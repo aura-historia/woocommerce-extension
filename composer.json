@@ -2,7 +2,7 @@
   "name": "aura-historia/aura-historia-partner-connect",
   "type": "wordpress-plugin",
   "require": {
-    "php": ">=8.2"
+    "php": ">=8.4"
   },
   "require-dev": {
     "phpunit/phpunit": "^9.6",
@@ -10,7 +10,7 @@
   },
   "config": {
     "platform": {
-      "php": "8.2"
+      "php": "8.4"
     }
   }
 }
