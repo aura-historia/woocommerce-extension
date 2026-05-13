@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  php-lint:
+    name: PHP lint (PHP 7.4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up PHP 7.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '7.4'
+          coverage: none
+
+      - name: Lint plugin PHP files
+        run: |
+          find . \
+            -path './node_modules' -prune -o \
+            -path './vendor' -prune -o \
+            -name '*.php' -print0 | xargs -0 -n1 php -l
+
+  integration-tests:
+    name: WordPress integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      WP_ENV_PHP_VERSION: '7.4'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Start WordPress environment
+        run: npm run env:start
+
+      - name: Run plugin integration tests
+        run: npm test
+
+      - name: Print wp-env logs on failure
+        if: failure()
+        run: npm run env:logs || true
+
+      - name: Destroy wp-env environment
+        if: always()
+        run: npm run env:destroy || true

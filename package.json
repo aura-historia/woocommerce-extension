@@ -1,0 +1,19 @@
+{
+  "name": "aura-historia-partner-connect",
+  "private": true,
+  "scripts": {
+    "env:start": "wp-env start",
+    "env:update": "wp-env start --update",
+    "env:stop": "wp-env stop",
+    "env:reset": "wp-env reset all",
+    "env:destroy": "node scripts/destroy-wp-env.js",
+    "env:logs": "wp-env logs",
+    "wp": "wp-env run cli wp",
+    "composer:install": "node scripts/run-composer.js install --no-interaction --prefer-dist",
+    "phpunit": "node scripts/run-phpunit.js",
+    "test": "npm run composer:install && npm run phpunit"
+  },
+  "devDependencies": {
+    "@wordpress/env": "^10.0.0"
+  }
+}

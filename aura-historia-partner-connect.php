@@ -1,0 +1,61 @@
+<?php
+/**
+ * @package AuraHistoria\PartnerConnect
+ *
+ * @wordpress-plugin
+ * Plugin Name:       Aura Historia Partner Connect
+ * Description:       Automatically creates and maintains WooCommerce product webhooks for the Aura Historia backend.
+ * Version:           0.1.0
+ * Requires at least: 6.5
+ * Requires PHP:      7.4
+ * Author:            Julian Bruder @ Aura Historia
+ * License:           MIT
+ * License URI:       https://opensource.org/licenses/MIT
+ * Text Domain:       aura-historia-partner-connect
+ * Domain Path:       /languages
+ * Requires Plugins:  woocommerce
+ */
+
+if (!defined("ABSPATH")) {
+    exit();
+}
+
+if (!defined("AHPC_VERSION")) {
+    define("AHPC_VERSION", "0.1.0");
+}
+
+if (!defined("AHPC_PLUGIN_FILE")) {
+    define("AHPC_PLUGIN_FILE", __FILE__);
+}
+
+if (!defined("AHPC_PLUGIN_DIR")) {
+    define("AHPC_PLUGIN_DIR", plugin_dir_path(__FILE__));
+}
+
+if (!defined("AHPC_PLUGIN_BASENAME")) {
+    define("AHPC_PLUGIN_BASENAME", plugin_basename(__FILE__));
+}
+
+require_once AHPC_PLUGIN_DIR . "includes/class-webhook-manager.php";
+require_once AHPC_PLUGIN_DIR . "includes/class-plugin.php";
+
+/**
+ * Returns the plugin singleton.
+ *
+ * @return \AuraHistoria\PartnerConnect\Plugin
+ */
+function ahpc_plugin()
+{
+    return \AuraHistoria\PartnerConnect\Plugin::instance();
+}
+
+register_activation_hook(AHPC_PLUGIN_FILE, [
+    "\\AuraHistoria\\PartnerConnect\\Plugin",
+    "activate",
+]);
+register_deactivation_hook(AHPC_PLUGIN_FILE, [
+    "\\AuraHistoria\\PartnerConnect\\Plugin",
+    "deactivate",
+]);
+
+add_action("plugins_loaded", [ahpc_plugin(), "boot"]);
