@@ -1,7 +1,7 @@
 === Aura Historia Partner Connect ===
 Requires at least: 6.5
 Tested up to: 6.6
-Requires PHP: 7.4
+Requires PHP: 8.1
 Requires Plugins: woocommerce
 Stable tag: 0.1.0
 License: MIT
