@@ -10,15 +10,15 @@ Its job is to automatically create and maintain exactly three WooCommerce webhoo
 - `product.updated`
 - `product.deleted`
 
-The delivery target is a user-configured Aura Historia backend endpoint.
+The delivery target is the Aura Historia backend endpoint hardcoded into the plugin.
 
 ## Architecture
 
 Keep the plugin small and follow the current structure:
 
-- `aura-historia-partner-connect.php` — plugin header and bootstrap
+- `aura-historia-partner-connect.php` — plugin header, bootstrap, and hardcoded endpoint constant
 - `includes/class-plugin.php` — WordPress/WooCommerce bootstrapping, admin UI, settings page, manual sync action
-- `includes/class-webhook-manager.php` — webhook ownership, idempotent sync, pause/delete behavior, drift recovery
+- `includes/class-webhook-manager.php` — webhook ownership, idempotent sync, pause/delete behavior, drift recovery, endpoint resolution
 - `uninstall.php` — uninstall cleanup
 - `tests/` — WordPress integration tests
 - `.wp-env.json`, `package.json`, and `composer.json` — local development and test tooling
@@ -38,6 +38,7 @@ When changing functionality, preserve these invariants:
 7. Uninstall should remove plugin-owned webhooks and plugin options.
 8. The plugin only handles the three product topics above.
 9. Keep the settings surface minimal.
+10. The delivery endpoint URL should stay hardcoded in the plugin, not user-configurable in wp-admin, unless explicitly requested.
 
 ## WordPress and WooCommerce conventions
 
@@ -68,6 +69,7 @@ That means:
 - `product.deleted` follows WooCommerce's built-in semantics and is triggered when a product is trashed.
 - Deleted payloads only contain an `id`.
 - WooCommerce signs deliveries with `X-WC-Webhook-Signature`.
+- The configured secret is a signing secret, not a standalone Authorization header.
 - Do not add catalog backfill behavior unless explicitly requested.
 
 ## Local development and tests
@@ -85,6 +87,7 @@ Notes:
 - `.wp-env.json` currently installs WooCommerce from WordPress.org.
 - `AHPC_FORCE_SYNC_DELIVERY` is enabled locally so webhook delivery happens synchronously.
 - Tests should avoid real outbound HTTP and should mock webhook requests.
+- Tests override the hardcoded endpoint URL through the `ahpc_webhook_endpoint_url` filter.
 - The test suite depends on PHPUnit Polyfills installed via Composer inside `wp-env`.
 
 When changing behavior, add or update tests when sensible, especially around:
@@ -93,6 +96,7 @@ When changing behavior, add or update tests when sensible, especially around:
 - idempotent updates
 - pause/delete cleanup
 - drift recovery
+- hardcoded endpoint behavior
 
 ## Editing guidance
 

@@ -8,7 +8,7 @@
  * Version:           0.1.0
  * Requires at least: 6.5
  * Requires PHP:      7.4
- * Author:            Julian Bruder @ Aura Historia
+ * Author:            Aura Historia
  * License:           MIT
  * License URI:       https://opensource.org/licenses/MIT
  * Text Domain:       aura-historia-partner-connect
@@ -34,6 +34,13 @@ if (!defined("AHPC_PLUGIN_DIR")) {
 
 if (!defined("AHPC_PLUGIN_BASENAME")) {
     define("AHPC_PLUGIN_BASENAME", plugin_basename(__FILE__));
+}
+
+if (!defined("AHPC_WEBHOOK_ENDPOINT_URL")) {
+    define(
+        "AHPC_WEBHOOK_ENDPOINT_URL",
+        "https://example.com/aura-historia/partner-connect/webhooks/woocommerce",
+    );
 }
 
 require_once AHPC_PLUGIN_DIR . "includes/class-webhook-manager.php";

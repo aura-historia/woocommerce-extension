@@ -8,6 +8,16 @@ This repository contains a lean WordPress plugin that keeps exactly three WooCom
 
 The plugin auto-registers those webhooks, repairs manual edits or deletions, exposes a small admin settings screen, pauses its webhooks on deactivation, and removes them on uninstall.
 
+## Endpoint and secret model
+
+The plugin uses a built-in delivery endpoint defined in code.
+
+Before you upload the plugin to a real store, replace the demo value of `AHPC_WEBHOOK_ENDPOINT_URL` in `aura-historia-partner-connect.php` with your real SaaS webhook URL.
+
+Store owners do **not** configure the endpoint URL in WordPress admin.
+
+The only store-level delivery setting is the webhook signing secret. WooCommerce uses that value to generate the `X-WC-Webhook-Signature` header. It is not sent as a standalone API key or `Authorization` header.
+
 ## Local development
 
 ### Prerequisites
@@ -41,10 +51,10 @@ If port `8888` is already busy, create a local `.wp-env.override.json` file and 
 
 ## Manual local test flow
 
-1. Start the local environment.
-2. In WordPress admin, go to `WooCommerce > Partner Connect`.
-3. Enter a delivery URL such as a `webhook.site` URL, an `ngrok` tunnel, or your own test receiver.
-4. Keep or replace the generated shared secret.
+1. Replace the demo `AHPC_WEBHOOK_ENDPOINT_URL` with a test receiver such as `webhook.site`, an `ngrok` tunnel, or your own receiver.
+2. Start the local environment.
+3. In WordPress admin, go to `WooCommerce > Partner Connect`.
+4. Set or replace the webhook signing secret.
 5. Check **Enable delivery** and save.
 6. Create, update, and trash a product.
 7. Confirm deliveries at your receiver and in WooCommerce logs.

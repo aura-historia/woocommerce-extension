@@ -46,7 +46,6 @@ class Webhook_Manager
     public static function default_settings()
     {
         return [
-            "endpoint_url" => "",
             "secret" => "",
             "enabled" => false,
         ];
@@ -60,6 +59,27 @@ class Webhook_Manager
     public static function generate_secret()
     {
         return wp_generate_password(40, false, false);
+    }
+
+    /**
+     * Returns the hardcoded delivery endpoint URL.
+     *
+     * @return string
+     */
+    public static function get_endpoint_url()
+    {
+        $url = defined("AHPC_WEBHOOK_ENDPOINT_URL")
+            ? AHPC_WEBHOOK_ENDPOINT_URL
+            : "";
+
+        /**
+         * Filters the hardcoded webhook delivery endpoint.
+         *
+         * @param string $url Delivery URL.
+         */
+        $url = apply_filters("ahpc_webhook_endpoint_url", $url);
+
+        return esc_url_raw(trim((string) $url), ["http", "https"]);
     }
 
     /**
@@ -113,12 +133,6 @@ class Webhook_Manager
 
         $settings = wp_parse_args($settings, self::default_settings());
 
-        $settings["endpoint_url"] = isset($settings["endpoint_url"])
-            ? esc_url_raw(trim((string) $settings["endpoint_url"]), [
-                "http",
-                "https",
-            ])
-            : "";
         $settings["secret"] = isset($settings["secret"])
             ? sanitize_text_field((string) $settings["secret"])
             : "";
@@ -220,8 +234,12 @@ class Webhook_Manager
 
         try {
             $settings = $this->get_settings();
+            $endpoint_url = self::get_endpoint_url();
             $user_id = $this->resolve_webhook_user_id();
-            $desired_status = $this->get_desired_status($settings);
+            $desired_status = $this->get_desired_status(
+                $settings,
+                $endpoint_url,
+            );
             $webhook_ids = $this->get_webhook_ids();
 
             if (!$user_id) {
@@ -270,7 +288,7 @@ class Webhook_Manager
                 $webhook->set_name($this->get_webhook_name($topic));
                 $webhook->set_topic($topic);
                 $webhook->set_status($desired_status);
-                $webhook->set_delivery_url($settings["endpoint_url"]);
+                $webhook->set_delivery_url($endpoint_url);
                 $webhook->set_secret($settings["secret"]);
                 $webhook->set_user_id($user_id);
                 $webhook->set_api_version(self::API_VERSION);
@@ -443,11 +461,12 @@ class Webhook_Manager
      * Returns the desired webhook status for the current settings.
      *
      * @param array<string,mixed> $settings Plugin settings.
+     * @param string              $endpoint_url Hardcoded delivery endpoint.
      * @return string
      */
-    private function get_desired_status($settings)
+    private function get_desired_status($settings, $endpoint_url)
     {
-        return !empty($settings["enabled"]) && !empty($settings["endpoint_url"])
+        return !empty($settings["enabled"]) && !empty($endpoint_url)
             ? "active"
             : "paused";
     }
@@ -455,7 +474,7 @@ class Webhook_Manager
     /**
      * Loads an existing managed webhook or creates a new one.
      *
-     * @param string           $topic       Webhook topic.
+     * @param string            $topic Webhook topic.
      * @param array<string,int> $webhook_ids Stored webhook IDs.
      * @return WC_Webhook
      */
@@ -473,7 +492,7 @@ class Webhook_Manager
     /**
      * Loads a managed webhook by topic.
      *
-     * @param string            $topic       Webhook topic.
+     * @param string            $topic Webhook topic.
      * @param array<string,int> $webhook_ids Stored webhook IDs.
      * @return WC_Webhook|null
      */
@@ -588,8 +607,8 @@ class Webhook_Manager
     /**
      * Returns whether the given webhook ID belongs to this plugin.
      *
-     * @param int        $webhook_id Webhook ID.
-     * @param WC_Webhook $webhook Optional webhook instance.
+     * @param int              $webhook_id Webhook ID.
+     * @param WC_Webhook|null  $webhook Optional webhook instance.
      * @return bool
      */
     public function owns_webhook_id($webhook_id, $webhook = null)

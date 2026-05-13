@@ -249,7 +249,6 @@ class Plugin
         $current = wp_parse_args($current, Webhook_Manager::default_settings());
 
         $sanitized = [
-            "endpoint_url" => "",
             "secret" => !empty($current["secret"])
                 ? sanitize_text_field((string) $current["secret"])
                 : Webhook_Manager::generate_secret(),
@@ -257,13 +256,6 @@ class Plugin
         ];
 
         if (is_array($input)) {
-            if (isset($input["endpoint_url"])) {
-                $sanitized["endpoint_url"] = esc_url_raw(
-                    trim(wp_unslash($input["endpoint_url"])),
-                    ["http", "https"],
-                );
-            }
-
             if (isset($input["secret"])) {
                 $sanitized["secret"] = sanitize_text_field(
                     wp_unslash($input["secret"]),
@@ -334,8 +326,8 @@ class Plugin
     /**
      * Marks the plugin webhooks as out of sync after a manual edit or deletion.
      *
-     * @param int        $webhook_id Webhook ID.
-     * @param WC_Webhook $webhook Optional webhook instance.
+     * @param int              $webhook_id Webhook ID.
+     * @param \WC_Webhook|null $webhook Optional webhook instance.
      * @return void
      */
     public function maybe_mark_managed_webhook_out_of_sync(
@@ -420,6 +412,7 @@ class Plugin
         }
 
         $settings = $this->get_current_settings();
+        $endpoint_url = Webhook_Manager::get_endpoint_url();
         $sync_error =
             $this->manager instanceof Webhook_Manager
                 ? $this->manager->get_last_sync_error()
@@ -473,14 +466,19 @@ class Plugin
 
 			<?php if (!empty($sync_error)): ?>
 				<?php $this->render_inline_notice("error", esc_html($sync_error)); ?>
-			<?php elseif (
-       empty($settings["enabled"]) ||
-       empty($settings["endpoint_url"])
-   ): ?>
+			<?php elseif (empty($endpoint_url)): ?>
 				<?php $this->render_inline_notice(
         "warning",
         esc_html__(
-            "Webhook delivery is currently paused. Add a delivery URL and enable delivery when you are ready to send events to your SaaS backend.",
+            "The built-in webhook endpoint URL is empty. Define AHPC_WEBHOOK_ENDPOINT_URL in the plugin before enabling delivery.",
+            Webhook_Manager::TEXT_DOMAIN,
+        ),
+    ); ?>
+			<?php elseif (empty($settings["enabled"])): ?>
+				<?php $this->render_inline_notice(
+        "warning",
+        esc_html__(
+            "Webhook delivery is currently paused. Enable delivery when you are ready to send events to your SaaS backend.",
             Webhook_Manager::TEXT_DOMAIN,
         ),
     ); ?>
@@ -491,20 +489,21 @@ class Plugin
 				<table class="form-table" role="presentation">
 					<tbody>
 						<tr>
-							<th scope="row">
-								<label for="ahpc-endpoint-url"><?php echo esc_html__(
-            "Delivery URL",
-            Webhook_Manager::TEXT_DOMAIN,
-        ); ?></label>
-							</th>
+							<th scope="row"><?php echo esc_html__(
+           "Delivery endpoint",
+           Webhook_Manager::TEXT_DOMAIN,
+       ); ?></th>
 							<td>
-								<input id="ahpc-endpoint-url" name="<?php echo esc_attr(
-            Webhook_Manager::OPTION_SETTINGS,
-        ); ?>[endpoint_url]" type="url" class="regular-text code" value="<?php echo esc_attr(
-    $settings["endpoint_url"],
-); ?>" placeholder="https://example.com/webhooks/woocommerce" />
+								<?php if (!empty($endpoint_url)): ?>
+									<code><?php echo esc_html($endpoint_url); ?></code>
+								<?php else: ?>
+									<em><?php echo esc_html__(
+             "Not configured",
+             Webhook_Manager::TEXT_DOMAIN,
+         ); ?></em>
+								<?php endif; ?>
 								<p class="description"><?php echo esc_html__(
-            "Use your SaaS webhook ingress URL. The plugin will update all three managed WooCommerce webhooks to use this destination.",
+            "This value is built into the plugin via AHPC_WEBHOOK_ENDPOINT_URL and is not editable by store owners.",
             Webhook_Manager::TEXT_DOMAIN,
         ); ?></p>
 							</td>
@@ -512,7 +511,7 @@ class Plugin
 						<tr>
 							<th scope="row">
 								<label for="ahpc-secret"><?php echo esc_html__(
-            "Shared secret",
+            "Webhook signing secret",
             Webhook_Manager::TEXT_DOMAIN,
         ); ?></label>
 							</th>
@@ -523,7 +522,7 @@ class Plugin
     $settings["secret"],
 ); ?>" />
 								<p class="description"><?php echo esc_html__(
-            "WooCommerce signs each webhook payload with this secret in the X-WC-Webhook-Signature header.",
+            "WooCommerce uses this value to generate the X-WC-Webhook-Signature header. It is not sent as a standalone Authorization or API key header.",
             Webhook_Manager::TEXT_DOMAIN,
         ); ?></p>
 							</td>
@@ -541,7 +540,7 @@ class Plugin
     !empty($settings["enabled"]),
 ); ?> />
 									<?php echo esc_html__(
-             "Send product webhook events to the configured delivery URL.",
+             "Send product webhook events to the built-in delivery endpoint.",
              Webhook_Manager::TEXT_DOMAIN,
          ); ?>
 								</label>
@@ -565,7 +564,7 @@ class Plugin
 			<p>
 				<?php
     echo esc_html__(
-        "The plugin owns exactly three WooCommerce webhooks and keeps them in sync with the settings above.",
+        "The plugin owns exactly three WooCommerce webhooks and keeps them in sync with the built-in endpoint and the settings above.",
         Webhook_Manager::TEXT_DOMAIN,
     );
     if ($last_sync_at) {
@@ -677,9 +676,6 @@ class Plugin
             $settings["secret"] = Webhook_Manager::generate_secret();
         }
 
-        $settings["endpoint_url"] = isset($settings["endpoint_url"])
-            ? esc_url_raw((string) $settings["endpoint_url"], ["http", "https"])
-            : "";
         $settings["secret"] = sanitize_text_field((string) $settings["secret"]);
         $settings["enabled"] = !empty($settings["enabled"]);
 

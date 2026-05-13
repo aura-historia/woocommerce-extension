@@ -20,6 +20,13 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
     protected $admin_user_id = 0;
 
     /**
+     * Endpoint URL used by the webhook manager during tests.
+     *
+     * @var string
+     */
+    protected $endpoint_url = "https://example.com/hooks";
+
+    /**
      * Ensures WooCommerce is installed for the test suite.
      *
      * @param WP_UnitTest_Factory $factory Test factory.
@@ -57,6 +64,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         );
 
         add_filter("pre_http_request", [$this, "mock_http_request"], 10, 3);
+        add_filter("ahpc_webhook_endpoint_url", [$this, "filter_endpoint_url"]);
 
         $manager = new Webhook_Manager();
         $manager->delete_webhooks();
@@ -74,9 +82,24 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $manager->delete_webhooks();
 
         remove_filter("pre_http_request", [$this, "mock_http_request"], 10);
+        remove_filter("ahpc_webhook_endpoint_url", [
+            $this,
+            "filter_endpoint_url",
+        ]);
         wp_set_current_user(0);
 
         parent::tearDown();
+    }
+
+    /**
+     * Overrides the built-in endpoint URL during tests.
+     *
+     * @param string $url Current endpoint URL.
+     * @return string
+     */
+    public function filter_endpoint_url($url)
+    {
+        return $this->endpoint_url;
     }
 
     /**
@@ -111,7 +134,6 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "endpoint_url" => "https://example.com/hooks",
                 "secret" => "test-secret",
                 "enabled" => true,
             ],
@@ -154,11 +176,11 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
     public function test_sync_webhooks_reuses_existing_webhooks()
     {
         $manager = new Webhook_Manager();
+        $this->endpoint_url = "https://example.com/original";
 
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "endpoint_url" => "https://example.com/original",
                 "secret" => "original-secret",
                 "enabled" => true,
             ],
@@ -168,10 +190,11 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $manager->sync_webhooks();
         $first_ids = $manager->get_webhook_ids();
 
+        $this->endpoint_url = "https://example.com/updated";
+
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "endpoint_url" => "https://example.com/updated",
                 "secret" => "updated-secret",
                 "enabled" => false,
             ],
@@ -206,7 +229,6 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "endpoint_url" => "https://example.com/hooks",
                 "secret" => "test-secret",
                 "enabled" => true,
             ],
@@ -240,7 +262,6 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "endpoint_url" => "https://example.com/hooks",
                 "secret" => "test-secret",
                 "enabled" => true,
             ],
