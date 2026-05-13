@@ -9,47 +9,12 @@ const wpEnvBinary = path.join(
 	process.platform === 'win32' ? 'wp-env.cmd' : 'wp-env'
 );
 
-const installPathResult = spawnSync(wpEnvBinary, ['install-path'], {
-	encoding: 'utf8',
-});
-
-if ( installPathResult.error ) {
-	console.error(installPathResult.error.message);
-	process.exit(1);
-}
-
-if ( installPathResult.status !== 0 ) {
-	if ( installPathResult.stdout ) {
-		process.stdout.write(installPathResult.stdout);
-	}
-	if ( installPathResult.stderr ) {
-		process.stderr.write(installPathResult.stderr);
-	}
-	process.exit(installPathResult.status === null ? 1 : installPathResult.status);
-}
-
-const installPath = installPathResult.stdout
-	.split(/\r?\n/)
-	.map((line) => line.trim())
-	.find(Boolean);
-
-if ( ! installPath ) {
-	console.error('Could not determine the wp-env install path.');
-	process.exit(1);
-}
-
-const composeFile = path.join(installPath, 'docker-compose.yml');
 const result = spawnSync(
-	'docker',
+	wpEnvBinary,
 	[
-		'compose',
-		'-f',
-		composeFile,
-		'exec',
-		'-T',
-		'-w',
-		`/var/www/html/wp-content/plugins/${pluginDir}`,
+		'run',
 		'tests-cli',
+		`--env-cwd=wp-content/plugins/${pluginDir}`,
 		'vendor/bin/phpunit',
 	],
 	{ stdio: 'inherit' }
