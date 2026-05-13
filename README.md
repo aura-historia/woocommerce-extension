@@ -91,6 +91,7 @@ Useful WooCommerce screens:
 - `npm run env:destroy` — remove the local environment entirely
 - `npm run wp -- plugin list` — run WP-CLI commands inside the environment
 - `npm test` — run the PHP integration tests
+- `git archive --format=zip --output aura-historia-partner-connect.zip --prefix=aura-historia-partner-connect/ HEAD` — after commiting all your changes create a release ZIP file suitable for upload to WordPress
 
 ## Tests
 
