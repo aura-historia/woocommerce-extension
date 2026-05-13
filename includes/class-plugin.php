@@ -212,7 +212,7 @@ class Plugin
                 "Aura Historia Partner Connect",
                 Webhook_Manager::TEXT_DOMAIN,
             ),
-            esc_html__("Partner Connect", Webhook_Manager::TEXT_DOMAIN),
+            esc_html__("Aura Historia", Webhook_Manager::TEXT_DOMAIN),
             "manage_woocommerce",
             self::PAGE_SLUG,
             [$this, "render_settings_page"],
@@ -445,7 +445,7 @@ class Plugin
      */
     public function maybe_mark_managed_webhook_out_of_sync(
         $webhook_id,
-        $webhook = null
+        $webhook = null,
     ) {
         if (!$this->manager instanceof Webhook_Manager) {
             return;

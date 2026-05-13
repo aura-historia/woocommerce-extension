@@ -48,7 +48,7 @@ Important notes:
 2. Before uploading the plugin, replace the demo `AHPC_BACKEND_BASE_URL` value in `aura-historia-partner-connect.php` with your real SaaS API base URL.
 3. Upload this plugin to `/wp-content/plugins/` or install it through the WordPress plugin screen.
 4. Activate the plugin.
-5. Go to `WooCommerce > Partner Connect`.
+5. Go to `WooCommerce > Aura Historia`.
 6. Enter the Shop ID UUID from your backend.
 7. Enter the Aura Historia API key for that shop.
 8. Enable delivery and save the settings.

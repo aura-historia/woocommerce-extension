@@ -71,7 +71,7 @@ If port `8888` is already busy, create a local `.wp-env.override.json` file and 
    - `PATCH /api/v1/shops/{shopId}`
    - `POST /api/v1/webhooks/woocommerce/{shopId}`
 2. Start the local environment.
-3. In WordPress admin, go to `WooCommerce > Partner Connect`.
+3. In WordPress admin, go to `WooCommerce > Aura Historia`.
 4. Enter the Shop ID and API key from your backend.
 5. Check **Enable delivery** and save.
 6. Create, update, and trash a product.
