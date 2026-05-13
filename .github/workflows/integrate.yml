@@ -57,7 +57,7 @@ jobs:
           - php: "8.2"
             wordpress: "WordPress/WordPress#6.7"
             woocommerce: "https://downloads.wordpress.org/plugin/woocommerce.latest-stable.zip"
-            label: "PHP 8.2 / WP 6.7 / WC latest"
+            label: "PHP 8.2 / WP 6.8 / WC latest"
           - php: "8.3"
             wordpress: "WordPress/WordPress#6.8"
             woocommerce: "https://downloads.wordpress.org/plugin/woocommerce.latest-stable.zip"
@@ -66,6 +66,10 @@ jobs:
             wordpress: "WordPress/WordPress#6.9.4"
             woocommerce: "https://downloads.wordpress.org/plugin/woocommerce.latest-stable.zip"
             label: "PHP 8.4 / WP 6.9 / WC latest"
+          - php: "8.5"
+            wordpress: "WordPress/WordPress#6.9.4"
+            woocommerce: "https://downloads.wordpress.org/plugin/woocommerce.latest-stable.zip"
+            label: "PHP 8.5 / WP 6.9 / WC latest"
     env:
       WP_ENV_PHP_VERSION: ${{ matrix.php }}
 
