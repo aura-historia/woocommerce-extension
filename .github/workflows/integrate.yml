@@ -55,7 +55,7 @@ jobs:
             woocommerce: "https://downloads.wordpress.org/plugin/woocommerce.9.0.0.zip"
             label: "PHP 8.1 / WP 6.5 / WC 9.0"
           - php: "8.2"
-            wordpress: "WordPress/WordPress#6.7"
+            wordpress: "WordPress/WordPress#6.8"
             woocommerce: "https://downloads.wordpress.org/plugin/woocommerce.latest-stable.zip"
             label: "PHP 8.2 / WP 6.8 / WC latest"
           - php: "8.3"
