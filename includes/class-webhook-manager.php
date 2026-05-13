@@ -471,6 +471,10 @@ class Webhook_Manager
 
             delete_option(self::OPTION_LAST_SYNC_ERROR);
 
+            if ("active" === $desired_status) {
+                $this->ping_active_webhooks($webhook_ids);
+            }
+
             return true;
         } finally {
             $this->syncing = false;
@@ -728,7 +732,7 @@ class Webhook_Manager
     private function get_desired_status(
         $settings,
         $endpoint_url,
-        $setup_error = null,
+        $setup_error = null
     ) {
         return !empty($settings["enabled"]) &&
             !$setup_error &&
@@ -753,6 +757,23 @@ class Webhook_Manager
         }
 
         return new WC_Webhook();
+    }
+
+    /**
+     * Sends a ping to each active managed webhook to verify connectivity.
+     *
+     * @param array<string,int> $webhook_ids Topic-to-ID map of managed webhooks.
+     * @return void
+     */
+    private function ping_active_webhooks($webhook_ids)
+    {
+        foreach ($webhook_ids as $topic => $webhook_id) {
+            $webhook = $this->load_webhook($webhook_id);
+
+            if ($webhook && method_exists($webhook, "deliver_ping")) {
+                $webhook->deliver_ping();
+            }
+        }
     }
 
     /**

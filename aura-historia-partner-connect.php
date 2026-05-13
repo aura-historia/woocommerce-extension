@@ -7,7 +7,7 @@
  * Description:       Automatically creates and maintains WooCommerce product webhooks for the Aura Historia backend.
  * Version:           0.1.0
  * Requires at least: 6.5
- * Requires PHP:      7.4
+ * Requires PHP:      8.4
  * Author:            Aura Historia
  * License:           MIT
  * License URI:       https://opensource.org/licenses/MIT

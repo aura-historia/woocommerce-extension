@@ -185,9 +185,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         }
 
         $registration_requests = array_values(
-            array_filter($this->http_requests, static function ($request) use (
-                $shop_id,
-            ) {
+            array_filter($this->http_requests, static function ($request) use ($shop_id) {
                 return "https://example.com/api/v1/shops/" . $shop_id ===
                     $request["url"];
             }),
@@ -208,9 +206,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         );
 
         $delivery_requests = array_values(
-            array_filter($this->http_requests, static function ($request) use (
-                $shop_id,
-            ) {
+            array_filter($this->http_requests, static function ($request) use ($shop_id) {
                 return "https://example.com/api/v1/webhooks/woocommerce/" .
                     $shop_id ===
                     $request["url"];
