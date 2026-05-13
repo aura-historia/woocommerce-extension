@@ -11,9 +11,11 @@
     "wp": "wp-env run cli wp",
     "composer:install": "node scripts/run-composer.js install --no-interaction --prefer-dist",
     "phpunit": "node scripts/run-phpunit.js",
+    "generate:api": "node scripts/generate-api-client.js",
     "test": "npm run composer:install && npm run phpunit"
   },
   "devDependencies": {
-    "@wordpress/env": "^11.5.0"
+    "@wordpress/env": "^11.5.0",
+    "js-yaml": "^4.1.1"
   }
 }

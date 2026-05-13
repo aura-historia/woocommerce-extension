@@ -486,6 +486,9 @@ class Webhook_Manager
     /**
      * Pushes the generated WooCommerce webhook secret to the backend.
      *
+     * Uses the generated Backend_Api_Client (patchShopById operation) so that
+     * all backend API calls are driven from the pinned OpenAPI spec.
+     *
      * @param string $shop_id Shop UUID.
      * @param string $api_key Backend API key.
      * @param string $secret  Generated webhook secret.
@@ -493,9 +496,7 @@ class Webhook_Manager
      */
     private function register_webhook_secret($shop_id, $api_key, $secret)
     {
-        $url = self::get_shop_registration_url($shop_id);
-
-        if ("" === $url) {
+        if ("" === self::get_shop_registration_url($shop_id)) {
             return new WP_Error(
                 "ahpc_invalid_registration_url",
                 __(
@@ -505,88 +506,11 @@ class Webhook_Manager
             );
         }
 
-        $response = wp_safe_remote_request($url, [
-            "method" => "PATCH",
-            "timeout" => 15,
-            "redirection" => 0,
-            "httpversion" => "1.1",
-            "blocking" => true,
-            "headers" => [
-                "Content-Type" => "application/json",
-                "Accept" => "application/json",
-                "x-api-key" => $api_key,
-            ],
-            "body" => wp_json_encode([
-                "woocommerceWebhookSecret" => $secret,
-            ]),
+        $client = new Backend_Api_Client(self::get_backend_base_url());
+
+        return $client->patch_shop_by_id($shop_id, $api_key, [
+            "woocommerceWebhookSecret" => $secret,
         ]);
-
-        if (is_wp_error($response)) {
-            return new WP_Error(
-                "ahpc_backend_registration_failed",
-                sprintf(
-                    /* translators: %s: WP_Error message. */
-                    __(
-                        "The backend rejected the secret registration request: %s",
-                        self::TEXT_DOMAIN,
-                    ),
-                    $response->get_error_message(),
-                ),
-            );
-        }
-
-        $response_code = (int) wp_remote_retrieve_response_code($response);
-
-        if ($response_code < 200 || $response_code >= 300) {
-            $response_message = $this->extract_response_message($response);
-            $message = sprintf(
-                /* translators: %d: HTTP response code. */
-                __(
-                    "The backend returned HTTP %d while storing the WooCommerce webhook secret.",
-                    self::TEXT_DOMAIN,
-                ),
-                $response_code,
-            );
-
-            if ("" !== $response_message) {
-                $message .= " " . $response_message;
-            }
-
-            return new WP_Error("ahpc_backend_registration_failed", $message);
-        }
-
-        return true;
-    }
-
-    /**
-     * Extracts a short error message from a backend HTTP response.
-     *
-     * @param array $response HTTP response.
-     * @return string
-     */
-    private function extract_response_message($response)
-    {
-        $body = trim((string) wp_remote_retrieve_body($response));
-
-        if ("" === $body) {
-            return "";
-        }
-
-        $decoded = json_decode($body, true);
-
-        if (is_array($decoded)) {
-            foreach (["message", "error", "detail"] as $key) {
-                if (!empty($decoded[$key]) && is_string($decoded[$key])) {
-                    return sanitize_text_field(
-                        wp_strip_all_tags($decoded[$key]),
-                    );
-                }
-            }
-        }
-
-        return sanitize_text_field(
-            wp_html_excerpt(wp_strip_all_tags($body), 200, "…"),
-        );
     }
 
     /**

@@ -40,6 +40,7 @@ if (!defined("AHPC_BACKEND_BASE_URL")) {
     define("AHPC_BACKEND_BASE_URL", "https://example.com");
 }
 
+require_once AHPC_PLUGIN_DIR . "includes/class-backend-api-client.php";
 require_once AHPC_PLUGIN_DIR . "includes/class-webhook-manager.php";
 require_once AHPC_PLUGIN_DIR . "includes/class-plugin.php";
 
