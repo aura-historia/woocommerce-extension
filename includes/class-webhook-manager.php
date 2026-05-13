@@ -728,7 +728,7 @@ class Webhook_Manager
     private function get_desired_status(
         $settings,
         $endpoint_url,
-        $setup_error = null,
+        $setup_error = null
     ) {
         return !empty($settings["enabled"]) &&
             !$setup_error &&

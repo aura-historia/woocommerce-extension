@@ -445,7 +445,7 @@ class Plugin
      */
     public function maybe_mark_managed_webhook_out_of_sync(
         $webhook_id,
-        $webhook = null,
+        $webhook = null
     ) {
         if (!$this->manager instanceof Webhook_Manager) {
             return;
