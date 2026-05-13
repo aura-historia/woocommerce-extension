@@ -40,7 +40,7 @@ When changing functionality, preserve these invariants:
 9. Keep the settings surface minimal.
 10. The delivery endpoint URL should stay hardcoded in the plugin, not user-configurable in wp-admin, unless explicitly requested.
 11. The WooCommerce webhook secret should be auto-generated and hidden from the merchant.
-12. Merchant-configurable settings should be limited to the backend Shop ID, backend API key, and enable/disable state.
+12. Merchant-configurable settings should be limited to the backend Shop ID and backend API key.
 
 ## WordPress and WooCommerce conventions
 

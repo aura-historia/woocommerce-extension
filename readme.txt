@@ -22,7 +22,7 @@ Features:
 
 * auto-registers the managed WooCommerce webhooks
 * uses a built-in backend base URL configured in code
-* lets the merchant configure only a Shop ID and API key
+* lets the merchant configure only a Shop ID and API key, then starts delivery automatically once both are valid
 * auto-generates the WooCommerce webhook secret and keeps it hidden from the merchant
 * PATCHes the generated secret to `/api/v1/shops/{shopId}` before activating delivery
 * sends webhook deliveries to `/api/v1/webhooks/woocommerce/{shopId}`
@@ -40,7 +40,7 @@ Important notes:
 * WooCommerce uses the generated secret to create the `X-WC-Webhook-Signature` header.
 * `product.deleted` is WooCommerce's built-in delete topic and fires when a product is trashed.
 * Deleted payloads only include an `id`.
-* Enabling the plugin to deliver events sends product data to your configured external endpoint.
+* Saving a valid Shop ID and API key sends product data to your configured external endpoint.
 
 == Installation ==
 
@@ -49,9 +49,9 @@ Important notes:
 3. Upload this plugin to `/wp-content/plugins/` or install it through the WordPress plugin screen.
 4. Activate the plugin.
 5. Go to `WooCommerce > Aura Historia`.
-6. Enter the Shop ID UUID from your backend.
-7. Enter the Aura Historia API key for that shop.
-8. Enable delivery and save the settings.
+6. Enter the Shop ID from Aura Historia for this store.
+7. Enter the Aura Historia API key for that store.
+8. Save the settings. Delivery starts automatically once both values are valid.
 
 == Frequently Asked Questions ==
 

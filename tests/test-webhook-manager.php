@@ -137,7 +137,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
     }
 
     /**
-     * It creates the three managed webhooks with the configured settings.
+     * It creates the three managed webhooks when connection details are present.
      *
      * @return void
      */
@@ -152,7 +152,6 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
                 "shop_id" => $shop_id,
                 "api_key" => $api_key,
                 "secret" => "test-secret",
-                "enabled" => true,
             ],
             false,
         );
@@ -185,7 +184,9 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         }
 
         $registration_requests = array_values(
-            array_filter($this->http_requests, static function ($request) use ($shop_id) {
+            array_filter($this->http_requests, static function ($request) use (
+                $shop_id,
+            ) {
                 return "https://example.com/api/v1/shops/" . $shop_id ===
                     $request["url"];
             }),
@@ -206,7 +207,9 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         );
 
         $delivery_requests = array_values(
-            array_filter($this->http_requests, static function ($request) use ($shop_id) {
+            array_filter($this->http_requests, static function ($request) use (
+                $shop_id,
+            ) {
                 return "https://example.com/api/v1/webhooks/woocommerce/" .
                     $shop_id ===
                     $request["url"];
@@ -232,15 +235,17 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
     {
         $manager = new Webhook_Manager();
         $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+        $original_api_key =
+            "aurahistoria_originaltoken_abcdefghijklmnopqrstuvwxyz1234567";
+        $updated_api_key =
+            "aurahistoria_updatedtoken_abcdefghijklmnopqrstuvwxyz7654321";
 
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
                 "shop_id" => $shop_id,
-                "api_key" =>
-                    "aurahistoria_originaltoken_abcdefghijklmnopqrstuvwxyz1234567",
+                "api_key" => $original_api_key,
                 "secret" => "original-secret",
-                "enabled" => true,
             ],
             false,
         );
@@ -252,10 +257,8 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             Webhook_Manager::OPTION_SETTINGS,
             [
                 "shop_id" => $shop_id,
-                "api_key" =>
-                    "aurahistoria_updatedtoken_abcdefghijklmnopqrstuvwxyz7654321",
+                "api_key" => $updated_api_key,
                 "secret" => "updated-secret",
-                "enabled" => false,
             ],
             false,
         );
@@ -269,13 +272,75 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         foreach (array_keys($manager->get_managed_topics()) as $topic) {
             $webhook = new WC_Webhook($second_ids[$topic]);
 
-            $this->assertSame("paused", $webhook->get_status());
+            $this->assertSame("active", $webhook->get_status());
             $this->assertSame(
                 "https://example.com/api/v1/webhooks/woocommerce/" . $shop_id,
                 $webhook->get_delivery_url(),
             );
             $this->assertSame("updated-secret", $webhook->get_secret());
         }
+
+        $registration_requests = array_values(
+            array_filter($this->http_requests, static function ($request) use (
+                $shop_id,
+            ) {
+                return "https://example.com/api/v1/shops/" . $shop_id ===
+                    $request["url"];
+            }),
+        );
+
+        $this->assertCount(2, $registration_requests);
+        $this->assertSame(
+            $updated_api_key,
+            $registration_requests[1]["args"]["headers"]["x-api-key"],
+        );
+    }
+
+    /**
+     * It keeps managed webhooks paused until both connection values are saved.
+     *
+     * @return void
+     */
+    public function test_sync_webhooks_pauses_delivery_until_connection_is_complete()
+    {
+        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+
+        update_option(
+            Webhook_Manager::OPTION_SETTINGS,
+            [
+                "shop_id" => $shop_id,
+                "api_key" => "",
+                "secret" => "test-secret",
+            ],
+            false,
+        );
+
+        $manager = new Webhook_Manager();
+        $result = $manager->sync_webhooks();
+        $ids = $manager->get_webhook_ids();
+
+        $this->assertTrue($result);
+        $this->assertCount(3, $ids);
+
+        foreach ($ids as $webhook_id) {
+            $webhook = new WC_Webhook($webhook_id);
+            $this->assertSame("paused", $webhook->get_status());
+            $this->assertSame(
+                "https://example.com/api/v1/webhooks/woocommerce/" . $shop_id,
+                $webhook->get_delivery_url(),
+            );
+        }
+
+        $registration_requests = array_values(
+            array_filter($this->http_requests, static function ($request) use (
+                $shop_id,
+            ) {
+                return "https://example.com/api/v1/shops/" . $shop_id ===
+                    $request["url"];
+            }),
+        );
+
+        $this->assertSame([], $registration_requests);
     }
 
     /**
@@ -292,7 +357,6 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
                 "api_key" =>
                     "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
                 "secret" => "test-secret",
-                "enabled" => true,
             ],
             false,
         );
@@ -328,7 +392,6 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
                 "api_key" =>
                     "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
                 "secret" => "test-secret",
-                "enabled" => true,
             ],
             false,
         );
@@ -356,7 +419,6 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
                 "shop_id" => "not-a-uuid",
                 "api_key" => "invalid-key",
                 "secret" => "test-secret",
-                "enabled" => true,
             ],
             false,
         );

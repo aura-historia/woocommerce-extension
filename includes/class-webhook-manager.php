@@ -49,7 +49,6 @@ class Webhook_Manager
             "shop_id" => "",
             "api_key" => "",
             "secret" => "",
-            "enabled" => false,
         ];
     }
 
@@ -234,7 +233,6 @@ class Webhook_Manager
         $settings["secret"] = isset($settings["secret"])
             ? sanitize_text_field((string) $settings["secret"])
             : "";
-        $settings["enabled"] = !empty($settings["enabled"]);
 
         if ("" === $settings["secret"]) {
             $settings["secret"] = self::generate_secret();
@@ -338,6 +336,8 @@ class Webhook_Manager
             $user_id = $this->resolve_webhook_user_id();
             $webhook_ids = $this->get_webhook_ids();
             $setup_error = null;
+            $has_shop_id = "" !== $shop_id;
+            $has_api_key = "" !== $api_key;
 
             if (!$user_id) {
                 return $this->record_sync_error(
@@ -351,31 +351,33 @@ class Webhook_Manager
                 );
             }
 
-            if (!empty($settings["enabled"])) {
+            if ($has_shop_id || $has_api_key) {
                 if (!self::get_backend_base_url()) {
                     $setup_error = new WP_Error(
                         "ahpc_missing_backend_base_url",
                         __(
-                            "The built-in backend base URL is empty. Define AHPC_BACKEND_BASE_URL before enabling delivery.",
+                            "Aura Historia is not fully configured inside the plugin. Define AHPC_BACKEND_BASE_URL before connecting a store.",
                             self::TEXT_DOMAIN,
                         ),
                     );
-                } elseif (!self::is_valid_shop_id($shop_id)) {
+                } elseif ($has_shop_id && !self::is_valid_shop_id($shop_id)) {
                     $setup_error = new WP_Error(
                         "ahpc_invalid_shop_id",
                         __(
-                            "The configured Shop ID must be a valid UUID before delivery can be enabled.",
+                            "The Shop ID does not match the value shown in Aura Historia. Copy it again and save once more.",
                             self::TEXT_DOMAIN,
                         ),
                     );
-                } elseif (!self::is_valid_api_key($api_key)) {
+                } elseif ($has_api_key && !self::is_valid_api_key($api_key)) {
                     $setup_error = new WP_Error(
                         "ahpc_invalid_api_key",
                         __(
-                            "The configured API key does not match the expected Aura Historia format.",
+                            "The API key does not match the value shown in Aura Historia. Copy it again and save once more.",
                             self::TEXT_DOMAIN,
                         ),
                     );
+                } elseif (!$has_shop_id || !$has_api_key) {
+                    $setup_error = null;
                 } elseif ("" === $endpoint_url) {
                     $setup_error = new WP_Error(
                         "ahpc_empty_webhook_endpoint_url",
@@ -732,9 +734,10 @@ class Webhook_Manager
     private function get_desired_status(
         $settings,
         $endpoint_url,
-        $setup_error = null
+        $setup_error = null,
     ) {
-        return !empty($settings["enabled"]) &&
+        return !empty($settings["shop_id"]) &&
+            !empty($settings["api_key"]) &&
             !$setup_error &&
             !empty($endpoint_url)
             ? "active"

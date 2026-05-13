@@ -24,7 +24,9 @@ Store owners **do** configure:
 - `Shop ID`
 - `API key`
 
-When delivery is enabled, the plugin:
+As soon as both values are saved and valid, the plugin starts delivery automatically.
+
+When a valid Shop ID and API key are saved, the plugin:
 
 1. auto-generates and stores a hidden WooCommerce webhook secret
 2. sends that secret to `PATCH /api/v1/shops/{shopId}` using the configured `x-api-key`
@@ -72,10 +74,9 @@ If port `8888` is already busy, create a local `.wp-env.override.json` file and 
    - `POST /api/v1/webhooks/woocommerce/{shopId}`
 2. Start the local environment.
 3. In WordPress admin, go to `WooCommerce > Aura Historia`.
-4. Enter the Shop ID and API key from your backend.
-5. Check **Enable delivery** and save.
-6. Create, update, and trash a product.
-7. Confirm the backend accepted the setup PATCH call and then received the webhook deliveries.
+4. Enter the Shop ID and API key from Aura Historia and save the settings.
+5. Create, update, and trash a product.
+6. Confirm the backend accepted the setup PATCH call and then received the webhook deliveries.
 
 Useful WooCommerce screens:
 

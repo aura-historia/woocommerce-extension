@@ -264,7 +264,6 @@ class Plugin
             "secret" => !empty($current["secret"])
                 ? sanitize_text_field((string) $current["secret"])
                 : Webhook_Manager::generate_secret(),
-            "enabled" => false,
         ];
 
         if (is_array($input)) {
@@ -283,7 +282,7 @@ class Plugin
                         Webhook_Manager::OPTION_SETTINGS,
                         "ahpc_invalid_shop_id",
                         __(
-                            "Shop ID must be a valid UUID.",
+                            "The Shop ID doesn't look right. Copy it again from Aura Historia and try once more.",
                             Webhook_Manager::TEXT_DOMAIN,
                         ),
                     );
@@ -310,14 +309,12 @@ class Plugin
                         Webhook_Manager::OPTION_SETTINGS,
                         "ahpc_invalid_api_key",
                         __(
-                            "API key must look like aurahistoria_shorttoken_longtoken.",
+                            "The API key doesn't look right. Copy it again from Aura Historia and try once more.",
                             Webhook_Manager::TEXT_DOMAIN,
                         ),
                     );
                 }
             }
-
-            $sanitized["enabled"] = !empty($input["enabled"]);
         }
 
         if ("" === $sanitized["secret"]) {
@@ -551,6 +548,8 @@ class Plugin
         $webhooks_url = admin_url(
             "admin.php?page=wc-settings&tab=advanced&section=webhooks",
         );
+        $has_shop_id = "" !== $settings["shop_id"];
+        $has_api_key = "" !== $settings["api_key"];
         ?>
 		<div class="wrap">
 			<h1><?php echo esc_html__(
@@ -558,7 +557,7 @@ class Plugin
        Webhook_Manager::TEXT_DOMAIN,
    ); ?></h1>
 			<p><?php echo esc_html__(
-       "This plugin manages three WooCommerce webhooks for product.created, product.updated, and product.deleted.",
+       "Connect this WooCommerce store to Aura Historia so your products can appear there and stay up to date automatically.",
        Webhook_Manager::TEXT_DOMAIN,
    ); ?></p>
 			<?php settings_errors(Webhook_Manager::OPTION_SETTINGS); ?>
@@ -587,45 +586,55 @@ class Plugin
 				<?php $this->render_inline_notice(
         "warning",
         esc_html__(
-            "The built-in backend base URL is empty. Define AHPC_BACKEND_BASE_URL in the plugin before enabling delivery.",
+            "Aura Historia is not fully configured inside the plugin yet. Define AHPC_BACKEND_BASE_URL before connecting a store.",
             Webhook_Manager::TEXT_DOMAIN,
         ),
     ); ?>
-			<?php elseif (
-       !empty($settings["enabled"]) &&
-       !Webhook_Manager::is_valid_shop_id($settings["shop_id"])
-   ): ?>
+			<?php elseif (!$has_shop_id && !$has_api_key): ?>
 				<?php $this->render_inline_notice(
         "warning",
         esc_html__(
-            "Enter a valid Shop ID UUID before enabling delivery.",
+            "Add your Shop ID and API key from Aura Historia to connect this store. Product updates start automatically after both are saved.",
             Webhook_Manager::TEXT_DOMAIN,
         ),
     ); ?>
-			<?php elseif (
-       !empty($settings["enabled"]) &&
-       !Webhook_Manager::is_valid_api_key($settings["api_key"])
-   ): ?>
+			<?php elseif (!$has_shop_id): ?>
 				<?php $this->render_inline_notice(
         "warning",
         esc_html__(
-            "Enter a valid Aura Historia API key before enabling delivery.",
+            "Add the Shop ID from Aura Historia to finish connecting this store.",
             Webhook_Manager::TEXT_DOMAIN,
         ),
     ); ?>
-			<?php elseif (!empty($settings["enabled"]) && empty($webhook_endpoint_url)): ?>
+			<?php elseif (!Webhook_Manager::is_valid_shop_id($settings["shop_id"])): ?>
+				<?php $this->render_inline_notice(
+        "warning",
+        esc_html__(
+            "The Shop ID doesn't look right. Copy it again from Aura Historia and try once more.",
+            Webhook_Manager::TEXT_DOMAIN,
+        ),
+    ); ?>
+			<?php elseif (!$has_api_key): ?>
+				<?php $this->render_inline_notice(
+        "warning",
+        esc_html__(
+            "Add the API key from Aura Historia to finish connecting this store.",
+            Webhook_Manager::TEXT_DOMAIN,
+        ),
+    ); ?>
+			<?php elseif (!Webhook_Manager::is_valid_api_key($settings["api_key"])): ?>
+				<?php $this->render_inline_notice(
+        "warning",
+        esc_html__(
+            "The API key doesn't look right. Copy it again from Aura Historia and try once more.",
+            Webhook_Manager::TEXT_DOMAIN,
+        ),
+    ); ?>
+			<?php elseif (empty($webhook_endpoint_url)): ?>
 				<?php $this->render_inline_notice(
         "warning",
         esc_html__(
             "The webhook delivery URL could not be built from the current settings.",
-            Webhook_Manager::TEXT_DOMAIN,
-        ),
-    ); ?>
-			<?php elseif (empty($settings["enabled"])): ?>
-				<?php $this->render_inline_notice(
-        "warning",
-        esc_html__(
-            "Webhook delivery is currently paused. Configure the connection and enable delivery when you are ready to send events to your SaaS backend.",
             Webhook_Manager::TEXT_DOMAIN,
         ),
     ); ?>
@@ -636,26 +645,6 @@ class Plugin
 				<table class="form-table" role="presentation">
 					<tbody>
 						<tr>
-							<th scope="row"><?php echo esc_html__(
-           "Backend base URL",
-           Webhook_Manager::TEXT_DOMAIN,
-       ); ?></th>
-							<td>
-								<?php if (!empty($backend_base_url)): ?>
-									<code><?php echo esc_html($backend_base_url); ?></code>
-								<?php else: ?>
-									<em><?php echo esc_html__(
-             "Not configured",
-             Webhook_Manager::TEXT_DOMAIN,
-         ); ?></em>
-								<?php endif; ?>
-								<p class="description"><?php echo esc_html__(
-            "This value is built into the plugin via AHPC_BACKEND_BASE_URL and is not editable by store owners.",
-            Webhook_Manager::TEXT_DOMAIN,
-        ); ?></p>
-							</td>
-						</tr>
-						<tr>
 							<th scope="row">
 								<label for="ahpc-shop-id"><?php echo esc_html__(
             "Shop ID",
@@ -665,11 +654,11 @@ class Plugin
 							<td>
 								<input id="ahpc-shop-id" name="<?php echo esc_attr(
             Webhook_Manager::OPTION_SETTINGS,
-        ); ?>[shop_id]" type="text" class="regular-text code" value="<?php echo esc_attr(
+        ); ?>[shop_id]" type="text" class="regular-text" value="<?php echo esc_attr(
     $settings["shop_id"],
 ); ?>" placeholder="123e4567-e89b-12d3-a456-426614174000" spellcheck="false" />
 								<p class="description"><?php echo esc_html__(
-            "Enter the Aura Historia Shop ID UUID that identifies this WooCommerce store in your backend.",
+            "Paste the Shop ID from Aura Historia for this store. It tells Aura Historia where your WooCommerce products should appear.",
             Webhook_Manager::TEXT_DOMAIN,
         ); ?></p>
 							</td>
@@ -684,63 +673,20 @@ class Plugin
 							<td>
 								<input id="ahpc-api-key" name="<?php echo esc_attr(
             Webhook_Manager::OPTION_SETTINGS,
-        ); ?>[api_key]" type="password" class="regular-text code" value="" placeholder="aurahistoria_shorttoken_longtoken" autocomplete="new-password" spellcheck="false" />
+        ); ?>[api_key]" type="password" class="regular-text" value="" autocomplete="new-password" spellcheck="false" />
 								<p class="description">
 									<?php echo esc_html__(
-             "Enter the Aura Historia API key used to PATCH /api/v1/shops/{shopId}. Leave this field blank to keep the currently stored key.",
+             "Paste the API key from Aura Historia for this store. It lets Aura Historia securely receive product updates from your shop. Leave this blank if you want to keep the key that is already saved.",
              Webhook_Manager::TEXT_DOMAIN,
          ); ?>
 									<?php if (!empty($settings["api_key"])): ?>
 										<?php echo " " .
               esc_html__(
-                  "An API key is currently stored.",
+                  "An API key is already saved.",
                   Webhook_Manager::TEXT_DOMAIN,
               ); ?>
 									<?php endif; ?>
 								</p>
-							</td>
-						</tr>
-						<tr>
-							<th scope="row"><?php echo esc_html__(
-           "Webhook endpoint preview",
-           Webhook_Manager::TEXT_DOMAIN,
-       ); ?></th>
-							<td>
-								<?php if (!empty($webhook_endpoint_url)): ?>
-									<code><?php echo esc_html($webhook_endpoint_url); ?></code>
-								<?php else: ?>
-									<em><?php echo esc_html__(
-             "Enter a valid Shop ID to preview the final webhook endpoint.",
-             Webhook_Manager::TEXT_DOMAIN,
-         ); ?></em>
-								<?php endif; ?>
-								<p class="description"><?php echo esc_html__(
-            "The plugin auto-generates a hidden WooCommerce webhook secret, PATCHes it to your backend shop record, and sends x-api-key on webhook deliveries.",
-            Webhook_Manager::TEXT_DOMAIN,
-        ); ?></p>
-							</td>
-						</tr>
-						<tr>
-							<th scope="row"><?php echo esc_html__(
-           "Enable delivery",
-           Webhook_Manager::TEXT_DOMAIN,
-       ); ?></th>
-							<td>
-								<label for="ahpc-enabled">
-									<input id="ahpc-enabled" name="<?php echo esc_attr(
-             Webhook_Manager::OPTION_SETTINGS,
-         ); ?>[enabled]" type="checkbox" value="1" <?php checked(
-    !empty($settings["enabled"]),
-); ?> />
-									<?php echo esc_html__(
-             "Send product webhook events to the built-in Aura Historia backend endpoints.",
-             Webhook_Manager::TEXT_DOMAIN,
-         ); ?>
-								</label>
-								<p class="description"><?php echo esc_html__(
-            "When enabled, the plugin first updates your backend shop record with the generated webhook secret and only keeps the WooCommerce webhooks active if that succeeds.",
-            Webhook_Manager::TEXT_DOMAIN,
-        ); ?></p>
 							</td>
 						</tr>
 					</tbody>
@@ -876,7 +822,6 @@ class Plugin
             $settings["api_key"],
         );
         $settings["secret"] = sanitize_text_field((string) $settings["secret"]);
-        $settings["enabled"] = !empty($settings["enabled"]);
 
         return $settings;
     }
