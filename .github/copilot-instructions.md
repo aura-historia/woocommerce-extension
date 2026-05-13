@@ -16,9 +16,9 @@ The delivery target is the Aura Historia backend endpoint hardcoded into the plu
 
 Keep the plugin small and follow the current structure:
 
-- `aura-historia-partner-connect.php` — plugin header, bootstrap, and hardcoded endpoint constant
-- `includes/class-plugin.php` — WordPress/WooCommerce bootstrapping, admin UI, settings page, manual sync action
-- `includes/class-webhook-manager.php` — webhook ownership, idempotent sync, pause/delete behavior, drift recovery, endpoint resolution
+- `aura-historia-partner-connect.php` — plugin header, bootstrap, and hardcoded backend base URL constant
+- `includes/class-plugin.php` — WordPress/WooCommerce bootstrapping, admin UI, settings page, lightweight validation, and manual sync action
+- `includes/class-webhook-manager.php` — webhook ownership, idempotent sync, backend secret registration, pause/delete behavior, drift recovery, and endpoint resolution
 - `uninstall.php` — uninstall cleanup
 - `tests/` — WordPress integration tests
 - `.wp-env.json`, `package.json`, and `composer.json` — local development and test tooling
@@ -39,6 +39,8 @@ When changing functionality, preserve these invariants:
 8. The plugin only handles the three product topics above.
 9. Keep the settings surface minimal.
 10. The delivery endpoint URL should stay hardcoded in the plugin, not user-configurable in wp-admin, unless explicitly requested.
+11. The WooCommerce webhook secret should be auto-generated and hidden from the merchant.
+12. Merchant-configurable settings should be limited to the backend Shop ID, backend API key, and enable/disable state.
 
 ## WordPress and WooCommerce conventions
 
@@ -50,6 +52,16 @@ When changing functionality, preserve these invariants:
 - Use capability checks such as `manage_woocommerce` for admin actions.
 - Use nonces for privileged actions.
 - Keep public-facing behavior conservative and wordpress.org-friendly.
+
+## Backend integration rules
+
+- The plugin must PATCH the generated webhook secret to `/api/v1/shops/{shopId}` before activating delivery.
+- The plugin must send webhook deliveries to `/api/v1/webhooks/woocommerce/{shopId}`.
+- The backend API key is a separate credential from the WooCommerce webhook secret.
+- The backend API key must be validated lightly in the UI before saving.
+- The Shop ID must be validated lightly as a UUID before saving.
+- The plugin should add `x-api-key` to outgoing webhook requests as safely as possible.
+- Prefer adding `x-api-key` late in the WordPress HTTP stack if that avoids leaking the header into WooCommerce delivery logs.
 
 ## WordPress.org mindset
 
@@ -69,7 +81,7 @@ That means:
 - `product.deleted` follows WooCommerce's built-in semantics and is triggered when a product is trashed.
 - Deleted payloads only contain an `id`.
 - WooCommerce signs deliveries with `X-WC-Webhook-Signature`.
-- The configured secret is a signing secret, not a standalone Authorization header.
+- The generated secret is a signing secret, not a standalone Authorization header.
 - Do not add catalog backfill behavior unless explicitly requested.
 
 ## Local development and tests
@@ -87,12 +99,14 @@ Notes:
 - `.wp-env.json` currently installs WooCommerce from WordPress.org.
 - `AHPC_FORCE_SYNC_DELIVERY` is enabled locally so webhook delivery happens synchronously.
 - Tests should avoid real outbound HTTP and should mock webhook requests.
-- Tests override the hardcoded endpoint URL through the `ahpc_webhook_endpoint_url` filter.
+- Tests override the hardcoded backend base URL through the `ahpc_backend_base_url` filter.
 - The test suite depends on PHPUnit Polyfills installed via Composer inside `wp-env`.
 
 When changing behavior, add or update tests when sensible, especially around:
 
 - managed webhook creation
+- backend secret registration
+- outgoing `x-api-key` header behavior
 - idempotent updates
 - pause/delete cleanup
 - drift recovery

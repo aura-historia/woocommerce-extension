@@ -46,6 +46,8 @@ class Webhook_Manager
     public static function default_settings()
     {
         return [
+            "shop_id" => "",
+            "api_key" => "",
             "secret" => "",
             "enabled" => false,
         ];
@@ -62,24 +64,114 @@ class Webhook_Manager
     }
 
     /**
-     * Returns the hardcoded delivery endpoint URL.
+     * Normalizes a shop UUID.
+     *
+     * @param string $shop_id Shop UUID.
+     * @return string
+     */
+    public static function normalize_shop_id($shop_id)
+    {
+        return strtolower(trim(sanitize_text_field((string) $shop_id)));
+    }
+
+    /**
+     * Returns whether the given shop ID looks like a UUID.
+     *
+     * @param string $shop_id Shop UUID.
+     * @return bool
+     */
+    public static function is_valid_shop_id($shop_id)
+    {
+        return 1 ===
+            preg_match(
+                "/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i",
+                self::normalize_shop_id($shop_id),
+            );
+    }
+
+    /**
+     * Normalizes an API key.
+     *
+     * @param string $api_key API key.
+     * @return string
+     */
+    public static function normalize_api_key($api_key)
+    {
+        return trim(sanitize_text_field((string) $api_key));
+    }
+
+    /**
+     * Returns whether the given API key matches the expected lightweight format.
+     *
+     * @param string $api_key API key.
+     * @return bool
+     */
+    public static function is_valid_api_key($api_key)
+    {
+        return 1 ===
+            preg_match(
+                "/\Aaurahistoria_[A-Za-z0-9]{6,}_[A-Za-z0-9]{12,}\z/",
+                self::normalize_api_key($api_key),
+            );
+    }
+
+    /**
+     * Returns the hardcoded backend base URL.
      *
      * @return string
      */
-    public static function get_endpoint_url()
+    public static function get_backend_base_url()
     {
-        $url = defined("AHPC_WEBHOOK_ENDPOINT_URL")
-            ? AHPC_WEBHOOK_ENDPOINT_URL
-            : "";
+        $url = defined("AHPC_BACKEND_BASE_URL") ? AHPC_BACKEND_BASE_URL : "";
 
         /**
-         * Filters the hardcoded webhook delivery endpoint.
+         * Filters the hardcoded backend base URL.
          *
-         * @param string $url Delivery URL.
+         * @param string $url Backend base URL.
          */
-        $url = apply_filters("ahpc_webhook_endpoint_url", $url);
+        $url = apply_filters("ahpc_backend_base_url", $url);
 
-        return esc_url_raw(trim((string) $url), ["http", "https"]);
+        $url = esc_url_raw(trim((string) $url), ["http", "https"]);
+
+        return $url ? untrailingslashit($url) : "";
+    }
+
+    /**
+     * Returns the backend shop registration URL.
+     *
+     * @param string $shop_id Shop UUID.
+     * @return string
+     */
+    public static function get_shop_registration_url($shop_id)
+    {
+        $shop_id = self::normalize_shop_id($shop_id);
+        $base_url = self::get_backend_base_url();
+
+        if (!$base_url || !self::is_valid_shop_id($shop_id)) {
+            return "";
+        }
+
+        return $base_url . "/api/v1/shops/" . rawurlencode($shop_id);
+    }
+
+    /**
+     * Returns the backend webhook delivery URL.
+     *
+     * @param string $shop_id Shop UUID.
+     * @return string
+     */
+    public static function get_webhook_endpoint_url($shop_id)
+    {
+        $shop_id = self::normalize_shop_id($shop_id);
+        $base_url = self::get_backend_base_url();
+
+        if (!$base_url || !self::is_valid_shop_id($shop_id)) {
+            return "";
+        }
+
+        return $base_url .
+            "/api/v1/webhooks/woocommerce/" .
+            rawurlencode($shop_id);
     }
 
     /**
@@ -133,6 +225,12 @@ class Webhook_Manager
 
         $settings = wp_parse_args($settings, self::default_settings());
 
+        $settings["shop_id"] = isset($settings["shop_id"])
+            ? self::normalize_shop_id($settings["shop_id"])
+            : "";
+        $settings["api_key"] = isset($settings["api_key"])
+            ? self::normalize_api_key($settings["api_key"])
+            : "";
         $settings["secret"] = isset($settings["secret"])
             ? sanitize_text_field((string) $settings["secret"])
             : "";
@@ -234,13 +332,12 @@ class Webhook_Manager
 
         try {
             $settings = $this->get_settings();
-            $endpoint_url = self::get_endpoint_url();
+            $shop_id = $settings["shop_id"];
+            $api_key = $settings["api_key"];
+            $endpoint_url = self::get_webhook_endpoint_url($shop_id);
             $user_id = $this->resolve_webhook_user_id();
-            $desired_status = $this->get_desired_status(
-                $settings,
-                $endpoint_url,
-            );
             $webhook_ids = $this->get_webhook_ids();
+            $setup_error = null;
 
             if (!$user_id) {
                 return $this->record_sync_error(
@@ -253,6 +350,58 @@ class Webhook_Manager
                     ),
                 );
             }
+
+            if (!empty($settings["enabled"])) {
+                if (!self::get_backend_base_url()) {
+                    $setup_error = new WP_Error(
+                        "ahpc_missing_backend_base_url",
+                        __(
+                            "The built-in backend base URL is empty. Define AHPC_BACKEND_BASE_URL before enabling delivery.",
+                            self::TEXT_DOMAIN,
+                        ),
+                    );
+                } elseif (!self::is_valid_shop_id($shop_id)) {
+                    $setup_error = new WP_Error(
+                        "ahpc_invalid_shop_id",
+                        __(
+                            "The configured Shop ID must be a valid UUID before delivery can be enabled.",
+                            self::TEXT_DOMAIN,
+                        ),
+                    );
+                } elseif (!self::is_valid_api_key($api_key)) {
+                    $setup_error = new WP_Error(
+                        "ahpc_invalid_api_key",
+                        __(
+                            "The configured API key does not match the expected Aura Historia format.",
+                            self::TEXT_DOMAIN,
+                        ),
+                    );
+                } elseif ("" === $endpoint_url) {
+                    $setup_error = new WP_Error(
+                        "ahpc_empty_webhook_endpoint_url",
+                        __(
+                            "The built-in webhook delivery URL could not be built from the current configuration.",
+                            self::TEXT_DOMAIN,
+                        ),
+                    );
+                } else {
+                    $registration_result = $this->register_webhook_secret(
+                        $shop_id,
+                        $api_key,
+                        $settings["secret"],
+                    );
+
+                    if (is_wp_error($registration_result)) {
+                        $setup_error = $registration_result;
+                    }
+                }
+            }
+
+            $desired_status = $this->get_desired_status(
+                $settings,
+                $endpoint_url,
+                $setup_error,
+            );
 
             foreach (array_keys($this->get_managed_topics()) as $topic) {
                 if (!wc_is_webhook_valid_topic($topic)) {
@@ -315,12 +464,123 @@ class Webhook_Manager
                 current_time("mysql"),
                 false,
             );
+
+            if ($setup_error) {
+                return $this->record_sync_error($setup_error, false);
+            }
+
             delete_option(self::OPTION_LAST_SYNC_ERROR);
 
             return true;
         } finally {
             $this->syncing = false;
         }
+    }
+
+    /**
+     * Pushes the generated WooCommerce webhook secret to the backend.
+     *
+     * @param string $shop_id Shop UUID.
+     * @param string $api_key Backend API key.
+     * @param string $secret  Generated webhook secret.
+     * @return true|WP_Error
+     */
+    private function register_webhook_secret($shop_id, $api_key, $secret)
+    {
+        $url = self::get_shop_registration_url($shop_id);
+
+        if ("" === $url) {
+            return new WP_Error(
+                "ahpc_invalid_registration_url",
+                __(
+                    "The backend registration URL could not be built from the configured Shop ID.",
+                    self::TEXT_DOMAIN,
+                ),
+            );
+        }
+
+        $response = wp_safe_remote_request($url, [
+            "method" => "PATCH",
+            "timeout" => 15,
+            "redirection" => 0,
+            "httpversion" => "1.1",
+            "blocking" => true,
+            "headers" => [
+                "Content-Type" => "application/json",
+                "Accept" => "application/json",
+                "x-api-key" => $api_key,
+            ],
+            "body" => wp_json_encode([
+                "woocommerceWebhookSecret" => $secret,
+            ]),
+        ]);
+
+        if (is_wp_error($response)) {
+            return new WP_Error(
+                "ahpc_backend_registration_failed",
+                sprintf(
+                    /* translators: %s: WP_Error message. */
+                    __(
+                        "The backend rejected the secret registration request: %s",
+                        self::TEXT_DOMAIN,
+                    ),
+                    $response->get_error_message(),
+                ),
+            );
+        }
+
+        $response_code = (int) wp_remote_retrieve_response_code($response);
+
+        if ($response_code < 200 || $response_code >= 300) {
+            $response_message = $this->extract_response_message($response);
+            $message = sprintf(
+                /* translators: %d: HTTP response code. */
+                __(
+                    "The backend returned HTTP %d while storing the WooCommerce webhook secret.",
+                    self::TEXT_DOMAIN,
+                ),
+                $response_code,
+            );
+
+            if ("" !== $response_message) {
+                $message .= " " . $response_message;
+            }
+
+            return new WP_Error("ahpc_backend_registration_failed", $message);
+        }
+
+        return true;
+    }
+
+    /**
+     * Extracts a short error message from a backend HTTP response.
+     *
+     * @param array $response HTTP response.
+     * @return string
+     */
+    private function extract_response_message($response)
+    {
+        $body = trim((string) wp_remote_retrieve_body($response));
+
+        if ("" === $body) {
+            return "";
+        }
+
+        $decoded = json_decode($body, true);
+
+        if (is_array($decoded)) {
+            foreach (["message", "error", "detail"] as $key) {
+                if (!empty($decoded[$key]) && is_string($decoded[$key])) {
+                    return sanitize_text_field(
+                        wp_strip_all_tags($decoded[$key]),
+                    );
+                }
+            }
+        }
+
+        return sanitize_text_field(
+            wp_html_excerpt(wp_strip_all_tags($body), 200, "…"),
+        );
     }
 
     /**
@@ -460,13 +720,19 @@ class Webhook_Manager
     /**
      * Returns the desired webhook status for the current settings.
      *
-     * @param array<string,mixed> $settings Plugin settings.
+     * @param array<string,mixed> $settings     Plugin settings.
      * @param string              $endpoint_url Hardcoded delivery endpoint.
+     * @param WP_Error|null       $setup_error  Setup error, if any.
      * @return string
      */
-    private function get_desired_status($settings, $endpoint_url)
-    {
-        return !empty($settings["enabled"]) && !empty($endpoint_url)
+    private function get_desired_status(
+        $settings,
+        $endpoint_url,
+        $setup_error = null,
+    ) {
+        return !empty($settings["enabled"]) &&
+            !$setup_error &&
+            !empty($endpoint_url)
             ? "active"
             : "paused";
     }
@@ -474,7 +740,7 @@ class Webhook_Manager
     /**
      * Loads an existing managed webhook or creates a new one.
      *
-     * @param string            $topic Webhook topic.
+     * @param string            $topic       Webhook topic.
      * @param array<string,int> $webhook_ids Stored webhook IDs.
      * @return WC_Webhook
      */
@@ -492,7 +758,7 @@ class Webhook_Manager
     /**
      * Loads a managed webhook by topic.
      *
-     * @param string            $topic Webhook topic.
+     * @param string            $topic       Webhook topic.
      * @param array<string,int> $webhook_ids Stored webhook IDs.
      * @return WC_Webhook|null
      */
@@ -607,8 +873,8 @@ class Webhook_Manager
     /**
      * Returns whether the given webhook ID belongs to this plugin.
      *
-     * @param int              $webhook_id Webhook ID.
-     * @param WC_Webhook|null  $webhook Optional webhook instance.
+     * @param int             $webhook_id Webhook ID.
+     * @param WC_Webhook|null $webhook    Optional webhook instance.
      * @return bool
      */
     public function owns_webhook_id($webhook_id, $webhook = null)
@@ -762,10 +1028,11 @@ class Webhook_Manager
     /**
      * Stores a sync error and returns it.
      *
-     * @param WP_Error|string $error Error instance or message.
+     * @param WP_Error|string $error              Error instance or message.
+     * @param bool            $requires_resync    Whether another automatic sync should be attempted.
      * @return WP_Error
      */
-    private function record_sync_error($error)
+    private function record_sync_error($error, $requires_resync = true)
     {
         if (is_wp_error($error)) {
             $message = $error->get_error_message();
@@ -775,7 +1042,11 @@ class Webhook_Manager
         }
 
         update_option(self::OPTION_LAST_SYNC_ERROR, $message, false);
-        update_option(self::OPTION_NEEDS_SYNC, "yes", false);
+        update_option(
+            self::OPTION_NEEDS_SYNC,
+            $requires_resync ? "yes" : "no",
+            false,
+        );
 
         return $error;
     }

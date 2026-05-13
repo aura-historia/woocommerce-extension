@@ -130,6 +130,12 @@ class Plugin
             $this,
             "add_plugin_action_links",
         ]);
+        add_filter(
+            "http_request_args",
+            [$this, "maybe_add_webhook_api_key_header"],
+            10,
+            2,
+        );
         add_action("woocommerce_loaded", [$this, "bootstrap_woocommerce"]);
 
         if (is_admin()) {
@@ -249,6 +255,12 @@ class Plugin
         $current = wp_parse_args($current, Webhook_Manager::default_settings());
 
         $sanitized = [
+            "shop_id" => Webhook_Manager::normalize_shop_id(
+                $current["shop_id"],
+            ),
+            "api_key" => Webhook_Manager::normalize_api_key(
+                $current["api_key"],
+            ),
             "secret" => !empty($current["secret"])
                 ? sanitize_text_field((string) $current["secret"])
                 : Webhook_Manager::generate_secret(),
@@ -256,10 +268,53 @@ class Plugin
         ];
 
         if (is_array($input)) {
-            if (isset($input["secret"])) {
-                $sanitized["secret"] = sanitize_text_field(
-                    wp_unslash($input["secret"]),
+            if (array_key_exists("shop_id", $input)) {
+                $shop_id = Webhook_Manager::normalize_shop_id(
+                    wp_unslash($input["shop_id"]),
                 );
+
+                if (
+                    "" === $shop_id ||
+                    Webhook_Manager::is_valid_shop_id($shop_id)
+                ) {
+                    $sanitized["shop_id"] = $shop_id;
+                } else {
+                    add_settings_error(
+                        Webhook_Manager::OPTION_SETTINGS,
+                        "ahpc_invalid_shop_id",
+                        __(
+                            "Shop ID must be a valid UUID.",
+                            Webhook_Manager::TEXT_DOMAIN,
+                        ),
+                    );
+                }
+            }
+
+            if (array_key_exists("api_key", $input)) {
+                $api_key = Webhook_Manager::normalize_api_key(
+                    wp_unslash($input["api_key"]),
+                );
+
+                if ("" === $api_key) {
+                    if (!empty($current["api_key"])) {
+                        $sanitized[
+                            "api_key"
+                        ] = Webhook_Manager::normalize_api_key(
+                            $current["api_key"],
+                        );
+                    }
+                } elseif (Webhook_Manager::is_valid_api_key($api_key)) {
+                    $sanitized["api_key"] = $api_key;
+                } else {
+                    add_settings_error(
+                        Webhook_Manager::OPTION_SETTINGS,
+                        "ahpc_invalid_api_key",
+                        __(
+                            "API key must look like aurahistoria_shorttoken_longtoken.",
+                            Webhook_Manager::TEXT_DOMAIN,
+                        ),
+                    );
+                }
             }
 
             $sanitized["enabled"] = !empty($input["enabled"]);
@@ -272,6 +327,64 @@ class Plugin
         update_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes", false);
 
         return $sanitized;
+    }
+
+    /**
+     * Adds the backend API key to outgoing webhook requests.
+     *
+     * This intentionally uses the lower-level `http_request_args` filter instead of
+     * `woocommerce_webhook_http_args` so WooCommerce's own delivery logger does not
+     * capture the x-api-key value in webhook delivery logs.
+     *
+     * @param array  $args HTTP request arguments.
+     * @param string $url  Request URL.
+     * @return array
+     */
+    public function maybe_add_webhook_api_key_header($args, $url)
+    {
+        if (!$this->manager instanceof Webhook_Manager) {
+            return $args;
+        }
+
+        $settings = $this->manager->get_settings();
+
+        if (
+            !Webhook_Manager::is_valid_shop_id($settings["shop_id"]) ||
+            !Webhook_Manager::is_valid_api_key($settings["api_key"])
+        ) {
+            return $args;
+        }
+
+        $webhook_endpoint_url = Webhook_Manager::get_webhook_endpoint_url(
+            $settings["shop_id"],
+        );
+
+        if (
+            "" === $webhook_endpoint_url ||
+            untrailingslashit($url) !== untrailingslashit($webhook_endpoint_url)
+        ) {
+            return $args;
+        }
+
+        $is_webhook_delivery =
+            !empty($args["headers"]["X-WC-Webhook-ID"]) ||
+            !empty($args["headers"]["X-WC-Webhook-Topic"]);
+        $is_webhook_ping =
+            !empty($args["body"]) &&
+            is_string($args["body"]) &&
+            false !== strpos($args["body"], "webhook_id=");
+
+        if (!$is_webhook_delivery && !$is_webhook_ping) {
+            return $args;
+        }
+
+        if (!isset($args["headers"]) || !is_array($args["headers"])) {
+            $args["headers"] = [];
+        }
+
+        $args["headers"]["x-api-key"] = $settings["api_key"];
+
+        return $args;
     }
 
     /**
@@ -326,8 +439,8 @@ class Plugin
     /**
      * Marks the plugin webhooks as out of sync after a manual edit or deletion.
      *
-     * @param int              $webhook_id Webhook ID.
-     * @param \WC_Webhook|null $webhook Optional webhook instance.
+     * @param int             $webhook_id Webhook ID.
+     * @param \WC_Webhook|null $webhook   Optional webhook instance.
      * @return void
      */
     public function maybe_mark_managed_webhook_out_of_sync(
@@ -412,7 +525,10 @@ class Plugin
         }
 
         $settings = $this->get_current_settings();
-        $endpoint_url = Webhook_Manager::get_endpoint_url();
+        $backend_base_url = Webhook_Manager::get_backend_base_url();
+        $webhook_endpoint_url = Webhook_Manager::get_webhook_endpoint_url(
+            $settings["shop_id"],
+        );
         $sync_error =
             $this->manager instanceof Webhook_Manager
                 ? $this->manager->get_last_sync_error()
@@ -445,6 +561,7 @@ class Plugin
        "This plugin manages three WooCommerce webhooks for product.created, product.updated, and product.deleted.",
        Webhook_Manager::TEXT_DOMAIN,
    ); ?></p>
+			<?php settings_errors(Webhook_Manager::OPTION_SETTINGS); ?>
 
 			<?php if (!$this->is_woocommerce_available()): ?>
 				<?php $this->render_inline_notice(
@@ -466,11 +583,41 @@ class Plugin
 
 			<?php if (!empty($sync_error)): ?>
 				<?php $this->render_inline_notice("error", esc_html($sync_error)); ?>
-			<?php elseif (empty($endpoint_url)): ?>
+			<?php elseif (empty($backend_base_url)): ?>
 				<?php $this->render_inline_notice(
         "warning",
         esc_html__(
-            "The built-in webhook endpoint URL is empty. Define AHPC_WEBHOOK_ENDPOINT_URL in the plugin before enabling delivery.",
+            "The built-in backend base URL is empty. Define AHPC_BACKEND_BASE_URL in the plugin before enabling delivery.",
+            Webhook_Manager::TEXT_DOMAIN,
+        ),
+    ); ?>
+			<?php elseif (
+       !empty($settings["enabled"]) &&
+       !Webhook_Manager::is_valid_shop_id($settings["shop_id"])
+   ): ?>
+				<?php $this->render_inline_notice(
+        "warning",
+        esc_html__(
+            "Enter a valid Shop ID UUID before enabling delivery.",
+            Webhook_Manager::TEXT_DOMAIN,
+        ),
+    ); ?>
+			<?php elseif (
+       !empty($settings["enabled"]) &&
+       !Webhook_Manager::is_valid_api_key($settings["api_key"])
+   ): ?>
+				<?php $this->render_inline_notice(
+        "warning",
+        esc_html__(
+            "Enter a valid Aura Historia API key before enabling delivery.",
+            Webhook_Manager::TEXT_DOMAIN,
+        ),
+    ); ?>
+			<?php elseif (!empty($settings["enabled"]) && empty($webhook_endpoint_url)): ?>
+				<?php $this->render_inline_notice(
+        "warning",
+        esc_html__(
+            "The webhook delivery URL could not be built from the current settings.",
             Webhook_Manager::TEXT_DOMAIN,
         ),
     ); ?>
@@ -478,7 +625,7 @@ class Plugin
 				<?php $this->render_inline_notice(
         "warning",
         esc_html__(
-            "Webhook delivery is currently paused. Enable delivery when you are ready to send events to your SaaS backend.",
+            "Webhook delivery is currently paused. Configure the connection and enable delivery when you are ready to send events to your SaaS backend.",
             Webhook_Manager::TEXT_DOMAIN,
         ),
     ); ?>
@@ -490,12 +637,12 @@ class Plugin
 					<tbody>
 						<tr>
 							<th scope="row"><?php echo esc_html__(
-           "Delivery endpoint",
+           "Backend base URL",
            Webhook_Manager::TEXT_DOMAIN,
        ); ?></th>
 							<td>
-								<?php if (!empty($endpoint_url)): ?>
-									<code><?php echo esc_html($endpoint_url); ?></code>
+								<?php if (!empty($backend_base_url)): ?>
+									<code><?php echo esc_html($backend_base_url); ?></code>
 								<?php else: ?>
 									<em><?php echo esc_html__(
              "Not configured",
@@ -503,26 +650,72 @@ class Plugin
          ); ?></em>
 								<?php endif; ?>
 								<p class="description"><?php echo esc_html__(
-            "This value is built into the plugin via AHPC_WEBHOOK_ENDPOINT_URL and is not editable by store owners.",
+            "This value is built into the plugin via AHPC_BACKEND_BASE_URL and is not editable by store owners.",
             Webhook_Manager::TEXT_DOMAIN,
         ); ?></p>
 							</td>
 						</tr>
 						<tr>
 							<th scope="row">
-								<label for="ahpc-secret"><?php echo esc_html__(
-            "Webhook signing secret",
+								<label for="ahpc-shop-id"><?php echo esc_html__(
+            "Shop ID",
             Webhook_Manager::TEXT_DOMAIN,
         ); ?></label>
 							</th>
 							<td>
-								<input id="ahpc-secret" name="<?php echo esc_attr(
+								<input id="ahpc-shop-id" name="<?php echo esc_attr(
             Webhook_Manager::OPTION_SETTINGS,
-        ); ?>[secret]" type="text" class="regular-text code" value="<?php echo esc_attr(
-    $settings["secret"],
-); ?>" />
+        ); ?>[shop_id]" type="text" class="regular-text code" value="<?php echo esc_attr(
+    $settings["shop_id"],
+); ?>" placeholder="123e4567-e89b-12d3-a456-426614174000" spellcheck="false" />
 								<p class="description"><?php echo esc_html__(
-            "WooCommerce uses this value to generate the X-WC-Webhook-Signature header. It is not sent as a standalone Authorization or API key header.",
+            "Enter the Aura Historia Shop ID UUID that identifies this WooCommerce store in your backend.",
+            Webhook_Manager::TEXT_DOMAIN,
+        ); ?></p>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row">
+								<label for="ahpc-api-key"><?php echo esc_html__(
+            "API key",
+            Webhook_Manager::TEXT_DOMAIN,
+        ); ?></label>
+							</th>
+							<td>
+								<input id="ahpc-api-key" name="<?php echo esc_attr(
+            Webhook_Manager::OPTION_SETTINGS,
+        ); ?>[api_key]" type="password" class="regular-text code" value="" placeholder="aurahistoria_shorttoken_longtoken" autocomplete="new-password" spellcheck="false" />
+								<p class="description">
+									<?php echo esc_html__(
+             "Enter the Aura Historia API key used to PATCH /api/v1/shops/{shopId}. Leave this field blank to keep the currently stored key.",
+             Webhook_Manager::TEXT_DOMAIN,
+         ); ?>
+									<?php if (!empty($settings["api_key"])): ?>
+										<?php echo " " .
+              esc_html__(
+                  "An API key is currently stored.",
+                  Webhook_Manager::TEXT_DOMAIN,
+              ); ?>
+									<?php endif; ?>
+								</p>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><?php echo esc_html__(
+           "Webhook endpoint preview",
+           Webhook_Manager::TEXT_DOMAIN,
+       ); ?></th>
+							<td>
+								<?php if (!empty($webhook_endpoint_url)): ?>
+									<code><?php echo esc_html($webhook_endpoint_url); ?></code>
+								<?php else: ?>
+									<em><?php echo esc_html__(
+             "Enter a valid Shop ID to preview the final webhook endpoint.",
+             Webhook_Manager::TEXT_DOMAIN,
+         ); ?></em>
+								<?php endif; ?>
+								<p class="description"><?php echo esc_html__(
+            "The plugin auto-generates a hidden WooCommerce webhook secret, PATCHes it to your backend shop record, and sends x-api-key on webhook deliveries.",
             Webhook_Manager::TEXT_DOMAIN,
         ); ?></p>
 							</td>
@@ -540,12 +733,12 @@ class Plugin
     !empty($settings["enabled"]),
 ); ?> />
 									<?php echo esc_html__(
-             "Send product webhook events to the built-in delivery endpoint.",
+             "Send product webhook events to the built-in Aura Historia backend endpoints.",
              Webhook_Manager::TEXT_DOMAIN,
          ); ?>
 								</label>
 								<p class="description"><?php echo esc_html__(
-            "When unchecked, the plugin keeps its managed WooCommerce webhooks in the paused state.",
+            "When enabled, the plugin first updates your backend shop record with the generated webhook secret and only keeps the WooCommerce webhooks active if that succeeds.",
             Webhook_Manager::TEXT_DOMAIN,
         ); ?></p>
 							</td>
@@ -564,7 +757,7 @@ class Plugin
 			<p>
 				<?php
     echo esc_html__(
-        "The plugin owns exactly three WooCommerce webhooks and keeps them in sync with the built-in endpoint and the settings above.",
+        "The plugin owns exactly three WooCommerce webhooks and keeps them in sync with the built-in backend endpoint pattern and the settings above.",
         Webhook_Manager::TEXT_DOMAIN,
     );
     if ($last_sync_at) {
@@ -676,6 +869,12 @@ class Plugin
             $settings["secret"] = Webhook_Manager::generate_secret();
         }
 
+        $settings["shop_id"] = Webhook_Manager::normalize_shop_id(
+            $settings["shop_id"],
+        );
+        $settings["api_key"] = Webhook_Manager::normalize_api_key(
+            $settings["api_key"],
+        );
         $settings["secret"] = sanitize_text_field((string) $settings["secret"]);
         $settings["enabled"] = !empty($settings["enabled"]);
 

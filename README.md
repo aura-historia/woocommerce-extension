@@ -8,15 +8,31 @@ This repository contains a lean WordPress plugin that keeps exactly three WooCom
 
 The plugin auto-registers those webhooks, repairs manual edits or deletions, exposes a small admin settings screen, pauses its webhooks on deactivation, and removes them on uninstall.
 
-## Endpoint and secret model
+## Connection model
 
-The plugin uses a built-in delivery endpoint defined in code.
+The plugin uses a built-in backend base URL defined in code.
 
-Before you upload the plugin to a real store, replace the demo value of `AHPC_WEBHOOK_ENDPOINT_URL` in `aura-historia-partner-connect.php` with your real SaaS webhook URL.
+Before you upload the plugin to a real store, replace the demo value of `AHPC_BACKEND_BASE_URL` in `aura-historia-partner-connect.php` with your real SaaS API base URL.
 
-Store owners do **not** configure the endpoint URL in WordPress admin.
+Store owners do **not** configure:
 
-The only store-level delivery setting is the webhook signing secret. WooCommerce uses that value to generate the `X-WC-Webhook-Signature` header. It is not sent as a standalone API key or `Authorization` header.
+- the webhook endpoint URL
+- the webhook secret
+
+Store owners **do** configure:
+
+- `Shop ID`
+- `API key`
+
+When delivery is enabled, the plugin:
+
+1. auto-generates and stores a hidden WooCommerce webhook secret
+2. sends that secret to `PATCH /api/v1/shops/{shopId}` using the configured `x-api-key`
+3. keeps the WooCommerce webhooks active only if that backend sync succeeds
+4. sends webhook deliveries to `/api/v1/webhooks/woocommerce/{shopId}`
+5. includes the configured `x-api-key` on outgoing webhook requests
+
+WooCommerce also signs the request body with `X-WC-Webhook-Signature` using the generated secret.
 
 ## Local development
 
@@ -51,13 +67,15 @@ If port `8888` is already busy, create a local `.wp-env.override.json` file and 
 
 ## Manual local test flow
 
-1. Replace the demo `AHPC_WEBHOOK_ENDPOINT_URL` with a test receiver such as `webhook.site`, an `ngrok` tunnel, or your own receiver.
+1. Replace the demo `AHPC_BACKEND_BASE_URL` with a test or staging backend base URL that supports both:
+   - `PATCH /api/v1/shops/{shopId}`
+   - `POST /api/v1/webhooks/woocommerce/{shopId}`
 2. Start the local environment.
 3. In WordPress admin, go to `WooCommerce > Partner Connect`.
-4. Set or replace the webhook signing secret.
+4. Enter the Shop ID and API key from your backend.
 5. Check **Enable delivery** and save.
 6. Create, update, and trash a product.
-7. Confirm deliveries at your receiver and in WooCommerce logs.
+7. Confirm the backend accepted the setup PATCH call and then received the webhook deliveries.
 
 Useful WooCommerce screens:
 
@@ -83,6 +101,8 @@ The test suite uses WordPress integration tests and runs inside `wp-env`.
 Current coverage focuses on the plugin's core contract:
 
 - creating the three managed WooCommerce webhooks
+- syncing the hidden secret to the backend
+- attaching `x-api-key` to outgoing webhook requests
 - updating those webhooks idempotently without duplicates
 - pausing managed webhooks when requested
 

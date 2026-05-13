@@ -36,11 +36,8 @@ if (!defined("AHPC_PLUGIN_BASENAME")) {
     define("AHPC_PLUGIN_BASENAME", plugin_basename(__FILE__));
 }
 
-if (!defined("AHPC_WEBHOOK_ENDPOINT_URL")) {
-    define(
-        "AHPC_WEBHOOK_ENDPOINT_URL",
-        "https://example.com/aura-historia/partner-connect/webhooks/woocommerce",
-    );
+if (!defined("AHPC_BACKEND_BASE_URL")) {
+    define("AHPC_BACKEND_BASE_URL", "https://example.com");
 }
 
 require_once AHPC_PLUGIN_DIR . "includes/class-webhook-manager.php";
