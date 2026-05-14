@@ -8,9 +8,9 @@
  * Regenerate with: npm run generate:api
  *
  * OpenAPI spec version : 1.0.0
- * Spec commit          : cce00e537cbc3a7dccab84b4346e1473bea6f1a4
- * Spec source          : https://github.com/aura-historia/internal-api/blob/cce00e537cbc3a7dccab84b4346e1473bea6f1a4/swagger.yaml
- * Generated on         : 2026-05-13
+ * Spec commit          : f06b903bf8641d5505aafc89462fd2f356f50386
+ * Spec source          : https://github.com/aura-historia/internal-api/blob/f06b903bf8641d5505aafc89462fd2f356f50386/swagger.yaml
+ * Generated on         : 2026-05-14
  */
 
 namespace AuraHistoria\PartnerConnect;
@@ -25,7 +25,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Typed HTTP client for the Aura Historia Backend API.
  *
  * Generated from the OpenAPI spec at:
- * https://github.com/aura-historia/internal-api/blob/cce00e537cbc3a7dccab84b4346e1473bea6f1a4/swagger.yaml
+ * https://github.com/aura-historia/internal-api/blob/f06b903bf8641d5505aafc89462fd2f356f50386/swagger.yaml
  *
  * All HTTP communication goes through WordPress's wp_safe_remote_request() so
  * that WordPress filters and proxy settings are respected.
@@ -58,12 +58,11 @@ class Backend_Api_Client {
 	 * Path        : /api/v1/shops/{shopId}
 	 *
 	 * The $body array accepts PatchShopData fields as specified in the OpenAPI
-	 * schema. Plugin-specific fields not yet present in the spec (e.g.
-	 * woocommerceWebhookSecret) may also be included and are forwarded as-is.
+	 * schema. See the spec for supported fields (e.g. woocommerceWebhookSecret).
 	 *
 	 * Error responses defined in the spec:
 	 *   - HTTP 400: Bad request - invalid or missing shop ID, empty body, or invalid JSON
-	 *   - HTTP 401: Unauthorized – invalid or missing JWT token.
+	 *   - HTTP 401: Unauthorized – invalid or missing Cognito JWT when using bearer auth, or missing/malformed/mismatched `x-api-key` when using partner API-key auth.
 	 *   - HTTP 403: Forbidden – caller is not allowed to update this shop.
 	 *   - HTTP 404: Shop not found
 	 *   - HTTP 500: Internal server error

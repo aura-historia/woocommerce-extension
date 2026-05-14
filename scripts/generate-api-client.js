@@ -22,7 +22,7 @@ const yaml  = require( 'js-yaml' );
 // ---------------------------------------------------------------------------
 
 const SPEC_REPO       = 'aura-historia/internal-api';
-const SPEC_COMMIT     = 'cce00e537cbc3a7dccab84b4346e1473bea6f1a4';
+const SPEC_COMMIT     = 'f06b903bf8641d5505aafc89462fd2f356f50386';
 const SPEC_FILE       = 'swagger.yaml';
 const SPEC_RAW_URL    = `https://raw.githubusercontent.com/${ SPEC_REPO }/${ SPEC_COMMIT }/${ SPEC_FILE }`;
 const SPEC_BROWSE_URL = `https://github.com/${ SPEC_REPO }/blob/${ SPEC_COMMIT }/${ SPEC_FILE }`;
@@ -161,8 +161,7 @@ lines.push( '\t * Method      : PATCH' );
 lines.push( '\t * Path        : /api/v1/shops/{shopId}' );
 lines.push( '\t *' );
 lines.push( '\t * The $body array accepts PatchShopData fields as specified in the OpenAPI' );
-lines.push( '\t * schema. Plugin-specific fields not yet present in the spec (e.g.' );
-lines.push( '\t * woocommerceWebhookSecret) may also be included and are forwarded as-is.' );
+lines.push( '\t * schema. See the spec for supported fields (e.g. woocommerceWebhookSecret).' );
 if ( errorResponses.length ) {
 lines.push( '\t *' );
 lines.push( '\t * Error responses defined in the spec:' );
