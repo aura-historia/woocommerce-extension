@@ -165,7 +165,7 @@ class Backend_Api_Client
             "timeout" => 15,
             "allow_redirects" => false,
             "http_errors" => true,
-            "version" => 1.1,
+            "version" => "1.1",
         ]);
 
         $filtered_client = apply_filters(
