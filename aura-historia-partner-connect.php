@@ -37,7 +37,7 @@ if (!defined("AHPC_PLUGIN_BASENAME")) {
 }
 
 if (!defined("AHPC_BACKEND_BASE_URL")) {
-    define("AHPC_BACKEND_BASE_URL", "api.dev.aura-historia.com");
+    define("AHPC_BACKEND_BASE_URL", "https://api.dev.aura-historia.com");
 }
 
 $ahpc_autoload = AHPC_PLUGIN_DIR . "vendor/autoload.php";

@@ -6,3 +6,5 @@ vendor/
 .wp-env.override.json
 npm-debug.log
 .DS_Store
+build-release/**
+aura-historia-partner-connect.zip
