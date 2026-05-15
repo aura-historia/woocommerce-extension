@@ -8,5 +8,6 @@
 /package-lock.json export-ignore
 /package.json export-ignore
 /phpunit.xml.dist export-ignore
+/openapi export-ignore
 /scripts export-ignore
 /tests export-ignore

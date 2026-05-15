@@ -6,6 +6,12 @@
  */
 
 use AuraHistoria\PartnerConnect\Webhook_Manager;
+use GuzzleHttp\Client;
+use GuzzleHttp\ClientInterface;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Middleware;
+use GuzzleHttp\Psr7\Response;
 
 /**
  * Tests the managed WooCommerce webhooks.
@@ -32,6 +38,20 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
      * @var array<int,array<string,mixed>>
      */
     protected $http_requests = [];
+
+    /**
+     * Guzzle client injected into the generated backend API client during tests.
+     *
+     * @var ClientInterface|null
+     */
+    protected $backend_guzzle_client = null;
+
+    /**
+     * Recorded outbound backend API requests sent through Guzzle.
+     *
+     * @var array<int,array<string,mixed>>
+     */
+    protected $backend_http_requests = [];
 
     /**
      * Ensures WooCommerce is installed for the test suite.
@@ -72,6 +92,16 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
 
         add_filter("pre_http_request", [$this, "mock_http_request"], 10, 3);
         add_filter("ahpc_backend_base_url", [$this, "filter_backend_base_url"]);
+        add_filter(
+            "ahpc_backend_guzzle_client",
+            [$this, "filter_backend_guzzle_client"],
+            10,
+            2,
+        );
+
+        $this->set_backend_mock_responses(
+            array_fill(0, 10, $this->mock_backend_registration_response()),
+        );
 
         $manager = new Webhook_Manager();
         $manager->delete_webhooks();
@@ -93,6 +123,11 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             $this,
             "filter_backend_base_url",
         ]);
+        remove_filter(
+            "ahpc_backend_guzzle_client",
+            [$this, "filter_backend_guzzle_client"],
+            10,
+        );
         wp_set_current_user(0);
 
         parent::tearDown();
@@ -110,7 +145,90 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
     }
 
     /**
-     * Prevents real HTTP requests during backend sync, webhook ping, or delivery.
+     * Injects the prepared Guzzle client into the generated backend API client.
+     *
+     * @param ClientInterface|mixed $client   Current Guzzle client.
+     * @param string                $base_url Backend base URL.
+     * @return ClientInterface|mixed
+     */
+    public function filter_backend_guzzle_client($client, $base_url)
+    {
+        return $this->backend_guzzle_client instanceof ClientInterface
+            ? $this->backend_guzzle_client
+            : $client;
+    }
+
+    /**
+     * Rebuilds the mocked backend Guzzle client with the given queued responses.
+     *
+     * @param array<int,Response> $responses Mocked backend responses.
+     * @return void
+     */
+    protected function set_backend_mock_responses($responses)
+    {
+        $this->backend_http_requests = [];
+
+        $mock_handler = new MockHandler($responses);
+        $handler_stack = HandlerStack::create($mock_handler);
+        $handler_stack->push(Middleware::history($this->backend_http_requests));
+
+        $this->backend_guzzle_client = new Client([
+            "handler" => $handler_stack,
+            "http_errors" => true,
+        ]);
+    }
+
+    /**
+     * Builds a mocked backend registration response.
+     *
+     * @param int               $status_code HTTP status code.
+     * @param array<string,mixed>|null $body Typed response payload.
+     * @return Response
+     */
+    protected function mock_backend_registration_response(
+        $status_code = 200,
+        $body = null,
+    ) {
+        if (null === $body) {
+            $body = [
+                "shopId" => "123e4567-e89b-12d3-a456-426614174000",
+                "shopSlugId" => "test-shop",
+                "name" => "Test Shop",
+                "shopType" => "COMMERCIAL_DEALER",
+                "domains" => ["example.com"],
+                "partnerStatus" => "PARTNERED",
+                "created" => "2024-01-01T10:00:00Z",
+                "updated" => "2024-01-01T12:00:00Z",
+            ];
+        }
+
+        return new Response(
+            $status_code,
+            ["Content-Type" => "application/json"],
+            wp_json_encode($body),
+        );
+    }
+
+    /**
+     * Returns recorded backend requests for a specific absolute URL.
+     *
+     * @param string $url Absolute request URL.
+     * @return array<int,array<string,mixed>>
+     */
+    protected function get_backend_requests_for_url($url)
+    {
+        return array_values(
+            array_filter($this->backend_http_requests, static function (
+                $transaction,
+            ) use ($url) {
+                return isset($transaction["request"]) &&
+                    $url === (string) $transaction["request"]->getUri();
+            }),
+        );
+    }
+
+    /**
+     * Prevents real WordPress HTTP requests during webhook ping or delivery.
      *
      * @param mixed  $preempt Existing preempted response.
      * @param array  $args HTTP arguments.
@@ -124,12 +242,26 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             "args" => $args,
         ];
 
+        return $this->mock_json_response(200, "");
+    }
+
+    /**
+     * Builds a mocked JSON HTTP response.
+     *
+     * @param int          $status_code HTTP status code.
+     * @param array|string $body        Response body payload.
+     * @return array
+     */
+    protected function mock_json_response($status_code, $body)
+    {
+        $message = $status_code >= 200 && $status_code < 300 ? "OK" : "Error";
+
         return [
             "headers" => [],
-            "body" => "",
+            "body" => is_string($body) ? $body : wp_json_encode($body),
             "response" => [
-                "code" => 200,
-                "message" => "OK",
+                "code" => $status_code,
+                "message" => $message,
             ],
             "cookies" => [],
             "filename" => null,
@@ -183,27 +315,22 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             $this->assertSame("wp_api_v3", $webhook->get_api_version());
         }
 
-        $registration_requests = array_values(
-            array_filter($this->http_requests, static function ($request) use (
-                $shop_id,
-            ) {
-                return "https://example.com/api/v1/shops/" . $shop_id ===
-                    $request["url"];
-            }),
+        $registration_requests = $this->get_backend_requests_for_url(
+            "https://example.com/api/v1/shops/" . $shop_id,
         );
 
         $this->assertCount(1, $registration_requests);
         $this->assertSame(
             "PATCH",
-            strtoupper($registration_requests[0]["args"]["method"]),
+            strtoupper($registration_requests[0]["request"]->getMethod()),
         );
         $this->assertSame(
             $api_key,
-            $registration_requests[0]["args"]["headers"]["x-api-key"],
+            $registration_requests[0]["request"]->getHeaderLine("x-api-key"),
         );
         $this->assertStringContainsString(
             '"woocommerceWebhookSecret":"test-secret"',
-            $registration_requests[0]["args"]["body"],
+            (string) $registration_requests[0]["request"]->getBody(),
         );
 
         $delivery_requests = array_values(
@@ -280,19 +407,14 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             $this->assertSame("updated-secret", $webhook->get_secret());
         }
 
-        $registration_requests = array_values(
-            array_filter($this->http_requests, static function ($request) use (
-                $shop_id,
-            ) {
-                return "https://example.com/api/v1/shops/" . $shop_id ===
-                    $request["url"];
-            }),
+        $registration_requests = $this->get_backend_requests_for_url(
+            "https://example.com/api/v1/shops/" . $shop_id,
         );
 
         $this->assertCount(2, $registration_requests);
         $this->assertSame(
             $updated_api_key,
-            $registration_requests[1]["args"]["headers"]["x-api-key"],
+            $registration_requests[1]["request"]->getHeaderLine("x-api-key"),
         );
     }
 
@@ -331,13 +453,8 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             );
         }
 
-        $registration_requests = array_values(
-            array_filter($this->http_requests, static function ($request) use (
-                $shop_id,
-            ) {
-                return "https://example.com/api/v1/shops/" . $shop_id ===
-                    $request["url"];
-            }),
+        $registration_requests = $this->get_backend_requests_for_url(
+            "https://example.com/api/v1/shops/" . $shop_id,
         );
 
         $this->assertSame([], $registration_requests);
@@ -428,6 +545,60 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $ids = $manager->get_webhook_ids();
 
         $this->assertInstanceOf(WP_Error::class, $result);
+        $this->assertCount(3, $ids);
+
+        foreach ($ids as $webhook_id) {
+            $webhook = new WC_Webhook($webhook_id);
+            $this->assertSame("paused", $webhook->get_status());
+        }
+    }
+
+    /**
+     * It surfaces typed backend error details from the OpenAPI response body.
+     *
+     * @return void
+     */
+    public function test_sync_webhooks_surfaces_backend_api_error_details()
+    {
+        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+        $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+
+        update_option(
+            Webhook_Manager::OPTION_SETTINGS,
+            [
+                "shop_id" => $shop_id,
+                "api_key" => $api_key,
+                "secret" => "test-secret",
+            ],
+            false,
+        );
+
+        $this->set_backend_mock_responses([
+            $this->mock_backend_registration_response(401, [
+                "status" => 401,
+                "title" => "Unauthorized",
+                "error" => "PARTNER_SHOP_API_KEY_MISMATCH",
+                "detail" => "Missing or empty 'x-api-key' header.",
+            ]),
+        ]);
+
+        $manager = new Webhook_Manager();
+        $result = $manager->sync_webhooks();
+        $ids = $manager->get_webhook_ids();
+
+        $this->assertInstanceOf(WP_Error::class, $result);
+        $this->assertSame(
+            "ahpc_backend_registration_failed",
+            $result->get_error_code(),
+        );
+        $this->assertStringContainsString(
+            "HTTP 401",
+            $result->get_error_message(),
+        );
+        $this->assertStringContainsString(
+            "Missing or empty 'x-api-key' header.",
+            $result->get_error_message(),
+        );
         $this->assertCount(3, $ids);
 
         foreach ($ids as $webhook_id) {

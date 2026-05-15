@@ -1,5 +1,7 @@
 node_modules/
 vendor/
+.tmp-internal-api-generated/
+.tmp-openapi-inspect/
 .phpunit.result.cache
 .wp-env.override.json
 npm-debug.log

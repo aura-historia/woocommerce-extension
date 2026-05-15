@@ -7,6 +7,7 @@
 
 namespace AuraHistoria\PartnerConnect;
 
+use AuraHistoria\PartnerConnect\InternalApi\Model\PatchShopData;
 use WC_Data_Store;
 use WC_Webhook;
 use WP_Error;
@@ -493,9 +494,43 @@ class Webhook_Manager
      */
     private function register_webhook_secret($shop_id, $api_key, $secret)
     {
-        $url = self::get_shop_registration_url($shop_id);
+        $request_body = new PatchShopData();
+        $request_body->setWoocommerceWebhookSecret($secret);
 
-        if ("" === $url) {
+        $client = new Backend_Api_Client(self::get_backend_base_url());
+        $response = $client->patch_shop_by_id(
+            $shop_id,
+            $api_key,
+            $request_body,
+        );
+
+        if (is_wp_error($response)) {
+            return $this->translate_backend_registration_error($response);
+        }
+
+        return true;
+    }
+
+    /**
+     * Converts a low-level backend client error into the existing admin-facing
+     * secret-registration error wording.
+     *
+     * @param WP_Error $error Backend client error.
+     * @return WP_Error
+     */
+    private function translate_backend_registration_error(WP_Error $error)
+    {
+        $error_code = $error->get_error_code();
+        $error_message = sanitize_text_field(
+            (string) $error->get_error_message(),
+        );
+        $error_data = $error->get_error_data($error_code);
+        $response_code =
+            is_array($error_data) && isset($error_data["response_code"])
+                ? (int) $error_data["response_code"]
+                : 0;
+
+        if ("ahpc_backend_invalid_url" === $error_code) {
             return new WP_Error(
                 "ahpc_invalid_registration_url",
                 __(
@@ -505,40 +540,45 @@ class Webhook_Manager
             );
         }
 
-        $response = wp_safe_remote_request($url, [
-            "method" => "PATCH",
-            "timeout" => 15,
-            "redirection" => 0,
-            "httpversion" => "1.1",
-            "blocking" => true,
-            "headers" => [
-                "Content-Type" => "application/json",
-                "Accept" => "application/json",
-                "x-api-key" => $api_key,
-            ],
-            "body" => wp_json_encode([
-                "woocommerceWebhookSecret" => $secret,
-            ]),
-        ]);
-
-        if (is_wp_error($response)) {
+        if ("ahpc_backend_client_unavailable" === $error_code) {
             return new WP_Error(
                 "ahpc_backend_registration_failed",
-                sprintf(
-                    /* translators: %s: WP_Error message. */
-                    __(
-                        "The backend rejected the secret registration request: %s",
-                        self::TEXT_DOMAIN,
-                    ),
-                    $response->get_error_message(),
+                __(
+                    "The plugin installation is incomplete and cannot contact Aura Historia right now.",
+                    self::TEXT_DOMAIN,
                 ),
             );
         }
 
-        $response_code = (int) wp_remote_retrieve_response_code($response);
+        if ("ahpc_backend_invalid_request" === $error_code) {
+            return new WP_Error(
+                "ahpc_backend_registration_failed",
+                sprintf(
+                    /* translators: %s: error detail. */
+                    __(
+                        "The backend request could not be prepared: %s",
+                        self::TEXT_DOMAIN,
+                    ),
+                    $error_message,
+                ),
+            );
+        }
 
-        if ($response_code < 200 || $response_code >= 300) {
-            $response_message = $this->extract_response_message($response);
+        if ("ahpc_backend_request_failed" === $error_code) {
+            return new WP_Error(
+                "ahpc_backend_registration_failed",
+                sprintf(
+                    /* translators: %s: error detail. */
+                    __(
+                        "The backend rejected the secret registration request: %s",
+                        self::TEXT_DOMAIN,
+                    ),
+                    $error_message,
+                ),
+            );
+        }
+
+        if ($response_code > 0) {
             $message = sprintf(
                 /* translators: %d: HTTP response code. */
                 __(
@@ -547,46 +587,18 @@ class Webhook_Manager
                 ),
                 $response_code,
             );
-
-            if ("" !== $response_message) {
-                $message .= " " . $response_message;
-            }
-
-            return new WP_Error("ahpc_backend_registration_failed", $message);
+        } else {
+            $message = __(
+                "The backend returned an invalid response while storing the WooCommerce webhook secret.",
+                self::TEXT_DOMAIN,
+            );
         }
 
-        return true;
-    }
-
-    /**
-     * Extracts a short error message from a backend HTTP response.
-     *
-     * @param array $response HTTP response.
-     * @return string
-     */
-    private function extract_response_message($response)
-    {
-        $body = trim((string) wp_remote_retrieve_body($response));
-
-        if ("" === $body) {
-            return "";
+        if ("" !== $error_message) {
+            $message .= " " . $error_message;
         }
 
-        $decoded = json_decode($body, true);
-
-        if (is_array($decoded)) {
-            foreach (["message", "error", "detail"] as $key) {
-                if (!empty($decoded[$key]) && is_string($decoded[$key])) {
-                    return sanitize_text_field(
-                        wp_strip_all_tags($decoded[$key]),
-                    );
-                }
-            }
-        }
-
-        return sanitize_text_field(
-            wp_html_excerpt(wp_strip_all_tags($body), 200, "…"),
-        );
+        return new WP_Error("ahpc_backend_registration_failed", $message);
     }
 
     /**
