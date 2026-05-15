@@ -295,13 +295,7 @@ class Plugin
                 );
 
                 if ("" === $api_key) {
-                    if (!empty($current["api_key"])) {
-                        $sanitized[
-                            "api_key"
-                        ] = Webhook_Manager::normalize_api_key(
-                            $current["api_key"],
-                        );
-                    }
+                    $sanitized["api_key"] = "";
                 } elseif (Webhook_Manager::is_valid_api_key($api_key)) {
                     $sanitized["api_key"] = $api_key;
                 } else {
@@ -656,7 +650,7 @@ class Plugin
             Webhook_Manager::OPTION_SETTINGS,
         ); ?>[shop_id]" type="text" class="regular-text" value="<?php echo esc_attr(
     $settings["shop_id"],
-); ?>" placeholder="123e4567-e89b-12d3-a456-426614174000" spellcheck="false" />
+); ?>" spellcheck="false" />
 								<p class="description"><?php echo esc_html__(
             "Paste the Shop ID from Aura Historia for this store. It tells Aura Historia where your WooCommerce products should appear.",
             Webhook_Manager::TEXT_DOMAIN,
@@ -673,20 +667,13 @@ class Plugin
 							<td>
 								<input id="ahpc-api-key" name="<?php echo esc_attr(
             Webhook_Manager::OPTION_SETTINGS,
-        ); ?>[api_key]" type="password" class="regular-text" value="" autocomplete="new-password" spellcheck="false" />
-								<p class="description">
-									<?php echo esc_html__(
-             "Paste the API key from Aura Historia for this store. It lets Aura Historia securely receive product updates from your shop. Leave this blank if you want to keep the key that is already saved.",
-             Webhook_Manager::TEXT_DOMAIN,
-         ); ?>
-									<?php if (!empty($settings["api_key"])): ?>
-										<?php echo " " .
-              esc_html__(
-                  "An API key is already saved.",
-                  Webhook_Manager::TEXT_DOMAIN,
-              ); ?>
-									<?php endif; ?>
-								</p>
+        ); ?>[api_key]" type="text" class="regular-text" value="<?php echo esc_attr(
+    $settings["api_key"],
+); ?>" autocomplete="off" spellcheck="false" />
+								<p class="description"><?php echo esc_html__(
+            "Paste the API key from Aura Historia for this store. It lets Aura Historia securely receive product updates from your shop.",
+            Webhook_Manager::TEXT_DOMAIN,
+        ); ?></p>
 							</td>
 						</tr>
 					</tbody>
