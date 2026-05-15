@@ -96,8 +96,8 @@ Useful WooCommerce screens:
 - `npm run env:destroy` — remove the local environment entirely
 - `npm run wp -- plugin list` — run WP-CLI commands inside the environment
 - `npm run openapi:generate` — regenerate the generated Guzzle backend client from the pinned internal API spec
+- `npm run release:zip` — build a release ZIP that includes the Composer-installed runtime dependencies
 - `npm test` — run the PHP integration tests
-- `git archive --format=zip --output aura-historia-partner-connect.zip --prefix=aura-historia-partner-connect/ HEAD` — creates a source archive; when building a release ZIP, make sure the Composer-installed `vendor/` directory is bundled too
 
 ## OpenAPI client generation
 
@@ -141,6 +141,12 @@ Run the tests with:
 - The plugin only manages future events. It does not backfill an existing catalog.
 
 ## Release notes
+
+Build a release ZIP with:
+
+- `npm run release:zip`
+
+This runs `build-release.sh`, assembles a clean release tree, installs production Composer dependencies inside it, and creates `aura-historia-partner-connect.zip` in the project root.
 
 The repository already includes the basics you need for a WordPress.org-style release:
 

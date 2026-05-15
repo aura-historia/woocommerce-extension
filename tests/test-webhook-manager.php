@@ -5,6 +5,7 @@
  * @package AuraHistoria\PartnerConnect
  */
 
+use AuraHistoria\PartnerConnect\Plugin;
 use AuraHistoria\PartnerConnect\Webhook_Manager;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
@@ -225,6 +226,35 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
                     $url === (string) $transaction["request"]->getUri();
             }),
         );
+    }
+
+    /**
+     * Renders the plugin settings page for assertions.
+     *
+     * @param array<string,string> $query_args Query arguments to inject.
+     * @return string
+     */
+    protected function render_plugin_settings_page($query_args = [])
+    {
+        update_option(
+            Webhook_Manager::OPTION_PLUGIN_VERSION,
+            AHPC_VERSION,
+            false,
+        );
+        update_option(Webhook_Manager::OPTION_NEEDS_SYNC, "no", false);
+
+        $original_get = $_GET;
+        $_GET = $query_args;
+
+        $plugin = new Plugin();
+
+        ob_start();
+        $plugin->render_settings_page();
+        $output = (string) ob_get_clean();
+
+        $_GET = $original_get;
+
+        return $output;
     }
 
     /**
@@ -605,5 +635,77 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             $webhook = new WC_Webhook($webhook_id);
             $this->assertSame("paused", $webhook->get_status());
         }
+    }
+
+    /**
+     * It shows the live Aura Historia connection status and uses an empty JSON
+     * object for the lightweight health check.
+     *
+     * @return void
+     */
+    public function test_render_settings_page_shows_connected_status()
+    {
+        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+        $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+
+        update_option(
+            Webhook_Manager::OPTION_SETTINGS,
+            [
+                "shop_id" => $shop_id,
+                "api_key" => $api_key,
+                "secret" => "test-secret",
+            ],
+            false,
+        );
+
+        $this->set_backend_mock_responses([
+            $this->mock_backend_registration_response(),
+        ]);
+
+        $output = $this->render_plugin_settings_page();
+        $requests = $this->get_backend_requests_for_url(
+            "https://example.com/api/v1/shops/" . $shop_id,
+        );
+
+        $this->assertStringContainsString("Connection status", $output);
+        $this->assertStringContainsString("Connected", $output);
+        $this->assertStringContainsString(
+            "saved Shop ID and API key are still valid",
+            $output,
+        );
+        $this->assertCount(1, $requests);
+        $this->assertSame("{}", (string) $requests[0]["request"]->getBody());
+    }
+
+    /**
+     * It shows a dedicated success notice after a verified settings save.
+     *
+     * @return void
+     */
+    public function test_render_settings_page_shows_verified_save_success_notice()
+    {
+        update_option(
+            Webhook_Manager::OPTION_SETTINGS,
+            [
+                "shop_id" => "123e4567-e89b-12d3-a456-426614174000",
+                "api_key" =>
+                    "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
+                "secret" => "test-secret",
+            ],
+            false,
+        );
+
+        $this->set_backend_mock_responses([
+            $this->mock_backend_registration_response(),
+        ]);
+
+        $output = $this->render_plugin_settings_page([
+            "settings-updated" => "true",
+        ]);
+
+        $this->assertStringContainsString(
+            "Configuration saved and Aura Historia connection verified.",
+            $output,
+        );
     }
 }

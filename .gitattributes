@@ -3,6 +3,7 @@
 /.wp-env.json export-ignore
 /.github export-ignore
 /README.md export-ignore
+/build-release.sh export-ignore
 /composer.json export-ignore
 /composer.lock export-ignore
 /package-lock.json export-ignore

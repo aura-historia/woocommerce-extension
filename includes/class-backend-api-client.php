@@ -126,6 +126,18 @@ class Backend_Api_Client
     }
 
     /**
+     * Performs a lightweight connection check with an empty JSON object body.
+     *
+     * @param string $shop_id Shop UUID.
+     * @param string $api_key Backend API key.
+     * @return GetShopData|WP_Error
+     */
+    public function verify_shop_connection($shop_id, $api_key)
+    {
+        return $this->patch_shop_by_id($shop_id, $api_key, new PatchShopData());
+    }
+
+    /**
      * Returns whether the generated client runtime dependencies are available.
      *
      * @return bool

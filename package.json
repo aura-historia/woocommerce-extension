@@ -11,6 +11,7 @@
     "wp": "wp-env run cli wp",
     "composer:install": "node scripts/run-composer.js install --no-interaction --prefer-dist",
     "openapi:generate": "node scripts/generate-openapi-client.mjs",
+    "release:zip": "sh ./build-release.sh",
     "phpunit": "node scripts/run-phpunit.js",
     "test": "npm run composer:install && npm run phpunit"
   },
