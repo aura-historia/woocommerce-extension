@@ -49,14 +49,11 @@ Important notes:
 
 1. Install and activate WooCommerce.
 2. Upload this plugin to `/wp-content/plugins/` or install it through the WordPress plugin screen.
-3. To point the plugin at the production backend, add the following line to `wp-config.php` (or set the `AHPC_BACKEND_BASE_URL` PHP environment variable in your server environment):
-   `define( 'AHPC_BACKEND_BASE_URL', 'https://api.aura-historia.com' );`
-   The plugin defaults to the development/staging URL when neither override is present.
-4. Activate the plugin.
-5. Go to `WooCommerce > Aura Historia`.
-6. Enter the Shop ID from Aura Historia for this store.
-7. Enter the Aura Historia API key for that store.
-8. Save the settings. Delivery starts automatically once both values are valid.
+3. Activate the plugin.
+4. Go to `WooCommerce > Aura Historia`.
+5. Enter the Shop ID from Aura Historia for this store.
+6. Enter the Aura Historia API key for that store.
+7. Save the settings. Delivery starts automatically once both values are valid.
 
 == Frequently Asked Questions ==
 
