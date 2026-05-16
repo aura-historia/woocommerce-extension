@@ -448,8 +448,10 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         $body = json_decode((string) $requests[0]["request"]->getBody(), true);
 
         $this->assertIsArray($body);
-        $this->assertArrayHasKey("products", $body);
-        $this->assertNotEmpty($body["products"]);
+        $this->assertArrayNotHasKey("products", $body);
+        $this->assertNotEmpty($body);
+        $this->assertIsArray($body[0]);
+        $this->assertArrayHasKey("id", $body[0]);
 
         // Clean up.
         $product_a->delete(true);
@@ -499,8 +501,10 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         $body = json_decode((string) $requests[0]["request"]->getBody(), true);
 
         $this->assertIsArray($body);
-        $this->assertArrayHasKey("products", $body);
-        $this->assertNotEmpty($body["products"]);
+        $this->assertArrayNotHasKey("products", $body);
+        $this->assertNotEmpty($body);
+        $this->assertIsArray($body[0]);
+        $this->assertArrayHasKey("id", $body[0]);
 
         $product->delete(true);
     }

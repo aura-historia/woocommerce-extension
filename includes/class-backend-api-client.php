@@ -177,12 +177,10 @@ class Backend_Api_Client
             );
         }
 
-        $request_body = ["products" => $products];
-
         try {
             $this->create_shops_api($api_key)->upsertShopProducts(
                 $shop_id,
-                $request_body,
+                $products,
             );
         } catch (ApiException $exception) {
             return $this->translate_api_exception($exception);
