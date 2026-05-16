@@ -237,44 +237,45 @@ class Product_Backfill
     /**
      * Builds the WooCommerce REST API v3 representation of a single product.
      *
-     * Uses {@see \WC_REST_Products_Controller} directly so that the backfill
-     * payload matches the WC REST API v3 format without going through webhook
-     * machinery.
+     * Dispatches a GET request through the WP REST server to
+     * `/wc/v3/products/{id}` so that routes are properly initialised and the
+     * returned data matches what live WooCommerce REST API calls return.  This
+     * approach does not involve any webhook machinery.
      *
      * @param int $product_id WooCommerce product ID.
      * @return array<string,mixed>|null Serialised product data, or null on failure.
      */
     private function build_product_payload($product_id)
     {
+        if (!function_exists("wc_get_product") || $product_id <= 0) {
+            return null;
+        }
+
+        if (!wc_get_product($product_id)) {
+            return null;
+        }
+
+        $server = rest_get_server();
+        $request = new \WP_REST_Request(
+            "GET",
+            "/wc/v3/products/{$product_id}",
+        );
+        $request->set_query_params(["context" => "view"]);
+
+        try {
+            $response = $server->dispatch($request);
+        } catch (\Throwable $e) {
+            return null;
+        }
+
         if (
-            !function_exists("wc_get_product") ||
-            !class_exists("WC_REST_Products_Controller") ||
-            $product_id <= 0
+            !$response instanceof \WP_REST_Response ||
+            $response->is_error()
         ) {
             return null;
         }
 
-        $product = wc_get_product($product_id);
-
-        if (!$product) {
-            return null;
-        }
-
-        $controller = new \WC_REST_Products_Controller();
-        $request = new \WP_REST_Request("GET");
-        $request->set_param("context", "view");
-
-        try {
-            $response = $controller->prepare_item_for_response($product, $request);
-        } catch (\Exception $e) {
-            return null;
-        }
-
-        if (!$response instanceof \WP_REST_Response) {
-            return null;
-        }
-
-        $data = $response->get_data();
+        $data = $server->response_to_data($response, false);
 
         return is_array($data) && !empty($data) ? $data : null;
     }
