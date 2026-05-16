@@ -65,7 +65,9 @@ class GetShopData implements ModelInterface, ArrayAccess, \JsonSerializable
         'domains' => 'string[]',
         'shopify_domain' => 'string',
         'shopify_currency' => '\AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData',
+        'shopify_language' => '\AuraHistoria\PartnerConnect\InternalApi\Model\LanguageData',
         'woocommerce_currency' => '\AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData',
+        'woocommerce_language' => '\AuraHistoria\PartnerConnect\InternalApi\Model\LanguageData',
         'url' => 'string',
         'image' => 'string',
         'structured_address' => '\AuraHistoria\PartnerConnect\InternalApi\Model\StructuredAddressData',
@@ -92,7 +94,9 @@ class GetShopData implements ModelInterface, ArrayAccess, \JsonSerializable
         'domains' => null,
         'shopify_domain' => null,
         'shopify_currency' => null,
+        'shopify_language' => null,
         'woocommerce_currency' => null,
+        'woocommerce_language' => null,
         'url' => 'uri',
         'image' => 'uri',
         'structured_address' => null,
@@ -117,7 +121,9 @@ class GetShopData implements ModelInterface, ArrayAccess, \JsonSerializable
         'domains' => false,
         'shopify_domain' => true,
         'shopify_currency' => true,
+        'shopify_language' => true,
         'woocommerce_currency' => true,
+        'woocommerce_language' => true,
         'url' => true,
         'image' => true,
         'structured_address' => false,
@@ -222,7 +228,9 @@ class GetShopData implements ModelInterface, ArrayAccess, \JsonSerializable
         'domains' => 'domains',
         'shopify_domain' => 'shopifyDomain',
         'shopify_currency' => 'shopifyCurrency',
+        'shopify_language' => 'shopifyLanguage',
         'woocommerce_currency' => 'woocommerceCurrency',
+        'woocommerce_language' => 'woocommerceLanguage',
         'url' => 'url',
         'image' => 'image',
         'structured_address' => 'structuredAddress',
@@ -247,7 +255,9 @@ class GetShopData implements ModelInterface, ArrayAccess, \JsonSerializable
         'domains' => 'setDomains',
         'shopify_domain' => 'setShopifyDomain',
         'shopify_currency' => 'setShopifyCurrency',
+        'shopify_language' => 'setShopifyLanguage',
         'woocommerce_currency' => 'setWoocommerceCurrency',
+        'woocommerce_language' => 'setWoocommerceLanguage',
         'url' => 'setUrl',
         'image' => 'setImage',
         'structured_address' => 'setStructuredAddress',
@@ -272,7 +282,9 @@ class GetShopData implements ModelInterface, ArrayAccess, \JsonSerializable
         'domains' => 'getDomains',
         'shopify_domain' => 'getShopifyDomain',
         'shopify_currency' => 'getShopifyCurrency',
+        'shopify_language' => 'getShopifyLanguage',
         'woocommerce_currency' => 'getWoocommerceCurrency',
+        'woocommerce_language' => 'getWoocommerceLanguage',
         'url' => 'getUrl',
         'image' => 'getImage',
         'structured_address' => 'getStructuredAddress',
@@ -348,7 +360,9 @@ class GetShopData implements ModelInterface, ArrayAccess, \JsonSerializable
         $this->setIfExists('domains', $data ?? [], null);
         $this->setIfExists('shopify_domain', $data ?? [], null);
         $this->setIfExists('shopify_currency', $data ?? [], null);
+        $this->setIfExists('shopify_language', $data ?? [], null);
         $this->setIfExists('woocommerce_currency', $data ?? [], null);
+        $this->setIfExists('woocommerce_language', $data ?? [], null);
         $this->setIfExists('url', $data ?? [], null);
         $this->setIfExists('image', $data ?? [], null);
         $this->setIfExists('structured_address', $data ?? [], null);
@@ -662,6 +676,40 @@ class GetShopData implements ModelInterface, ArrayAccess, \JsonSerializable
     }
 
     /**
+     * Gets shopify_language
+     *
+     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\LanguageData|null
+     */
+    public function getShopifyLanguage()
+    {
+        return $this->container['shopify_language'];
+    }
+
+    /**
+     * Sets shopify_language
+     *
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\LanguageData|null $shopify_language Optional Shopify default language configured for the shop. Relevant for shops using Shopify partner-shop ingestion. When present, Shopify product lifecycle events for this shop are ingested using this language. When absent, Shopify product lifecycle events for this shop currently fail instead of inferring or defaulting a language.
+     *
+     * @return self
+     */
+    public function setShopifyLanguage($shopify_language)
+    {
+        if (is_null($shopify_language)) {
+            array_push($this->openAPINullablesSetToNull, 'shopify_language');
+        } else {
+            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
+            $index = array_search('shopify_language', $nullablesSetToNull);
+            if ($index !== FALSE) {
+                unset($nullablesSetToNull[$index]);
+                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
+            }
+        }
+        $this->container['shopify_language'] = $shopify_language;
+
+        return $this;
+    }
+
+    /**
      * Gets woocommerce_currency
      *
      * @return \AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData|null
@@ -691,6 +739,40 @@ class GetShopData implements ModelInterface, ArrayAccess, \JsonSerializable
             }
         }
         $this->container['woocommerce_currency'] = $woocommerce_currency;
+
+        return $this;
+    }
+
+    /**
+     * Gets woocommerce_language
+     *
+     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\LanguageData|null
+     */
+    public function getWoocommerceLanguage()
+    {
+        return $this->container['woocommerce_language'];
+    }
+
+    /**
+     * Sets woocommerce_language
+     *
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\LanguageData|null $woocommerce_language Optional WooCommerce default language configured for the shop. Relevant for shops using `POST /api/v1/webhooks/woocommerce/{shopId}`. When present, WooCommerce webhook-ingested products for this shop are ingested using this language. When absent, WooCommerce webhook requests for this shop currently fail instead of inferring or defaulting a language.
+     *
+     * @return self
+     */
+    public function setWoocommerceLanguage($woocommerce_language)
+    {
+        if (is_null($woocommerce_language)) {
+            array_push($this->openAPINullablesSetToNull, 'woocommerce_language');
+        } else {
+            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
+            $index = array_search('woocommerce_language', $nullablesSetToNull);
+            if ($index !== FALSE) {
+                unset($nullablesSetToNull[$index]);
+                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
+            }
+        }
+        $this->container['woocommerce_language'] = $woocommerce_language;
 
         return $this;
     }

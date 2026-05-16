@@ -49,6 +49,7 @@ if (file_exists($ahpc_autoload)) {
 require_once AHPC_PLUGIN_DIR . "includes/class-internal-api-autoloader.php";
 \AuraHistoria\PartnerConnect\Internal_Api_Autoloader::register();
 require_once AHPC_PLUGIN_DIR . "includes/class-backend-api-client.php";
+require_once AHPC_PLUGIN_DIR . "includes/class-store-locale.php";
 require_once AHPC_PLUGIN_DIR . "includes/class-webhook-manager.php";
 require_once AHPC_PLUGIN_DIR . "includes/class-product-backfill.php";
 require_once AHPC_PLUGIN_DIR . "includes/class-plugin.php";

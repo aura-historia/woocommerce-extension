@@ -363,6 +363,10 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             '"woocommerceWebhookSecret":"test-secret"',
             (string) $registration_requests[0]["request"]->getBody(),
         );
+        $this->assertStringContainsString(
+            '"woocommerceLanguage":"en"',
+            (string) $registration_requests[0]["request"]->getBody(),
+        );
 
         $delivery_requests = array_values(
             array_filter($this->http_requests, static function ($request) use (
@@ -996,6 +1000,159 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $this->assertStringContainsString(
             "Configuration saved and Aura Historia connection verified.",
             $output,
+        );
+    }
+
+    /**
+     * It includes the store currency in the PATCH registration payload.
+     *
+     * @return void
+     */
+    public function test_patch_registration_includes_supported_currency()
+    {
+        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+        $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+
+        update_option("woocommerce_currency", "EUR", false);
+        update_option(
+            Webhook_Manager::OPTION_SETTINGS,
+            [
+                "shop_id" => $shop_id,
+                "api_key" => $api_key,
+                "secret" => "test-secret",
+            ],
+            false,
+        );
+
+        $manager = new Webhook_Manager();
+        $manager->sync_webhooks();
+
+        $registration_requests = $this->get_backend_requests_for_url(
+            "https://example.com/api/v1/shops/" . $shop_id,
+        );
+
+        $this->assertCount(1, $registration_requests);
+        $this->assertStringContainsString(
+            '"woocommerceCurrency":"EUR"',
+            (string) $registration_requests[0]["request"]->getBody(),
+        );
+    }
+
+    /**
+     * It omits the currency from the PATCH payload when the store currency is
+     * not supported by the backend.
+     *
+     * @return void
+     */
+    public function test_patch_registration_omits_unsupported_currency()
+    {
+        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+        $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+
+        update_option("woocommerce_currency", "XYZ", false);
+        update_option(
+            Webhook_Manager::OPTION_SETTINGS,
+            [
+                "shop_id" => $shop_id,
+                "api_key" => $api_key,
+                "secret" => "test-secret",
+            ],
+            false,
+        );
+
+        $manager = new Webhook_Manager();
+        $manager->sync_webhooks();
+
+        $registration_requests = $this->get_backend_requests_for_url(
+            "https://example.com/api/v1/shops/" . $shop_id,
+        );
+
+        $this->assertCount(1, $registration_requests);
+        $this->assertStringNotContainsString(
+            "woocommerceCurrency",
+            (string) $registration_requests[0]["request"]->getBody(),
+        );
+    }
+
+    /**
+     * It includes the store language in the PATCH registration payload derived
+     * from the WordPress locale.
+     *
+     * @return void
+     */
+    public function test_patch_registration_includes_locale_derived_language()
+    {
+        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+        $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+
+        add_filter("locale", static function () {
+            return "de_DE";
+        });
+
+        update_option(
+            Webhook_Manager::OPTION_SETTINGS,
+            [
+                "shop_id" => $shop_id,
+                "api_key" => $api_key,
+                "secret" => "test-secret",
+            ],
+            false,
+        );
+
+        $manager = new Webhook_Manager();
+        $manager->sync_webhooks();
+
+        remove_all_filters("locale");
+
+        $registration_requests = $this->get_backend_requests_for_url(
+            "https://example.com/api/v1/shops/" . $shop_id,
+        );
+
+        $this->assertCount(1, $registration_requests);
+        $this->assertStringContainsString(
+            '"woocommerceLanguage":"de"',
+            (string) $registration_requests[0]["request"]->getBody(),
+        );
+    }
+
+    /**
+     * It falls back to "en" when the WordPress locale does not map to a
+     * supported backend language.
+     *
+     * @return void
+     */
+    public function test_patch_registration_uses_en_fallback_for_unsupported_locale()
+    {
+        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+        $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+
+        add_filter("locale", static function () {
+            return "xx_XX";
+        });
+
+        update_option(
+            Webhook_Manager::OPTION_SETTINGS,
+            [
+                "shop_id" => $shop_id,
+                "api_key" => $api_key,
+                "secret" => "test-secret",
+            ],
+            false,
+        );
+
+        $manager = new Webhook_Manager();
+        $manager->sync_webhooks();
+
+        remove_all_filters("locale");
+
+        $registration_requests = $this->get_backend_requests_for_url(
+            "https://example.com/api/v1/shops/" . $shop_id,
+        );
+
+        $this->assertCount(1, $registration_requests);
+        $this->assertStringContainsString(
+            '"woocommerceLanguage":"en"',
+            (string) $registration_requests[0]["request"]->getBody(),
         );
     }
 }

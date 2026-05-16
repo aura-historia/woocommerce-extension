@@ -458,7 +458,7 @@ class Product_Backfill
             "images" => $this->get_product_image_urls($product),
         ];
 
-        $language = $this->get_content_language();
+        $language = Store_Locale::get_language();
         $title = $this->normalize_text_value(
             method_exists($product, "get_name") ? $product->get_name() : "",
         );
@@ -535,36 +535,9 @@ class Product_Backfill
             return null;
         }
 
-        $currency = function_exists("get_woocommerce_currency")
-            ? strtoupper((string) get_woocommerce_currency())
-            : "";
+        $currency = Store_Locale::get_currency();
 
-        if (
-            !in_array(
-                $currency,
-                [
-                    "EUR",
-                    "GBP",
-                    "USD",
-                    "AUD",
-                    "CAD",
-                    "NZD",
-                    "CNY",
-                    "BRL",
-                    "PLN",
-                    "TRY",
-                    "JPY",
-                    "CZK",
-                    "RUB",
-                    "AED",
-                    "SAR",
-                    "HKD",
-                    "SGD",
-                    "CHF",
-                ],
-                true,
-            )
-        ) {
+        if (null === $currency) {
             return null;
         }
 
@@ -706,46 +679,6 @@ class Product_Backfill
         $url = esc_url_raw(trim((string) $value), ["http", "https"]);
 
         return is_string($url) ? $url : "";
-    }
-
-    /**
-     * Returns the canonical Aura Historia language code for the current store.
-     *
-     * @return string
-     */
-    private function get_content_language()
-    {
-        $locale = strtolower(str_replace("-", "_", (string) get_locale()));
-        $language = preg_replace("/[^a-z_]/", "", $locale);
-        $language = is_string($language) ? strtok($language, "_") : false;
-
-        if (
-            is_string($language) &&
-            in_array(
-                $language,
-                [
-                    "de",
-                    "en",
-                    "fr",
-                    "es",
-                    "it",
-                    "zh",
-                    "pt",
-                    "pl",
-                    "tr",
-                    "nl",
-                    "cs",
-                    "ja",
-                    "ru",
-                    "ar",
-                ],
-                true,
-            )
-        ) {
-            return $language;
-        }
-
-        return "en";
     }
 
     /**
