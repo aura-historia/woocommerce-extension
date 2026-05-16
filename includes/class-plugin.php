@@ -145,6 +145,10 @@ class Plugin
                 $this,
                 "handle_sync_request",
             ]);
+            add_action("admin_post_ahpc_queue_backfill", [
+                $this,
+                "handle_backfill_request",
+            ]);
             add_action("admin_notices", [
                 $this,
                 "maybe_show_dependency_notice",
@@ -174,6 +178,17 @@ class Plugin
 
         if (defined("AHPC_FORCE_SYNC_DELIVERY") && AHPC_FORCE_SYNC_DELIVERY) {
             add_filter("woocommerce_webhook_deliver_async", "__return_false");
+        }
+
+        if (class_exists(Product_Backfill::class)) {
+            add_action(
+                Product_Backfill::ACTION_HOOK,
+                static function ($shop_id, $page) {
+                    (new Product_Backfill())->process_batch($shop_id, $page);
+                },
+                10,
+                2,
+            );
         }
 
         add_action(
@@ -453,6 +468,130 @@ class Plugin
     }
 
     /**
+     * Handles the manual backfill action.
+     *
+     * @return void
+     */
+    public function handle_backfill_request()
+    {
+        if (!current_user_can("manage_woocommerce")) {
+            wp_die(
+                esc_html__(
+                    "You are not allowed to queue a product backfill.",
+                    Webhook_Manager::TEXT_DOMAIN,
+                ),
+                403,
+            );
+        }
+
+        check_admin_referer("ahpc_queue_backfill");
+
+        $redirect_url = $this->get_settings_page_url();
+        $result = $this->queue_manual_backfill();
+
+        if (!is_wp_error($result)) {
+            $redirect_url = add_query_arg(
+                "ahpc_backfill",
+                "queued",
+                $redirect_url,
+            );
+        } else {
+            $status = "failed";
+
+            switch ($result->get_error_code()) {
+                case "ahpc_backfill_unavailable":
+                    $status = "unavailable";
+                    break;
+                case "ahpc_backfill_invalid_settings":
+                    $status = "invalid";
+                    break;
+            }
+
+            $redirect_url = add_query_arg(
+                "ahpc_backfill",
+                $status,
+                $redirect_url,
+            );
+        }
+
+        wp_safe_redirect($redirect_url);
+        exit();
+    }
+
+    /**
+     * Queues a fresh full product backfill using the currently saved settings.
+     *
+     * @return true|WP_Error
+     */
+    public function queue_manual_backfill()
+    {
+        if (!$this->is_woocommerce_available()) {
+            return new WP_Error(
+                "ahpc_backfill_unavailable",
+                __(
+                    "WooCommerce is not active, so the product backfill cannot be queued yet.",
+                    Webhook_Manager::TEXT_DOMAIN,
+                ),
+            );
+        }
+
+        if (!class_exists(Product_Backfill::class)) {
+            return new WP_Error(
+                "ahpc_backfill_unavailable",
+                __(
+                    "The product backfill component is not available right now.",
+                    Webhook_Manager::TEXT_DOMAIN,
+                ),
+            );
+        }
+
+        $this->bootstrap_woocommerce();
+
+        $settings = $this->get_current_settings();
+
+        if (
+            !Webhook_Manager::is_valid_shop_id($settings["shop_id"]) ||
+            !Webhook_Manager::is_valid_api_key($settings["api_key"])
+        ) {
+            return new WP_Error(
+                "ahpc_backfill_invalid_settings",
+                __(
+                    "Save a valid Shop ID and API key before queueing a full product backfill.",
+                    Webhook_Manager::TEXT_DOMAIN,
+                ),
+            );
+        }
+
+        if (!$this->manager instanceof Webhook_Manager) {
+            return new WP_Error(
+                "ahpc_backfill_unavailable",
+                __(
+                    "The webhook manager could not be initialized.",
+                    Webhook_Manager::TEXT_DOMAIN,
+                ),
+            );
+        }
+
+        $sync_result = $this->manager->sync_webhooks();
+
+        if (is_wp_error($sync_result)) {
+            return $sync_result;
+        }
+
+        if (!(new Product_Backfill())->schedule_backfill($settings["shop_id"])) {
+            return new WP_Error(
+                "ahpc_backfill_failed",
+                __(
+                    "The product backfill could not be queued. Check the backfill status below and the WooCommerce Action Scheduler screen for more detail.",
+                    Webhook_Manager::TEXT_DOMAIN,
+                ),
+            );
+        }
+
+        return true;
+    }
+
+    /**
      * Marks the plugin webhooks as out of sync after a manual edit or deletion.
      *
      * @param int             $webhook_id Webhook ID.
@@ -563,6 +702,9 @@ class Plugin
         $sync_success =
             isset($_GET["ahpc_synced"]) &&
             "1" === wp_unslash($_GET["ahpc_synced"]);
+        $backfill_request_status = isset($_GET["ahpc_backfill"])
+            ? sanitize_key(wp_unslash($_GET["ahpc_backfill"]))
+            : "";
         $settings_updated =
             isset($_GET["settings-updated"]) &&
             "true" === wp_unslash($_GET["settings-updated"]);
@@ -573,6 +715,7 @@ class Plugin
         $has_shop_id = "" !== $settings["shop_id"];
         $has_api_key = "" !== $settings["api_key"];
         $connection_status = $this->get_connection_status($settings);
+        $backfill_status = $this->get_backfill_status($settings);
         $hide_default_updated_notice =
             $settings_updated &&
             empty($sync_error) &&
@@ -602,6 +745,40 @@ class Plugin
         "success",
         esc_html__(
             "Managed WooCommerce webhooks synced successfully.",
+            Webhook_Manager::TEXT_DOMAIN,
+        ),
+    ); ?>
+			<?php endif; ?>
+
+			<?php if ("queued" === $backfill_request_status): ?>
+				<?php $this->render_inline_notice(
+        "success",
+        esc_html__(
+            "A fresh product backfill was queued. Existing products will be re-sent in the background.",
+            Webhook_Manager::TEXT_DOMAIN,
+        ),
+    ); ?>
+			<?php elseif ("invalid" === $backfill_request_status): ?>
+				<?php $this->render_inline_notice(
+        "warning",
+        esc_html__(
+            "Save a valid Shop ID and API key before queueing a full product backfill.",
+            Webhook_Manager::TEXT_DOMAIN,
+        ),
+    ); ?>
+			<?php elseif ("unavailable" === $backfill_request_status): ?>
+				<?php $this->render_inline_notice(
+        "error",
+        esc_html__(
+            "The product backfill could not be queued because WooCommerce or Action Scheduler is not available yet.",
+            Webhook_Manager::TEXT_DOMAIN,
+        ),
+    ); ?>
+			<?php elseif ("failed" === $backfill_request_status): ?>
+				<?php $this->render_inline_notice(
+        "error",
+        esc_html__(
+            "The product backfill could not be queued. Check the backfill status below for more detail.",
             Webhook_Manager::TEXT_DOMAIN,
         ),
     ); ?>
@@ -734,12 +911,52 @@ class Plugin
         ); ?></p>
 							</td>
 						</tr>
+						<tr>
+							<th scope="row"><?php echo esc_html__(
+           "Product backfill",
+           Webhook_Manager::TEXT_DOMAIN,
+       ); ?></th>
+							<td>
+								<strong><?php echo esc_html($backfill_status["label"]); ?></strong>
+								<p class="description"><?php echo esc_html($backfill_status["message"]); ?></p>
+							</td>
+						</tr>
 					</tbody>
 				</table>
 				<?php submit_button(
         esc_html__("Save changes", Webhook_Manager::TEXT_DOMAIN),
     ); ?>
 			</form>
+
+			<h2><?php echo esc_html__(
+       "Existing product backfill",
+       Webhook_Manager::TEXT_DOMAIN,
+   ); ?></h2>
+			<p><?php echo esc_html__(
+       "Use this if the initial product backfill did not start, was interrupted, or you want to re-send the entire current catalog. It queues a fresh background backfill for the saved Shop ID and replaces any pending backfill batches.",
+       Webhook_Manager::TEXT_DOMAIN,
+   ); ?></p>
+			<?php if ($this->is_woocommerce_available()): ?>
+				<form method="post" action="<?php echo esc_url(
+        admin_url("admin-post.php"),
+    ); ?>">
+					<input type="hidden" name="action" value="ahpc_queue_backfill" />
+					<?php wp_nonce_field("ahpc_queue_backfill"); ?>
+					<?php submit_button(
+         esc_html__(
+             "Re-send all existing products",
+             Webhook_Manager::TEXT_DOMAIN,
+         ),
+         "secondary",
+         "submit",
+         false,
+     ); ?>
+				</form>
+				<p class="description"><?php echo esc_html__(
+        "The backfill runs in the background via Action Scheduler. On large catalogs it may take some time, and queueing it again restarts the pending backfill from the beginning.",
+        Webhook_Manager::TEXT_DOMAIN,
+    ); ?></p>
+			<?php endif; ?>
 
 			<h2><?php echo esc_html__(
        "Managed webhooks",
@@ -931,6 +1148,312 @@ class Plugin
                 Webhook_Manager::TEXT_DOMAIN,
             ),
         ];
+    }
+
+    /**
+     * Returns the current product backfill status for the settings page.
+     *
+     * @param array<string,mixed> $settings Current plugin settings.
+     * @return array<string,string>
+     */
+    private function get_backfill_status($settings)
+    {
+        if (!class_exists(Product_Backfill::class)) {
+            return [
+                "label" => __("Unavailable", Webhook_Manager::TEXT_DOMAIN),
+                "message" => __(
+                    "The product backfill component is not loaded right now.",
+                    Webhook_Manager::TEXT_DOMAIN,
+                ),
+            ];
+        }
+
+        if (!function_exists("as_schedule_single_action")) {
+            return [
+                "label" => __("Unavailable", Webhook_Manager::TEXT_DOMAIN),
+                "message" => sprintf(
+                    /* translators: %s: Action Scheduler hook name. */
+                    __(
+                        'Action Scheduler is not available, so the product backfill action "%s" cannot be queued.',
+                        Webhook_Manager::TEXT_DOMAIN,
+                    ),
+                    Product_Backfill::ACTION_HOOK,
+                ),
+            ];
+        }
+
+        $details = (new Product_Backfill())->get_status_details();
+        $hook = isset($details["hook"])
+            ? (string) $details["hook"]
+            : Product_Backfill::ACTION_HOOK;
+        $status = isset($details["status"])
+            ? (string) $details["status"]
+            : Product_Backfill::STATUS_NOT_SCHEDULED;
+        $next_scheduled_at = isset($details["next_scheduled_at"])
+            ? absint($details["next_scheduled_at"])
+            : 0;
+        $scheduled_at = $next_scheduled_at
+            ? $this->format_admin_timestamp($next_scheduled_at)
+            : $this->format_admin_datetime(
+                isset($details["scheduled_at"])
+                    ? (string) $details["scheduled_at"]
+                    : "",
+            );
+        $started_at = $this->format_admin_datetime(
+            isset($details["started_at"])
+                ? (string) $details["started_at"]
+                : "",
+        );
+        $completed_at = $this->format_admin_datetime(
+            isset($details["completed_at"])
+                ? (string) $details["completed_at"]
+                : "",
+        );
+        $failed_at = $this->format_admin_datetime(
+            isset($details["failed_at"]) ? (string) $details["failed_at"] : "",
+        );
+        $last_error = isset($details["last_error"])
+            ? (string) $details["last_error"]
+            : "";
+
+        if (Product_Backfill::STATUS_SCHEDULED === $status) {
+            $message = $scheduled_at
+                ? sprintf(
+                    /* translators: 1: Action Scheduler hook name, 2: formatted time. */
+                    __(
+                        'Action Scheduler hook "%1$s" is queued to run at %2$s.',
+                        Webhook_Manager::TEXT_DOMAIN,
+                    ),
+                    $hook,
+                    $scheduled_at,
+                )
+                : sprintf(
+                    /* translators: %s: Action Scheduler hook name. */
+                    __(
+                        'Action Scheduler hook "%s" is queued and waiting for Action Scheduler to finish initializing.',
+                        Webhook_Manager::TEXT_DOMAIN,
+                    ),
+                    $hook,
+                );
+
+            if ($completed_at) {
+                $message .=
+                    " " .
+                    sprintf(
+                        /* translators: %s: formatted time. */
+                        __(
+                            "Last successful backfill: %s.",
+                            Webhook_Manager::TEXT_DOMAIN,
+                        ),
+                        $completed_at,
+                    );
+            }
+
+            return [
+                "label" => __("Queued", Webhook_Manager::TEXT_DOMAIN),
+                "message" => $message,
+            ];
+        }
+
+        if (Product_Backfill::STATUS_RUNNING === $status) {
+            $message = $started_at
+                ? sprintf(
+                    /* translators: 1: Action Scheduler hook name, 2: formatted time. */
+                    __(
+                        'Action Scheduler hook "%1$s" started processing at %2$s.',
+                        Webhook_Manager::TEXT_DOMAIN,
+                    ),
+                    $hook,
+                    $started_at,
+                )
+                : sprintf(
+                    /* translators: %s: Action Scheduler hook name. */
+                    __(
+                        'Action Scheduler hook "%s" is currently processing existing products.',
+                        Webhook_Manager::TEXT_DOMAIN,
+                    ),
+                    $hook,
+                );
+
+            if ($completed_at) {
+                $message .=
+                    " " .
+                    sprintf(
+                        /* translators: %s: formatted time. */
+                        __(
+                            "Last successful backfill: %s.",
+                            Webhook_Manager::TEXT_DOMAIN,
+                        ),
+                        $completed_at,
+                    );
+            }
+
+            return [
+                "label" => __("Running", Webhook_Manager::TEXT_DOMAIN),
+                "message" => $message,
+            ];
+        }
+
+        if (Product_Backfill::STATUS_COMPLETE === $status) {
+            return [
+                "label" => __("Completed", Webhook_Manager::TEXT_DOMAIN),
+                "message" => $completed_at
+                    ? sprintf(
+                        /* translators: 1: formatted time, 2: Action Scheduler hook name. */
+                        __(
+                            'The most recent product backfill completed successfully at %1$s using Action Scheduler hook "%2$s".',
+                            Webhook_Manager::TEXT_DOMAIN,
+                        ),
+                        $completed_at,
+                        $hook,
+                    )
+                    : sprintf(
+                        /* translators: %s: Action Scheduler hook name. */
+                        __(
+                            'The most recent product backfill completed successfully using Action Scheduler hook "%s".',
+                            Webhook_Manager::TEXT_DOMAIN,
+                        ),
+                        $hook,
+                    ),
+            ];
+        }
+
+        if (Product_Backfill::STATUS_FAILED === $status) {
+            if ($failed_at && $last_error) {
+                $message = sprintf(
+                    /* translators: 1: formatted time, 2: error detail. */
+                    __(
+                        'The most recent product backfill batch failed at %1$s: %2$s',
+                        Webhook_Manager::TEXT_DOMAIN,
+                    ),
+                    $failed_at,
+                    $last_error,
+                );
+            } elseif ($last_error) {
+                $message = sprintf(
+                    /* translators: %s: error detail. */
+                    __(
+                        "The most recent product backfill batch failed: %s",
+                        Webhook_Manager::TEXT_DOMAIN,
+                    ),
+                    $last_error,
+                );
+            } else {
+                $message = __(
+                    "The most recent product backfill batch failed.",
+                    Webhook_Manager::TEXT_DOMAIN,
+                );
+            }
+
+            $message .=
+                " " .
+                sprintf(
+                    /* translators: %s: Action Scheduler hook name. */
+                    __(
+                        'Action Scheduler hook "%s" will retry the batch if another attempt is allowed.',
+                        Webhook_Manager::TEXT_DOMAIN,
+                    ),
+                    $hook,
+                );
+
+            if ($completed_at) {
+                $message .=
+                    " " .
+                    sprintf(
+                        /* translators: %s: formatted time. */
+                        __(
+                            "Last successful backfill: %s.",
+                            Webhook_Manager::TEXT_DOMAIN,
+                        ),
+                        $completed_at,
+                    );
+            }
+
+            return [
+                "label" => __("Failed", Webhook_Manager::TEXT_DOMAIN),
+                "message" => $message,
+            ];
+        }
+
+        if (
+            !Webhook_Manager::is_valid_shop_id($settings["shop_id"]) ||
+            !Webhook_Manager::is_valid_api_key($settings["api_key"])
+        ) {
+            return [
+                "label" => __("Not queued", Webhook_Manager::TEXT_DOMAIN),
+                "message" => sprintf(
+                    /* translators: %s: Action Scheduler hook name. */
+                    __(
+                        'Save a valid Shop ID and API key to queue the product backfill action "%s".',
+                        Webhook_Manager::TEXT_DOMAIN,
+                    ),
+                    $hook,
+                ),
+            ];
+        }
+
+        $message = sprintf(
+            /* translators: %s: Action Scheduler hook name. */
+            __(
+                'No product backfill batch is currently queued. The plugin uses Action Scheduler hook "%s" to backfill existing products after a successful sync.',
+                Webhook_Manager::TEXT_DOMAIN,
+            ),
+            $hook,
+        );
+
+        if ($completed_at) {
+            $message .=
+                " " .
+                sprintf(
+                    /* translators: %s: formatted time. */
+                    __(
+                        "Last successful backfill: %s.",
+                        Webhook_Manager::TEXT_DOMAIN,
+                    ),
+                    $completed_at,
+                );
+        }
+
+        return [
+            "label" => __("Not queued", Webhook_Manager::TEXT_DOMAIN),
+            "message" => $message,
+        ];
+    }
+
+    /**
+     * Formats a MySQL datetime for the admin UI.
+     *
+     * @param string $datetime MySQL datetime.
+     * @return string
+     */
+    private function format_admin_datetime($datetime)
+    {
+        if ("" === $datetime) {
+            return "";
+        }
+
+        return mysql2date(
+            get_option("date_format") . " " . get_option("time_format"),
+            $datetime,
+        );
+    }
+
+    /**
+     * Formats a Unix timestamp for the admin UI.
+     *
+     * @param int $timestamp Unix timestamp.
+     * @return string
+     */
+    private function format_admin_timestamp($timestamp)
+    {
+        if ($timestamp <= 0) {
+            return "";
+        }
+
+        return wp_date(
+            get_option("date_format") . " " . get_option("time_format"),
+            $timestamp,
+        );
     }
 
     /**

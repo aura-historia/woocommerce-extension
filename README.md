@@ -33,6 +33,8 @@ When a valid Shop ID and API key are saved, the plugin:
 3. keeps the WooCommerce webhooks active only if that backend sync succeeds
 4. sends webhook deliveries to `/api/v1/webhooks/woocommerce/{shopId}`
 5. includes the configured `x-api-key` on outgoing webhook requests
+6. asynchronously backfills all existing WooCommerce products to `PUT /api/v1/shops/{shopId}/products` in batches of 100
+7. lets a merchant manually queue a fresh full product backfill from `WooCommerce > Aura Historia`
 
 WooCommerce also signs the request body with `X-WC-Webhook-Signature` using the generated secret.
 
@@ -72,14 +74,15 @@ If port `8888` is already busy, create a local `.wp-env.override.json` file and 
 
 ## Manual local test flow
 
-1. Replace the demo `AHPC_BACKEND_BASE_URL` with a test or staging backend base URL that supports both:
+1. Replace the demo `AHPC_BACKEND_BASE_URL` with a test or staging backend base URL that supports:
    - `PATCH /api/v1/shops/{shopId}`
    - `POST /api/v1/webhooks/woocommerce/{shopId}`
+   - `PUT /api/v1/shops/{shopId}/products`
 2. Start the local environment.
 3. In WordPress admin, go to `WooCommerce > Aura Historia`.
 4. Enter the Shop ID and API key from Aura Historia and save the settings.
 5. Create, update, and trash a product.
-6. Confirm the backend accepted the setup PATCH call and then received the webhook deliveries.
+6. Confirm the backend accepted the setup PATCH call, received the product backfill, and received live webhook deliveries. The current backfill status is shown in `WooCommerce > Aura Historia`, where you can also manually queue a fresh full backfill. The Action Scheduler hook name is `ahpc_backfill_products_batch` if you inspect `WooCommerce > Tools > Action Scheduler`.
 
 Useful WooCommerce screens:
 
@@ -128,6 +131,7 @@ Current coverage focuses on the plugin's core contract:
 - attaching `x-api-key` to outgoing webhook requests
 - updating those webhooks idempotently without duplicates
 - pausing managed webhooks when requested
+- scheduling and processing asynchronous product backfill batches
 
 Run the tests with:
 
@@ -138,7 +142,8 @@ Run the tests with:
 - `product.deleted` uses WooCommerce's built-in topic and fires when a product is trashed.
 - Deleted payloads only include an `id`.
 - WooCommerce signs webhook requests with `X-WC-Webhook-Signature`.
-- The plugin only manages future events. It does not backfill an existing catalog.
+- When a valid Shop ID and API key are saved, the plugin schedules a product backfill via Action Scheduler (bundled with WooCommerce). Products are sent to `PUT /api/v1/shops/{shopId}/products` in batches of 100. The backfill is restartable and retries failed batches automatically through Action Scheduler's built-in retry mechanism. The batch action hook is `ahpc_backfill_products_batch`.
+- Merchants can manually queue a fresh full product backfill from `WooCommerce > Aura Historia`. Queueing it again replaces any pending backfill batches and restarts the catalog resend.
 
 ## Release notes
 

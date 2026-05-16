@@ -138,6 +138,68 @@ class Backend_Api_Client
     }
 
     /**
+     * Calls `PUT /api/v1/shops/{shopId}/products` using the generated OpenAPI
+     * client, upserting a batch of products for backfill.
+     *
+     * Using PUT (rather than POST) means re-running the backfill is safe: the
+     * backend detects whether each product is new, changed, or unchanged and
+     * applies the appropriate action.
+     *
+     * @param string  $shop_id  Shop UUID.
+     * @param string  $api_key  Backend API key.
+     * @param array[] $products Array of strict partner product objects matching the backend PutProductData schema.
+     * @return true|WP_Error
+     */
+    public function put_shop_products($shop_id, $api_key, array $products)
+    {
+        $shop_id = Webhook_Manager::normalize_shop_id($shop_id);
+
+        if (
+            "" === $this->base_url ||
+            !Webhook_Manager::is_valid_shop_id($shop_id)
+        ) {
+            return new WP_Error(
+                "ahpc_backend_invalid_url",
+                __(
+                    "The backend shop URL could not be built from the configured Shop ID.",
+                    self::TEXT_DOMAIN,
+                ),
+            );
+        }
+
+        if (!$this->is_runtime_available()) {
+            return new WP_Error(
+                "ahpc_backend_client_unavailable",
+                __(
+                    "The plugin's generated backend API client dependencies are not available.",
+                    self::TEXT_DOMAIN,
+                ),
+            );
+        }
+
+        try {
+            $this->create_shops_api($api_key)->upsertShopProducts(
+                $shop_id,
+                $products,
+            );
+        } catch (ApiException $exception) {
+            return $this->translate_api_exception($exception);
+        } catch (\InvalidArgumentException $exception) {
+            return new WP_Error(
+                "ahpc_backend_invalid_request",
+                $this->sanitize_error_fragment($exception->getMessage()),
+            );
+        } catch (\Throwable $throwable) {
+            return new WP_Error(
+                "ahpc_backend_request_failed",
+                $this->sanitize_error_fragment($throwable->getMessage()),
+            );
+        }
+
+        return true;
+    }
+
+    /**
      * Returns whether the generated client runtime dependencies are available.
      *
      * @return bool

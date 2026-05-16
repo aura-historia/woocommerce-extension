@@ -27,6 +27,7 @@ Features:
 * PATCHes the generated secret to `/api/v1/shops/{shopId}` before activating delivery
 * sends webhook deliveries to `/api/v1/webhooks/woocommerce/{shopId}`
 * includes `x-api-key` on outgoing webhook requests
+* asynchronously backfills all existing products to `PUT /api/v1/shops/{shopId}/products` in batches of 100 via Action Scheduler when a valid connection is configured
 * repairs plugin-owned webhooks after manual edits or deletions
 * pauses plugin-owned webhooks on deactivation
 * removes plugin-owned webhooks on uninstall
@@ -41,6 +42,8 @@ Important notes:
 * `product.deleted` is WooCommerce's built-in delete topic and fires when a product is trashed.
 * Deleted payloads only include an `id`.
 * Saving a valid Shop ID and API key sends product data to your configured external endpoint.
+* The current backfill status is shown on `WooCommerce > Aura Historia`.
+* Merchants can manually queue a fresh full product backfill from `WooCommerce > Aura Historia`.
 
 == Installation ==
 
@@ -57,7 +60,7 @@ Important notes:
 
 = Does this backfill my existing products? =
 
-No. The plugin only manages future WooCommerce webhook events.
+Yes. When a valid Shop ID and API key are saved, the plugin automatically backfills all existing WooCommerce products to `PUT /api/v1/shops/{shopId}/products`. Products are sent in batches of 100 via Action Scheduler (bundled with WooCommerce) so large catalogs do not block the page. Batches that fail are retried automatically by Action Scheduler. The backfill is restarted whenever valid connection settings are saved, the current backfill status is shown on `WooCommerce > Aura Historia`, and merchants can manually queue a fresh full backfill from that screen.
 
 = Which events are sent? =
 
