@@ -847,18 +847,11 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             }
 
             /**
-             * Returns the fixed product IDs instead of querying the database.
-             *
-             * @param int $page Page number (unused).
-             * @return int[]
-             */
-            protected function get_product_ids_for_test($page)
-            {
-                return $this->ids;
-            }
-
-            /**
              * Override process_batch to inject stubbed product IDs and skip payload build.
+             *
+             * This replaces the full batch pipeline with a lightweight stub that only
+             * tests the pagination scheduling logic: it checks settings validity and
+             * schedules the next page when the simulated page is full.
              *
              * @param string $shop_id Shop UUID.
              * @param int    $page    Page number.

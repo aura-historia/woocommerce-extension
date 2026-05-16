@@ -206,6 +206,10 @@ class Product_Backfill
     /**
      * Returns the product IDs for a given page, ordered by ascending ID.
      *
+     * Both `publish` and `private` products are intentionally included so that
+     * privately listed products (accessible by direct URL but hidden from the
+     * shop archive) are also represented in the Aura Historia backend catalog.
+     *
      * @param int $page One-based page number.
      * @return int[]
      */
