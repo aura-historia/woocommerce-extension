@@ -10,9 +10,19 @@ The plugin auto-registers those webhooks, repairs manual edits or deletions, exp
 
 ## Connection model
 
-The plugin uses a built-in backend base URL defined in code.
+The plugin uses a built-in backend base URL that defaults to the development/staging environment (`https://api.dev.aura-historia.com`).
 
-Before you upload the plugin to a real store, replace the demo value of `AHPC_BACKEND_BASE_URL` in `aura-historia-partner-connect.php` with your real SaaS API base URL.
+To point the plugin at the production backend (`https://api.aura-historia.com`), set the `AHPC_BACKEND_BASE_URL` environment variable before PHP runs, or define the constant in `wp-config.php`:
+
+```php
+define( 'AHPC_BACKEND_BASE_URL', 'https://api.aura-historia.com' );
+```
+
+The resolution order is:
+
+1. A PHP constant defined before the plugin loads (e.g. in `wp-config.php`).
+2. A server-level PHP environment variable named `AHPC_BACKEND_BASE_URL` (suitable for CI/CD pipelines and container deployments).
+3. The built-in development default `https://api.dev.aura-historia.com`.
 
 Store owners do **not** configure:
 
@@ -74,7 +84,10 @@ If port `8888` is already busy, create a local `.wp-env.override.json` file and 
 
 ## Manual local test flow
 
-1. Replace the demo `AHPC_BACKEND_BASE_URL` with a test or staging backend base URL that supports:
+1. Point the plugin at a test or staging backend by either:
+   - Adding `define( 'AHPC_BACKEND_BASE_URL', 'https://your-test-backend.example.com' );` to `.wp-env.json`'s `config` block, or
+   - Setting the `AHPC_BACKEND_BASE_URL` environment variable in the server environment.
+   The backend must support:
    - `PATCH /api/v1/shops/{shopId}`
    - `POST /api/v1/webhooks/woocommerce/{shopId}`
    - `PUT /api/v1/shops/{shopId}/products`

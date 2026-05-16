@@ -37,7 +37,14 @@ if (!defined("AHPC_PLUGIN_BASENAME")) {
 }
 
 if (!defined("AHPC_BACKEND_BASE_URL")) {
-    define("AHPC_BACKEND_BASE_URL", "https://api.dev.aura-historia.com");
+    $ahpc_env_backend_base_url = getenv("AHPC_BACKEND_BASE_URL");
+    define(
+        "AHPC_BACKEND_BASE_URL",
+        $ahpc_env_backend_base_url !== false && $ahpc_env_backend_base_url !== ""
+            ? $ahpc_env_backend_base_url
+            : "https://api.dev.aura-historia.com",
+    );
+    unset($ahpc_env_backend_base_url);
 }
 
 $ahpc_autoload = AHPC_PLUGIN_DIR . "vendor/autoload.php";

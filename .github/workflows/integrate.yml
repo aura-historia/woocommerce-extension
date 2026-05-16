@@ -47,7 +47,7 @@ jobs:
     needs: php-lint
     timeout-minutes: 30
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - php: "8.1"
@@ -111,7 +111,8 @@ jobs:
 
       - name: Print wp-env logs on failure
         if: failure()
-        run: npm run env:logs || true
+        timeout-minutes: 2
+        run: npm run env:logs -- --no-follow || true
 
       - name: Destroy wp-env environment
         if: always()
