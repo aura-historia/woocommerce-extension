@@ -615,7 +615,9 @@ class Webhook_Manager
 
         if ("active" === $desired_status) {
             $backfill->schedule_backfill(
-                isset($settings["shop_id"]) ? (string) $settings["shop_id"] : "",
+                isset($settings["shop_id"])
+                    ? (string) $settings["shop_id"]
+                    : "",
             );
         } else {
             $backfill->cancel_backfill();
@@ -703,8 +705,10 @@ class Webhook_Manager
         delete_option(self::OPTION_LAST_SYNC_AT);
 
         if (class_exists(Product_Backfill::class)) {
-            (new Product_Backfill())->cancel_backfill();
+            new Product_Backfill()->cancel_backfill();
         }
+
+        delete_option("ahpc_backfill_state");
     }
 
     /**

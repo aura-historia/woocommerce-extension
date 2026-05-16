@@ -37,6 +37,36 @@ class Product_Backfill
     const ACTION_GROUP = "ahpc-partner-connect";
 
     /**
+     * Option key used to persist the latest backfill status for the admin UI.
+     */
+    const OPTION_STATE = "ahpc_backfill_state";
+
+    /**
+     * Backfill status: no batch is currently queued.
+     */
+    const STATUS_NOT_SCHEDULED = "not_scheduled";
+
+    /**
+     * Backfill status: a batch is queued.
+     */
+    const STATUS_SCHEDULED = "scheduled";
+
+    /**
+     * Backfill status: a batch is currently being processed.
+     */
+    const STATUS_RUNNING = "running";
+
+    /**
+     * Backfill status: the most recent run completed successfully.
+     */
+    const STATUS_COMPLETE = "complete";
+
+    /**
+     * Backfill status: the most recent run failed.
+     */
+    const STATUS_FAILED = "failed";
+
+    /**
      * Number of products per batch sent to the backend.
      */
     const BATCH_SIZE = 100;
@@ -45,6 +75,20 @@ class Product_Backfill
      * Plugin text domain.
      */
     const TEXT_DOMAIN = "aura-historia-partner-connect";
+
+    /**
+     * Deferred backfill operation to run once Action Scheduler is initialized.
+     *
+     * @var array<string,string>|null
+     */
+    private static $deferred_operation = null;
+
+    /**
+     * Whether the deferred operation callback has been registered.
+     *
+     * @var bool
+     */
+    private static $deferred_operation_registered = false;
 
     /**
      * Schedules a fresh product backfill for the given shop.
@@ -57,26 +101,48 @@ class Product_Backfill
      */
     public function schedule_backfill($shop_id)
     {
-        if (!function_exists("as_enqueue_async_action")) {
-            return false;
-        }
-
         $shop_id = Webhook_Manager::normalize_shop_id($shop_id);
 
         if (!Webhook_Manager::is_valid_shop_id($shop_id)) {
             return false;
         }
 
-        // Cancel any previously scheduled batches before starting fresh.
-        $this->cancel_backfill();
+        if (
+            !function_exists("as_schedule_single_action") ||
+            !function_exists("as_unschedule_all_actions")
+        ) {
+            $this->record_failed(
+                __(
+                    "Action Scheduler is not available, so the product backfill could not be queued.",
+                    self::TEXT_DOMAIN,
+                ),
+            );
 
-        as_enqueue_async_action(
-            self::ACTION_HOOK,
-            [$shop_id, 1],
-            self::ACTION_GROUP,
-        );
+            return false;
+        }
 
-        return true;
+        if (!$this->is_action_scheduler_ready()) {
+            self::$deferred_operation = [
+                "type" => "schedule",
+                "shop_id" => $shop_id,
+            ];
+
+            if (!self::$deferred_operation_registered) {
+                self::$deferred_operation_registered = true;
+                add_action(
+                    "action_scheduler_init",
+                    [self::class, "run_deferred_operation"],
+                    10,
+                    0,
+                );
+            }
+
+            $this->record_scheduled();
+
+            return true;
+        }
+
+        return $this->schedule_backfill_now($shop_id);
     }
 
     /**
@@ -87,10 +153,33 @@ class Product_Backfill
     public function cancel_backfill()
     {
         if (!function_exists("as_unschedule_all_actions")) {
+            $this->record_not_scheduled();
             return;
         }
 
-        as_unschedule_all_actions(self::ACTION_HOOK, null, self::ACTION_GROUP);
+        if (!$this->is_action_scheduler_ready()) {
+            self::$deferred_operation = [
+                "type" => "cancel",
+                "shop_id" => "",
+            ];
+
+            if (!self::$deferred_operation_registered) {
+                self::$deferred_operation_registered = true;
+                add_action(
+                    "action_scheduler_init",
+                    [self::class, "run_deferred_operation"],
+                    10,
+                    0,
+                );
+            }
+
+            $this->record_not_scheduled();
+
+            return;
+        }
+
+        $this->cancel_backfill_actions();
+        $this->record_not_scheduled();
     }
 
     /**
@@ -100,7 +189,18 @@ class Product_Backfill
      */
     public function is_backfill_scheduled()
     {
-        if (!function_exists("as_has_scheduled_action")) {
+        if (
+            is_array(self::$deferred_operation) &&
+            isset(self::$deferred_operation["type"]) &&
+            "schedule" === self::$deferred_operation["type"]
+        ) {
+            return true;
+        }
+
+        if (
+            !function_exists("as_has_scheduled_action") ||
+            !$this->is_action_scheduler_ready()
+        ) {
             return false;
         }
 
@@ -112,12 +212,52 @@ class Product_Backfill
     }
 
     /**
+     * Returns the latest product backfill status details for the admin UI.
+     *
+     * @return array<string,mixed>
+     */
+    public function get_status_details()
+    {
+        $state = $this->get_state();
+        $next_scheduled_at = 0;
+
+        if (
+            is_array(self::$deferred_operation) &&
+            isset(self::$deferred_operation["type"]) &&
+            "schedule" === self::$deferred_operation["type"]
+        ) {
+            $state["status"] = self::STATUS_SCHEDULED;
+        } elseif (
+            function_exists("as_next_scheduled_action") &&
+            $this->is_action_scheduler_ready()
+        ) {
+            $next_action = as_next_scheduled_action(
+                self::ACTION_HOOK,
+                null,
+                self::ACTION_GROUP,
+            );
+
+            if (true === $next_action) {
+                $state["status"] = self::STATUS_RUNNING;
+            } elseif (is_numeric($next_action) && (int) $next_action > 0) {
+                $state["status"] = self::STATUS_SCHEDULED;
+                $next_scheduled_at = (int) $next_action;
+            }
+        }
+
+        $state["hook"] = self::ACTION_HOOK;
+        $state["next_scheduled_at"] = $next_scheduled_at;
+
+        return $state;
+    }
+
+    /**
      * Processes a single product batch.
      *
      * Invoked by Action Scheduler via the {@see ACTION_HOOK} action.
      * Fetches up to {@see BATCH_SIZE} products for the given page, serialises
      * each one using the WooCommerce REST API v3 format, and posts the batch to
-     * the backend.  If the page was full (i.e. there may be more products), the
+     * the backend. If the page was full (i.e. there may be more products), the
      * next page is immediately re-enqueued.
      *
      * Throwing an exception causes Action Scheduler to retry this batch
@@ -143,7 +283,9 @@ class Product_Backfill
         $stored_shop_id = Webhook_Manager::normalize_shop_id(
             isset($settings["shop_id"]) ? (string) $settings["shop_id"] : "",
         );
-        $api_key = isset($settings["api_key"]) ? (string) $settings["api_key"] : "";
+        $api_key = isset($settings["api_key"])
+            ? (string) $settings["api_key"]
+            : "";
 
         if (
             $stored_shop_id !== $shop_id ||
@@ -159,9 +301,11 @@ class Product_Backfill
         $product_ids = $this->get_product_ids($page);
 
         if (empty($product_ids)) {
-            // No more products; backfill complete.
+            $this->record_complete();
             return;
         }
+
+        $this->record_running();
 
         // Serialise each product in WC REST API v3 format.
         $payloads = [];
@@ -181,14 +325,16 @@ class Product_Backfill
             $result = $client->put_shop_products($shop_id, $api_key, $payloads);
 
             if (is_wp_error($result)) {
-                // Throw so Action Scheduler retries this batch automatically.
-                throw new \RuntimeException(
-                    sprintf(
-                        "Aura Historia backfill batch (page %d) failed: %s",
-                        $page,
-                        $result->get_error_message(),
-                    ),
+                $message = sprintf(
+                    "Aura Historia backfill batch (page %d) failed: %s",
+                    $page,
+                    $result->get_error_message(),
                 );
+
+                $this->record_failed($message);
+
+                // Throw so Action Scheduler retries this batch automatically.
+                throw new \RuntimeException($message);
             }
         }
 
@@ -196,14 +342,63 @@ class Product_Backfill
         // indicating there may be more products.
         if (
             count($product_ids) >= self::BATCH_SIZE &&
-            function_exists("as_enqueue_async_action")
+            function_exists("as_schedule_single_action")
         ) {
-            as_enqueue_async_action(
+            $next_action_id = as_schedule_single_action(
+                time(),
                 self::ACTION_HOOK,
                 [$shop_id, $page + 1],
                 self::ACTION_GROUP,
+                true,
             );
+
+            if (!$next_action_id) {
+                $message = sprintf(
+                    "Aura Historia backfill batch (page %d) could not schedule page %d.",
+                    $page,
+                    $page + 1,
+                );
+
+                $this->record_failed($message);
+                throw new \RuntimeException($message);
+            }
+
+            $this->record_scheduled();
+
+            return;
         }
+
+        $this->record_complete();
+    }
+
+    /**
+     * Runs a deferred schedule or cancel operation once Action Scheduler is ready.
+     *
+     * @return void
+     */
+    public static function run_deferred_operation()
+    {
+        $operation = self::$deferred_operation;
+
+        self::$deferred_operation = null;
+        self::$deferred_operation_registered = false;
+
+        if (!is_array($operation) || empty($operation["type"])) {
+            return;
+        }
+
+        $backfill = new self();
+
+        if ("schedule" === $operation["type"]) {
+            $backfill->schedule_backfill(
+                isset($operation["shop_id"])
+                    ? (string) $operation["shop_id"]
+                    : "",
+            );
+            return;
+        }
+
+        $backfill->cancel_backfill();
     }
 
     /**
@@ -239,8 +434,9 @@ class Product_Backfill
      *
      * Dispatches a GET request through the WP REST server to
      * `/wc/v3/products/{id}` so that routes are properly initialised and the
-     * returned data matches what live WooCommerce REST API calls return.  This
-     * approach does not involve any webhook machinery.
+     * returned data matches what live WooCommerce REST API calls return. This
+     * runs under the stored webhook user so Action Scheduler batches can build
+     * product payloads even when there is no logged-in admin.
      *
      * @param int $product_id WooCommerce product ID.
      * @return array<string,mixed>|null Serialised product data, or null on failure.
@@ -255,28 +451,227 @@ class Product_Backfill
             return null;
         }
 
-        $server = rest_get_server();
-        $request = new \WP_REST_Request(
-            "GET",
-            "/wc/v3/products/{$product_id}",
-        );
-        $request->set_query_params(["context" => "view"]);
+        $manager = new Webhook_Manager();
+        $restore_user_id = get_current_user_id();
+        $webhook_user_id = $manager->resolve_webhook_user_id();
+
+        if ($webhook_user_id && $webhook_user_id !== $restore_user_id) {
+            wp_set_current_user($webhook_user_id);
+        }
 
         try {
-            $response = $server->dispatch($request);
-        } catch (\Throwable $e) {
-            return null;
+            $server = rest_get_server();
+            $request = new \WP_REST_Request(
+                "GET",
+                "/wc/v3/products/{$product_id}",
+            );
+            $request->set_query_params(["context" => "view"]);
+
+            try {
+                $response = $server->dispatch($request);
+            } catch (\Throwable $e) {
+                return null;
+            }
+
+            if (
+                !$response instanceof \WP_REST_Response ||
+                $response->is_error()
+            ) {
+                return null;
+            }
+
+            $data = $server->response_to_data($response, false);
+
+            return is_array($data) && !empty($data) ? $data : null;
+        } finally {
+            if ($webhook_user_id && $webhook_user_id !== $restore_user_id) {
+                wp_set_current_user($restore_user_id);
+            }
+        }
+    }
+
+    /**
+     * Returns whether Action Scheduler has finished initializing.
+     *
+     * @return bool
+     */
+    private function is_action_scheduler_ready()
+    {
+        return did_action("action_scheduler_init") > 0;
+    }
+
+    /**
+     * Schedules the initial backfill batch immediately.
+     *
+     * @param string $shop_id Shop UUID.
+     * @return bool
+     */
+    private function schedule_backfill_now($shop_id)
+    {
+        $this->cancel_backfill_actions();
+
+        $action_id = as_schedule_single_action(
+            time(),
+            self::ACTION_HOOK,
+            [$shop_id, 1],
+            self::ACTION_GROUP,
+            true,
+        );
+
+        if (!$action_id) {
+            $this->record_failed(
+                __(
+                    "The initial product backfill batch could not be scheduled.",
+                    self::TEXT_DOMAIN,
+                ),
+            );
+
+            return false;
         }
 
-        if (
-            !$response instanceof \WP_REST_Response ||
-            $response->is_error()
-        ) {
-            return null;
+        $this->record_scheduled();
+
+        return true;
+    }
+
+    /**
+     * Unschedules all pending backfill actions without changing the stored state.
+     *
+     * @return void
+     */
+    private function cancel_backfill_actions()
+    {
+        as_unschedule_all_actions(self::ACTION_HOOK, null, self::ACTION_GROUP);
+    }
+
+    /**
+     * Returns the stored backfill state with guaranteed defaults.
+     *
+     * @return array<string,string>
+     */
+    private function get_state()
+    {
+        $state = get_option(self::OPTION_STATE, []);
+
+        if (!is_array($state)) {
+            $state = [];
         }
 
-        $data = $server->response_to_data($response, false);
+        return wp_parse_args($state, self::default_state());
+    }
 
-        return is_array($data) && !empty($data) ? $data : null;
+    /**
+     * Returns the default stored backfill state.
+     *
+     * @return array<string,string>
+     */
+    private static function default_state()
+    {
+        return [
+            "status" => self::STATUS_NOT_SCHEDULED,
+            "scheduled_at" => "",
+            "started_at" => "",
+            "completed_at" => "",
+            "failed_at" => "",
+            "last_error" => "",
+        ];
+    }
+
+    /**
+     * Persists the current backfill state.
+     *
+     * @param array<string,string> $changes State changes to store.
+     * @return void
+     */
+    private function update_state($changes)
+    {
+        $state = $this->get_state();
+
+        foreach ($changes as $key => $value) {
+            $state[$key] = (string) $value;
+        }
+
+        update_option(self::OPTION_STATE, $state, false);
+    }
+
+    /**
+     * Records that a backfill batch is queued.
+     *
+     * @return void
+     */
+    private function record_scheduled()
+    {
+        $this->update_state([
+            "status" => self::STATUS_SCHEDULED,
+            "scheduled_at" => current_time("mysql"),
+            "started_at" => "",
+            "failed_at" => "",
+            "last_error" => "",
+        ]);
+    }
+
+    /**
+     * Records that a backfill batch is currently running.
+     *
+     * @return void
+     */
+    private function record_running()
+    {
+        $this->update_state([
+            "status" => self::STATUS_RUNNING,
+            "started_at" => current_time("mysql"),
+            "failed_at" => "",
+            "last_error" => "",
+        ]);
+    }
+
+    /**
+     * Records that the most recent backfill run completed successfully.
+     *
+     * @return void
+     */
+    private function record_complete()
+    {
+        $this->update_state([
+            "status" => self::STATUS_COMPLETE,
+            "scheduled_at" => "",
+            "started_at" => "",
+            "completed_at" => current_time("mysql"),
+            "failed_at" => "",
+            "last_error" => "",
+        ]);
+    }
+
+    /**
+     * Records that no backfill is currently scheduled.
+     *
+     * @return void
+     */
+    private function record_not_scheduled()
+    {
+        $this->update_state([
+            "status" => self::STATUS_NOT_SCHEDULED,
+            "scheduled_at" => "",
+            "started_at" => "",
+            "failed_at" => "",
+            "last_error" => "",
+        ]);
+    }
+
+    /**
+     * Records that the most recent backfill attempt failed.
+     *
+     * @param string $message Error detail.
+     * @return void
+     */
+    private function record_failed($message)
+    {
+        $this->update_state([
+            "status" => self::STATUS_FAILED,
+            "scheduled_at" => "",
+            "started_at" => "",
+            "failed_at" => current_time("mysql"),
+            "last_error" => sanitize_text_field((string) $message),
+        ]);
     }
 }

@@ -6,6 +6,7 @@
  */
 
 use AuraHistoria\PartnerConnect\Plugin;
+use AuraHistoria\PartnerConnect\Product_Backfill;
 use AuraHistoria\PartnerConnect\Webhook_Manager;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
@@ -816,6 +817,85 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         );
         $this->assertCount(1, $requests);
         $this->assertSame("{}", (string) $requests[0]["request"]->getBody());
+    }
+
+    /**
+     * It shows the queued backfill action details on the settings page.
+     *
+     * @return void
+     */
+    public function test_render_settings_page_shows_queued_backfill_status()
+    {
+        if (!function_exists("as_next_scheduled_action")) {
+            $this->markTestSkipped("Action Scheduler is not available.");
+        }
+
+        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+        $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+
+        update_option(
+            Webhook_Manager::OPTION_SETTINGS,
+            [
+                "shop_id" => $shop_id,
+                "api_key" => $api_key,
+                "secret" => "test-secret",
+            ],
+            false,
+        );
+
+        $backfill = new Product_Backfill();
+        $backfill->cancel_backfill();
+        $this->assertTrue($backfill->schedule_backfill($shop_id));
+
+        $output = $this->render_plugin_settings_page();
+
+        $this->assertStringContainsString("Product backfill", $output);
+        $this->assertStringContainsString("Queued", $output);
+        $this->assertStringContainsString(
+            Product_Backfill::ACTION_HOOK,
+            $output,
+        );
+    }
+
+    /**
+     * It shows the latest successful backfill details on the settings page.
+     *
+     * @return void
+     */
+    public function test_render_settings_page_shows_completed_backfill_status()
+    {
+        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+        $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+
+        update_option(
+            Webhook_Manager::OPTION_SETTINGS,
+            [
+                "shop_id" => $shop_id,
+                "api_key" => $api_key,
+                "secret" => "test-secret",
+            ],
+            false,
+        );
+
+        $product = new WC_Product_Simple();
+        $product->set_name("Status Product");
+        $product->set_status("publish");
+        $product->save();
+
+        $backfill = new Product_Backfill();
+        $backfill->process_batch($shop_id, 1);
+
+        $output = $this->render_plugin_settings_page();
+
+        $this->assertStringContainsString("Product backfill", $output);
+        $this->assertStringContainsString("Completed", $output);
+        $this->assertStringContainsString("completed successfully", $output);
+        $this->assertStringContainsString(
+            Product_Backfill::ACTION_HOOK,
+            $output,
+        );
+
+        $product->delete(true);
     }
 
     /**

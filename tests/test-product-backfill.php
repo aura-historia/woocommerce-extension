@@ -187,13 +187,12 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
     protected function get_backend_requests_for_url($url)
     {
         return array_values(
-            array_filter(
-                $this->backend_http_requests,
-                static function ($transaction) use ($url) {
-                    return isset($transaction["request"]) &&
-                        $url === (string) $transaction["request"]->getUri();
-                },
-            ),
+            array_filter($this->backend_http_requests, static function (
+                $transaction,
+            ) use ($url) {
+                return isset($transaction["request"]) &&
+                    $url === (string) $transaction["request"]->getUri();
+            }),
         );
     }
 
@@ -240,8 +239,8 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
              */
             public function schedule_backfill($shop_id)
             {
-                // Return false directly, mimicking missing as_enqueue_async_action.
-                if (!function_exists("as_enqueue_async_action")) {
+                // Return false directly, mimicking missing as_schedule_single_action.
+                if (!function_exists("as_schedule_single_action")) {
                     return false;
                 }
 
@@ -334,10 +333,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         $backfill = new Product_Backfill();
 
         // Use a different shop ID than what is stored in options.
-        $backfill->process_batch(
-            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
-            1,
-        );
+        $backfill->process_batch("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", 1);
 
         // No backend request should have been made.
         $this->assertEmpty(
@@ -449,10 +445,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             $requests[0]["request"]->getHeaderLine("x-api-key"),
         );
 
-        $body = json_decode(
-            (string) $requests[0]["request"]->getBody(),
-            true,
-        );
+        $body = json_decode((string) $requests[0]["request"]->getBody(), true);
 
         $this->assertIsArray($body);
         $this->assertArrayHasKey("products", $body);
@@ -461,6 +454,55 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         // Clean up.
         $product_a->delete(true);
         $product_b->delete(true);
+    }
+
+    /**
+     * It still serialises and sends products when no admin user is logged in.
+     *
+     * @return void
+     */
+    public function test_process_batch_puts_products_to_backend_without_logged_in_user()
+    {
+        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+        $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+
+        update_option(
+            Webhook_Manager::OPTION_SETTINGS,
+            [
+                "shop_id" => $shop_id,
+                "api_key" => $api_key,
+                "secret" => "test-secret",
+            ],
+            false,
+        );
+
+        $product = new WC_Product_Simple();
+        $product->set_name("Background Product");
+        $product->set_status("publish");
+        $product->save();
+
+        wp_set_current_user(0);
+
+        try {
+            $backfill = new Product_Backfill();
+            $backfill->process_batch($shop_id, 1);
+        } finally {
+            wp_set_current_user($this->admin_user_id);
+        }
+
+        $requests = $this->get_backend_requests_for_url(
+            "https://example.com/api/v1/shops/" . $shop_id . "/products",
+        );
+
+        $this->assertCount(1, $requests);
+
+        $body = json_decode((string) $requests[0]["request"]->getBody(), true);
+
+        $this->assertIsArray($body);
+        $this->assertArrayHasKey("products", $body);
+        $this->assertNotEmpty($body["products"]);
+
+        $product->delete(true);
     }
 
     /**
@@ -832,7 +874,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
      */
     protected function make_backfill_with_product_ids(array $product_ids)
     {
-        return new class($product_ids) extends Product_Backfill {
+        return new class ($product_ids) extends Product_Backfill {
             /** @var int[] */
             private $ids;
 
@@ -878,15 +920,11 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
                         ? (string) $settings["shop_id"]
                         : "",
                 );
-                $api_key =
-                    isset($settings["api_key"])
-                        ? (string) $settings["api_key"]
-                        : "";
+                $api_key = isset($settings["api_key"])
+                    ? (string) $settings["api_key"]
+                    : "";
 
-                if (
-                    $stored_shop_id !== $shop_id ||
-                    "" === $api_key
-                ) {
+                if ($stored_shop_id !== $shop_id || "" === $api_key) {
                     return;
                 }
 
@@ -898,12 +936,14 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
 
                 if (
                     count($product_ids) >= self::BATCH_SIZE &&
-                    function_exists("as_enqueue_async_action")
+                    function_exists("as_schedule_single_action")
                 ) {
-                    as_enqueue_async_action(
+                    as_schedule_single_action(
+                        time(),
                         self::ACTION_HOOK,
                         [$shop_id, $page + 1],
                         self::ACTION_GROUP,
+                        true,
                     );
                 }
             }
