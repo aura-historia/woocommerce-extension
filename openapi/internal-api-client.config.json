@@ -8,7 +8,7 @@
     "name": "php",
     "image": "openapitools/openapi-generator-cli:v7.22.0"
   },
-  "operations": ["patchShopById", "upsertShopProducts"],
+  "operations": ["patchShopById", "putPartnerProducts"],
   "namespace": "AuraHistoria\\PartnerConnect\\InternalApi",
   "modelPackage": "Model",
   "filteredSpecPath": "openapi/internal-api.filtered.yaml",
