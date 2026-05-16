@@ -139,7 +139,7 @@ class Backend_Api_Client
 
     /**
      * Calls `PUT /api/v1/shops/{shopId}/products` using the generated OpenAPI
-     * client, upserting a batch of WooCommerce product objects for backfill.
+     * client, upserting a batch of products for backfill.
      *
      * Using PUT (rather than POST) means re-running the backfill is safe: the
      * backend detects whether each product is new, changed, or unchanged and
@@ -147,7 +147,7 @@ class Backend_Api_Client
      *
      * @param string  $shop_id  Shop UUID.
      * @param string  $api_key  Backend API key.
-     * @param array[] $products Array of WooCommerce product objects in WC REST API v3 format.
+     * @param array[] $products Array of strict partner product objects matching the backend PutProductData schema.
      * @return true|WP_Error
      */
     public function put_shop_products($shop_id, $api_key, array $products)

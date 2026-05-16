@@ -398,7 +398,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
     // ------------------------------------------------------------------
 
     /**
-     * It sends a PUT request with WC REST API v3 product payloads for a non-empty page.
+     * It sends a PUT request with strict partner backfill product payloads for a non-empty page.
      *
      * @return void
      */
@@ -420,6 +420,8 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         // Create two published products.
         $product_a = new WC_Product_Simple();
         $product_a->set_name("Product Alpha");
+        $product_a->set_description("<p>Alpha description</p>");
+        $product_a->set_regular_price("42.69");
         $product_a->set_status("publish");
         $product_a->save();
 
@@ -451,7 +453,22 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         $this->assertArrayNotHasKey("products", $body);
         $this->assertNotEmpty($body);
         $this->assertIsArray($body[0]);
-        $this->assertArrayHasKey("id", $body[0]);
+        $this->assertSame(
+            (string) $product_a->get_id(),
+            $body[0]["shopsProductId"],
+        );
+        $this->assertSame("Product Alpha", $body[0]["title"]["text"]);
+        $this->assertSame("en", $body[0]["title"]["language"]);
+        $this->assertSame("Alpha description", $body[0]["description"]["text"]);
+        $this->assertSame("en", $body[0]["description"]["language"]);
+        $this->assertSame("AVAILABLE", $body[0]["state"]);
+        $this->assertSame(get_permalink($product_a->get_id()), $body[0]["url"]);
+        $this->assertSame(
+            get_woocommerce_currency(),
+            $body[0]["price"]["currency"],
+        );
+        $this->assertSame(4269, $body[0]["price"]["amount"]);
+        $this->assertSame([], $body[0]["images"]);
 
         // Clean up.
         $product_a->delete(true);
@@ -480,6 +497,8 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
 
         $product = new WC_Product_Simple();
         $product->set_name("Background Product");
+        $product->set_description("<p>Background description</p>");
+        $product->set_regular_price("19.99");
         $product->set_status("publish");
         $product->save();
 
@@ -504,7 +523,25 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         $this->assertArrayNotHasKey("products", $body);
         $this->assertNotEmpty($body);
         $this->assertIsArray($body[0]);
-        $this->assertArrayHasKey("id", $body[0]);
+        $this->assertSame(
+            (string) $product->get_id(),
+            $body[0]["shopsProductId"],
+        );
+        $this->assertSame("Background Product", $body[0]["title"]["text"]);
+        $this->assertSame("en", $body[0]["title"]["language"]);
+        $this->assertSame(
+            "Background description",
+            $body[0]["description"]["text"],
+        );
+        $this->assertSame("en", $body[0]["description"]["language"]);
+        $this->assertSame("AVAILABLE", $body[0]["state"]);
+        $this->assertSame(get_permalink($product->get_id()), $body[0]["url"]);
+        $this->assertSame(
+            get_woocommerce_currency(),
+            $body[0]["price"]["currency"],
+        );
+        $this->assertSame(1999, $body[0]["price"]["amount"]);
+        $this->assertSame([], $body[0]["images"]);
 
         $product->delete(true);
     }

@@ -255,10 +255,10 @@ class Product_Backfill
      * Processes a single product batch.
      *
      * Invoked by Action Scheduler via the {@see ACTION_HOOK} action.
-     * Fetches up to {@see BATCH_SIZE} products for the given page, serialises
-     * each one using the WooCommerce REST API v3 format, and posts the batch to
-     * the backend. If the page was full (i.e. there may be more products), the
-     * next page is immediately re-enqueued.
+     * Fetches up to {@see BATCH_SIZE} products for the given page, maps each
+     * one to the backend's strict `PutProductData` schema, and posts the batch
+     * to the partner upsert endpoint. If the page was full (i.e. there may be
+     * more products), the next page is immediately re-enqueued.
      *
      * Throwing an exception causes Action Scheduler to retry this batch
      * automatically, so backend errors propagate as exceptions.
@@ -307,7 +307,7 @@ class Product_Backfill
 
         $this->record_running();
 
-        // Serialise each product in WC REST API v3 format.
+        // Build each product using the backend's strict PutProductData shape.
         $payloads = [];
 
         foreach ($product_ids as $product_id) {
@@ -430,13 +430,12 @@ class Product_Backfill
     }
 
     /**
-     * Builds the WooCommerce REST API v3 representation of a single product.
+     * Builds the backend `PutProductData` representation of a single product.
      *
-     * Dispatches a GET request through the WP REST server to
-     * `/wc/v3/products/{id}` so that routes are properly initialised and the
-     * returned data matches what live WooCommerce REST API calls return. This
-     * runs under the stored webhook user so Action Scheduler batches can build
-     * product payloads even when there is no logged-in admin.
+     * The batch backfill endpoint does not accept the raw WooCommerce webhook or
+     * REST payload shape. It expects the stricter partner-ingestion schema from
+     * the Aura Historia OpenAPI contract, so this method maps the WooCommerce
+     * product object to that schema directly.
      *
      * @param int $product_id WooCommerce product ID.
      * @return array<string,mixed>|null Serialised product data, or null on failure.
@@ -447,47 +446,306 @@ class Product_Backfill
             return null;
         }
 
-        if (!wc_get_product($product_id)) {
+        $product = wc_get_product($product_id);
+
+        if (!$product || !is_object($product)) {
             return null;
         }
 
-        $manager = new Webhook_Manager();
-        $restore_user_id = get_current_user_id();
-        $webhook_user_id = $manager->resolve_webhook_user_id();
+        $payload = [
+            "shopsProductId" => (string) $product_id,
+            "state" => $this->get_product_state($product),
+            "images" => $this->get_product_image_urls($product),
+        ];
 
-        if ($webhook_user_id && $webhook_user_id !== $restore_user_id) {
-            wp_set_current_user($webhook_user_id);
+        $language = $this->get_content_language();
+        $title = $this->normalize_text_value(
+            method_exists($product, "get_name") ? $product->get_name() : "",
+        );
+
+        if ("" !== $title) {
+            $payload["title"] = [
+                "text" => $title,
+                "language" => $language,
+            ];
         }
 
-        try {
-            $server = rest_get_server();
-            $request = new \WP_REST_Request(
-                "GET",
-                "/wc/v3/products/{$product_id}",
-            );
-            $request->set_query_params(["context" => "view"]);
+        $description = $this->get_product_description_text($product);
 
-            try {
-                $response = $server->dispatch($request);
-            } catch (\Throwable $e) {
-                return null;
-            }
+        if ("" !== $description) {
+            $payload["description"] = [
+                "text" => $description,
+                "language" => $language,
+            ];
+        }
 
-            if (
-                !$response instanceof \WP_REST_Response ||
-                $response->is_error()
-            ) {
-                return null;
-            }
+        $price = $this->build_price_payload($product);
 
-            $data = $server->response_to_data($response, false);
+        if (is_array($price)) {
+            $payload["price"] = $price;
+        }
 
-            return is_array($data) && !empty($data) ? $data : null;
-        } finally {
-            if ($webhook_user_id && $webhook_user_id !== $restore_user_id) {
-                wp_set_current_user($restore_user_id);
+        $url = $this->normalize_url_value(get_permalink($product_id));
+
+        if ("" !== $url) {
+            $payload["url"] = $url;
+        }
+
+        return $payload;
+    }
+
+    /**
+     * Returns a plain-text description suitable for `LocalizedTextData.text`.
+     *
+     * @param object $product WooCommerce product object.
+     * @return string
+     */
+    private function get_product_description_text($product)
+    {
+        $description = $this->normalize_text_value(
+            method_exists($product, "get_description")
+                ? $product->get_description()
+                : "",
+        );
+
+        if ("" !== $description) {
+            return $description;
+        }
+
+        return $this->normalize_text_value(
+            method_exists($product, "get_short_description")
+                ? $product->get_short_description()
+                : "",
+        );
+    }
+
+    /**
+     * Builds strict backend price data in minor currency units.
+     *
+     * @param object $product WooCommerce product object.
+     * @return array<string,mixed>|null
+     */
+    private function build_price_payload($product)
+    {
+        $raw_price = method_exists($product, "get_price")
+            ? (string) $product->get_price()
+            : "";
+
+        if ("" === trim($raw_price)) {
+            return null;
+        }
+
+        $currency = function_exists("get_woocommerce_currency")
+            ? strtoupper((string) get_woocommerce_currency())
+            : "";
+
+        if (
+            !in_array(
+                $currency,
+                [
+                    "EUR",
+                    "GBP",
+                    "USD",
+                    "AUD",
+                    "CAD",
+                    "NZD",
+                    "CNY",
+                    "BRL",
+                    "PLN",
+                    "TRY",
+                    "JPY",
+                    "CZK",
+                    "RUB",
+                    "AED",
+                    "SAR",
+                    "HKD",
+                    "SGD",
+                    "CHF",
+                ],
+                true,
+            )
+        ) {
+            return null;
+        }
+
+        $amount = $this->convert_price_to_minor_units($raw_price);
+
+        if (null === $amount) {
+            return null;
+        }
+
+        return [
+            "currency" => $currency,
+            "amount" => $amount,
+        ];
+    }
+
+    /**
+     * Converts a WooCommerce decimal price string to minor currency units.
+     *
+     * @param string $price WooCommerce decimal price string.
+     * @return int|null
+     */
+    private function convert_price_to_minor_units($price)
+    {
+        $decimals = function_exists("wc_get_price_decimals")
+            ? max(0, (int) wc_get_price_decimals())
+            : 2;
+        $normalized = function_exists("wc_format_decimal")
+            ? (string) wc_format_decimal($price, $decimals, false)
+            : (string) $price;
+
+        if ("" === trim($normalized) || false !== strpos($normalized, "-")) {
+            return null;
+        }
+
+        $parts = explode(".", $normalized, 2);
+        $whole = preg_replace("/\D/", "", $parts[0]);
+        $fraction = isset($parts[1]) ? preg_replace("/\D/", "", $parts[1]) : "";
+        $fraction = substr(str_pad($fraction, $decimals, "0"), 0, $decimals);
+        $amount = ltrim((string) $whole . (string) $fraction, "0");
+
+        return "" === $amount ? 0 : (int) $amount;
+    }
+
+    /**
+     * Maps the WooCommerce product visibility/stock state to the backend enum.
+     *
+     * @param object $product WooCommerce product object.
+     * @return string
+     */
+    private function get_product_state($product)
+    {
+        $status = method_exists($product, "get_status")
+            ? (string) $product->get_status()
+            : "";
+        $stock_status = method_exists($product, "get_stock_status")
+            ? (string) $product->get_stock_status()
+            : "";
+
+        if ("publish" === $status) {
+            return "outofstock" === $stock_status ? "SOLD" : "AVAILABLE";
+        }
+
+        if (in_array($status, ["draft", "pending", "private"], true)) {
+            return "LISTED";
+        }
+
+        if ("trash" === $status) {
+            return "REMOVED";
+        }
+
+        return "UNKNOWN";
+    }
+
+    /**
+     * Returns absolute image URLs for the product.
+     *
+     * @param object $product WooCommerce product object.
+     * @return string[]
+     */
+    private function get_product_image_urls($product)
+    {
+        $image_ids = [];
+
+        if (method_exists($product, "get_image_id")) {
+            $image_ids[] = (int) $product->get_image_id();
+        }
+
+        if (method_exists($product, "get_gallery_image_ids")) {
+            $gallery_ids = $product->get_gallery_image_ids();
+
+            if (is_array($gallery_ids)) {
+                $image_ids = array_merge($image_ids, $gallery_ids);
             }
         }
+
+        $urls = [];
+
+        foreach (array_unique(array_map("intval", $image_ids)) as $image_id) {
+            if ($image_id <= 0) {
+                continue;
+            }
+
+            $url = $this->normalize_url_value(wp_get_attachment_url($image_id));
+
+            if ("" !== $url) {
+                $urls[] = $url;
+            }
+        }
+
+        return array_values($urls);
+    }
+
+    /**
+     * Normalizes HTML-rich content to plain text for the backend schema.
+     *
+     * @param mixed $value Raw text or HTML content.
+     * @return string
+     */
+    private function normalize_text_value($value)
+    {
+        $text = html_entity_decode(
+            wp_strip_all_tags((string) $value),
+            ENT_QUOTES,
+            "UTF-8",
+        );
+        $text = preg_replace("/\s+/u", " ", trim($text));
+
+        return is_string($text) ? $text : trim((string) $value);
+    }
+
+    /**
+     * Normalizes a URL for the backend schema.
+     *
+     * @param mixed $value Raw URL value.
+     * @return string
+     */
+    private function normalize_url_value($value)
+    {
+        $url = esc_url_raw(trim((string) $value), ["http", "https"]);
+
+        return is_string($url) ? $url : "";
+    }
+
+    /**
+     * Returns the canonical Aura Historia language code for the current store.
+     *
+     * @return string
+     */
+    private function get_content_language()
+    {
+        $locale = strtolower(str_replace("-", "_", (string) get_locale()));
+        $language = preg_replace("/[^a-z_]/", "", $locale);
+        $language = is_string($language) ? strtok($language, "_") : false;
+
+        if (
+            is_string($language) &&
+            in_array(
+                $language,
+                [
+                    "de",
+                    "en",
+                    "fr",
+                    "es",
+                    "it",
+                    "zh",
+                    "pt",
+                    "pl",
+                    "tr",
+                    "nl",
+                    "cs",
+                    "ja",
+                    "ru",
+                    "ar",
+                ],
+                true,
+            )
+        ) {
+            return $language;
+        }
+
+        return "en";
     }
 
     /**
