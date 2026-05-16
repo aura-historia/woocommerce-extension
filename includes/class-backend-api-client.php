@@ -138,15 +138,19 @@ class Backend_Api_Client
     }
 
     /**
-     * Calls `POST /api/v1/shops/{shopId}/products` using the generated OpenAPI
-     * client, uploading a batch of WooCommerce product objects for backfill.
+     * Calls `PUT /api/v1/shops/{shopId}/products` using the generated OpenAPI
+     * client, upserting a batch of WooCommerce product objects for backfill.
+     *
+     * Using PUT (rather than POST) means re-running the backfill is safe: the
+     * backend detects whether each product is new, changed, or unchanged and
+     * applies the appropriate action.
      *
      * @param string  $shop_id  Shop UUID.
      * @param string  $api_key  Backend API key.
      * @param array[] $products Array of WooCommerce product objects in WC REST API v3 format.
      * @return true|WP_Error
      */
-    public function post_shop_products($shop_id, $api_key, array $products)
+    public function put_shop_products($shop_id, $api_key, array $products)
     {
         $shop_id = Webhook_Manager::normalize_shop_id($shop_id);
 
@@ -176,7 +180,7 @@ class Backend_Api_Client
         $request_body = ["products" => $products];
 
         try {
-            $this->create_shops_api($api_key)->createShopProducts(
+            $this->create_shops_api($api_key)->upsertShopProducts(
                 $shop_id,
                 $request_body,
             );

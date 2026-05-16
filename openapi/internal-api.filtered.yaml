@@ -238,17 +238,21 @@ paths:
                 title: Internal Server Error
                 error: INTERNAL_SERVER_ERROR
   /api/v1/shops/{shopId}/products:
-    post:
-      summary: Batch-create or update shop products
+    put:
+      summary: Batch-upsert shop products
       description: >
         Accepts a batch of WooCommerce product objects and upserts them for the
         specified shop.
+
+        The backend detects whether each product is new, changed, or unchanged
+        and applies the appropriate action, making this operation safe to repeat
+        (e.g. for re-backfills after a reconnection).
 
         Used for the initial product backfill after a shop connects via the
         WooCommerce plugin.
 
         Requires the partner shop's `x-api-key`.
-      operationId: createShopProducts
+      operationId: upsertShopProducts
       tags:
         - Shops
       security:
@@ -270,9 +274,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/PostShopProductsData"
+              $ref: "#/components/schemas/PutShopProductsData"
       responses:
-        "201":
+        "200":
           description: Products accepted and queued for processing
         "400":
           description: Bad request
@@ -989,16 +993,15 @@ components:
         - OCEANIA
         - SOUTH_AMERICA
       example: EUROPE
-    PostShopProductsData:
+    PutShopProductsData:
       type: object
       required:
         - products
       description: >
         Batch of WooCommerce product objects to upsert for a shop.
 
-        Each item in the `products` array is a WooCommerce product payload in the
-        WooCommerce REST API v3 format — the same representation sent by live
-        WooCommerce product webhooks.
+        Each item in the `products` array is a WooCommerce product payload
+        in WooCommerce REST API v3 format.
       properties:
         products:
           type: array

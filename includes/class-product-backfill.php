@@ -16,7 +16,10 @@ if (!defined("ABSPATH")) {
  *
  * When the plugin connects to the Aura Historia backend with valid settings,
  * all existing WooCommerce products are pushed to the backend endpoint
- * `POST /api/v1/shops/{shopId}/products` in batches of {@see BATCH_SIZE}.
+ * `PUT /api/v1/shops/{shopId}/products` in batches of {@see BATCH_SIZE}.
+ *
+ * Using PUT means the backfill is idempotent: re-running it (e.g. after
+ * reconnecting a shop) updates changed products and skips unchanged ones.
  *
  * Action Scheduler (bundled with WooCommerce) is used so that large catalogs
  * do not block the HTTP response and can be retried automatically on failure.
@@ -175,7 +178,7 @@ class Product_Backfill
             $client = new Backend_Api_Client(
                 Webhook_Manager::get_backend_base_url(),
             );
-            $result = $client->post_shop_products($shop_id, $api_key, $payloads);
+            $result = $client->put_shop_products($shop_id, $api_key, $payloads);
 
             if (is_wp_error($result)) {
                 // Throw so Action Scheduler retries this batch automatically.
@@ -232,31 +235,47 @@ class Product_Backfill
     }
 
     /**
-     * Builds the WooCommerce REST API v3 payload for a single product.
+     * Builds the WooCommerce REST API v3 representation of a single product.
      *
-     * Delegates to {@see \WC_Webhook::build_payload()} so that the backfill
-     * payload format is identical to what the backend receives from live
-     * WooCommerce product webhooks.
+     * Uses {@see \WC_REST_Products_Controller} directly so that the backfill
+     * payload matches the WC REST API v3 format without going through webhook
+     * machinery.
      *
      * @param int $product_id WooCommerce product ID.
      * @return array<string,mixed>|null Serialised product data, or null on failure.
      */
     private function build_product_payload($product_id)
     {
-        if (!class_exists("WC_Webhook") || $product_id <= 0) {
+        if (
+            !function_exists("wc_get_product") ||
+            !class_exists("WC_REST_Products_Controller") ||
+            $product_id <= 0
+        ) {
             return null;
         }
 
-        $webhook = new \WC_Webhook();
-        $webhook->set_topic("product.updated");
-        $webhook->set_api_version(3);
+        $product = wc_get_product($product_id);
+
+        if (!$product) {
+            return null;
+        }
+
+        $controller = new \WC_REST_Products_Controller();
+        $request = new \WP_REST_Request("GET");
+        $request->set_param("context", "view");
 
         try {
-            $payload = $webhook->build_payload($product_id);
+            $response = $controller->prepare_item_for_response($product, $request);
         } catch (\Exception $e) {
             return null;
         }
 
-        return is_array($payload) && !empty($payload) ? $payload : null;
+        if (!$response instanceof \WP_REST_Response) {
+            return null;
+        }
+
+        $data = $response->get_data();
+
+        return is_array($data) && !empty($data) ? $data : null;
     }
 }

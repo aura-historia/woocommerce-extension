@@ -77,7 +77,7 @@ class ShopsApi
         'patchShopById' => [
             'application/json',
         ],
-        'createShopProducts' => [
+        'upsertShopProducts' => [
             'application/json',
         ],
     ];
@@ -555,39 +555,39 @@ class ShopsApi
     }
 
     /**
-     * Operation createShopProducts
+     * Operation upsertShopProducts
      *
      * Batch-create or update shop products
      *
      * @param  string $shop_id      Unique identifier of the shop (UUID format) (required)
      * @param  array  $products_data Batch of WooCommerce product objects to upsert (required)
-     * @param  string $contentType  The value for the Content-Type header. Check self::contentTypes['createShopProducts'] to see the possible values for this operation
+     * @param  string $contentType  The value for the Content-Type header. Check self::contentTypes['upsertShopProducts'] to see the possible values for this operation
      *
      * @throws \AuraHistoria\PartnerConnect\InternalApi\ApiException on non-2xx response or if the response body is not in the expected format
      * @throws \InvalidArgumentException
      * @return void
      */
-    public function createShopProducts($shop_id, array $products_data, string $contentType = self::contentTypes['createShopProducts'][0])
+    public function upsertShopProducts($shop_id, array $products_data, string $contentType = self::contentTypes['upsertShopProducts'][0])
     {
-        $this->createShopProductsWithHttpInfo($shop_id, $products_data, $contentType);
+        $this->upsertShopProductsWithHttpInfo($shop_id, $products_data, $contentType);
     }
 
     /**
-     * Operation createShopProductsWithHttpInfo
+     * Operation upsertShopProductsWithHttpInfo
      *
      * Batch-create or update shop products
      *
      * @param  string $shop_id      Unique identifier of the shop (UUID format) (required)
      * @param  array  $products_data Batch of WooCommerce product objects to upsert (required)
-     * @param  string $contentType  The value for the Content-Type header. Check self::contentTypes['createShopProducts'] to see the possible values for this operation
+     * @param  string $contentType  The value for the Content-Type header. Check self::contentTypes['upsertShopProducts'] to see the possible values for this operation
      *
      * @throws \AuraHistoria\PartnerConnect\InternalApi\ApiException on non-2xx response or if the response body is not in the expected format
      * @throws \InvalidArgumentException
      * @return array of null, HTTP status code, HTTP response headers (array of strings)
      */
-    public function createShopProductsWithHttpInfo($shop_id, array $products_data, string $contentType = self::contentTypes['createShopProducts'][0])
+    public function upsertShopProductsWithHttpInfo($shop_id, array $products_data, string $contentType = self::contentTypes['upsertShopProducts'][0])
     {
-        $request = $this->createShopProductsRequest($shop_id, $products_data, $contentType);
+        $request = $this->upsertShopProductsRequest($shop_id, $products_data, $contentType);
 
         try {
             $options = $this->createHttpClientOption();
@@ -645,21 +645,21 @@ class ShopsApi
     }
 
     /**
-     * Create request for operation 'createShopProducts'
+     * Create request for operation 'upsertShopProducts'
      *
      * @param  string $shop_id      Unique identifier of the shop (UUID format) (required)
      * @param  array  $products_data Batch of WooCommerce product objects to upsert (required)
-     * @param  string $contentType  The value for the Content-Type header. Check self::contentTypes['createShopProducts'] to see the possible values for this operation
+     * @param  string $contentType  The value for the Content-Type header. Check self::contentTypes['upsertShopProducts'] to see the possible values for this operation
      *
      * @throws \InvalidArgumentException
      * @return \GuzzleHttp\Psr7\Request
      */
-    public function createShopProductsRequest($shop_id, array $products_data, string $contentType = self::contentTypes['createShopProducts'][0])
+    public function upsertShopProductsRequest($shop_id, array $products_data, string $contentType = self::contentTypes['upsertShopProducts'][0])
     {
         // verify the required parameter 'shop_id' is set
         if ($shop_id === null || (is_array($shop_id) && count($shop_id) === 0)) {
             throw new \InvalidArgumentException(
-                'Missing the required parameter $shop_id when calling createShopProducts'
+                'Missing the required parameter $shop_id when calling upsertShopProducts'
             );
         }
 
@@ -741,7 +741,7 @@ class ShopsApi
         $operationHost = $this->config->getHost();
         $query = ObjectSerializer::buildQuery($queryParams);
         return new Request(
-            'POST',
+            'PUT',
             $operationHost . $resourcePath . ($query ? "?{$query}" : ''),
             $headers,
             $httpBody

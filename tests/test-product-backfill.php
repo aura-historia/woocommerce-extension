@@ -96,7 +96,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             array_fill(
                 0,
                 20,
-                new Response(201, ["Content-Type" => "application/json"], ""),
+                new Response(200, ["Content-Type" => "application/json"], ""),
             ),
         );
 
@@ -402,11 +402,11 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
     // ------------------------------------------------------------------
 
     /**
-     * It posts product payloads to the backend for a non-empty product page.
+     * It sends a PUT request with WC REST API v3 product payloads for a non-empty page.
      *
      * @return void
      */
-    public function test_process_batch_posts_products_to_backend()
+    public function test_process_batch_puts_products_to_backend()
     {
         $shop_id = "123e4567-e89b-12d3-a456-426614174000";
         $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
@@ -441,7 +441,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
 
         $this->assertCount(1, $requests);
         $this->assertSame(
-            "POST",
+            "PUT",
             strtoupper($requests[0]["request"]->getMethod()),
         );
         $this->assertSame(
