@@ -29,7 +29,7 @@ As soon as both values are saved and valid, the plugin starts delivery automatic
 When a valid Shop ID and API key are saved, the plugin:
 
 1. auto-generates and stores a hidden WooCommerce webhook secret
-2. sends that secret to `PATCH /api/v1/shops/{shopId}` using the configured `x-api-key`
+2. uses a typed OpenAPI-backed backend client to `PATCH /api/v1/shops/{shopId}` with the configured `x-api-key`
 3. keeps the WooCommerce webhooks active only if that backend sync succeeds
 4. sends webhook deliveries to `/api/v1/webhooks/woocommerce/{shopId}`
 5. includes the configured `x-api-key` on outgoing webhook requests
@@ -41,18 +41,21 @@ WooCommerce also signs the request body with `X-WC-Webhook-Signature` using the 
 ### Prerequisites
 
 - Docker
+- PHP with Composer
 - Node.js
 - npm
 
 ### Start a local WordPress + WooCommerce site
 
-1. Install dependencies:
+1. Install PHP dependencies:
+   - `composer install`
+2. Install Node.js dependencies:
    - `npm install`
-2. Start the local environment:
+3. Start the local environment:
    - `npm run env:start`
-3. Open WordPress:
+4. Open WordPress:
    - `http://localhost:8888`
-4. Log in with:
+5. Log in with:
    - username: `admin`
    - password: `password`
 
@@ -85,14 +88,32 @@ Useful WooCommerce screens:
 
 ## Useful commands
 
+- `composer install` — install the runtime PHP dependencies, including Guzzle
 - `npm run env:start` — start WordPress locally
 - `npm run env:update` — restart and refresh remote sources
 - `npm run env:stop` — stop the local environment
 - `npm run env:reset` — reset the local database
 - `npm run env:destroy` — remove the local environment entirely
 - `npm run wp -- plugin list` — run WP-CLI commands inside the environment
+- `npm run openapi:generate` — regenerate the generated Guzzle backend client from the pinned internal API spec
+- `npm run release:zip` — build a release ZIP that includes the Composer-installed runtime dependencies
 - `npm test` — run the PHP integration tests
-- `git archive --format=zip --output aura-historia-partner-connect.zip --prefix=aura-historia-partner-connect/ HEAD` — after commiting all your changes create a release ZIP file suitable for upload to WordPress
+
+## OpenAPI client generation
+
+The plugin uses a generated Guzzle-based OpenAPI client so backend calls stay strongly typed as the integration grows.
+
+The generator setup is pinned and deterministic:
+
+- upstream source: `https://github.com/aura-historia/internal-api`
+- pinned commit: `a9464cd344463588656e57ce3c52481e5f1f74ce`
+- generator image: `openapitools/openapi-generator-cli:v7.22.0`
+- config: `openapi/internal-api-client.config.json`
+- filtered spec snapshot: `openapi/internal-api.filtered.yaml`
+
+Regenerate the client with:
+
+- `npm run openapi:generate`
 
 ## Tests
 
@@ -120,6 +141,12 @@ Run the tests with:
 - The plugin only manages future events. It does not backfill an existing catalog.
 
 ## Release notes
+
+Build a release ZIP with:
+
+- `npm run release:zip`
+
+This runs `build-release.sh`, assembles a clean release tree, installs production Composer dependencies inside it, and creates `aura-historia-partner-connect.zip` in the project root.
 
 The repository already includes the basics you need for a WordPress.org-style release:
 

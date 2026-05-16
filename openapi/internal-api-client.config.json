@@ -1,0 +1,17 @@
+{
+  "source": {
+    "repositoryUrl": "https://github.com/aura-historia/internal-api",
+    "commit": "a9464cd344463588656e57ce3c52481e5f1f74ce",
+    "specPath": "swagger.yaml"
+  },
+  "generator": {
+    "name": "php",
+    "image": "openapitools/openapi-generator-cli:v7.22.0"
+  },
+  "operations": ["patchShopById"],
+  "namespace": "AuraHistoria\\PartnerConnect\\InternalApi",
+  "modelPackage": "Model",
+  "filteredSpecPath": "openapi/internal-api.filtered.yaml",
+  "outputPath": "includes/internal-api",
+  "temporaryPath": ".tmp-internal-api-generated"
+}

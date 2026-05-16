@@ -7,6 +7,7 @@
 
 namespace AuraHistoria\PartnerConnect;
 
+use AuraHistoria\PartnerConnect\InternalApi\Model\PatchShopData;
 use WC_Data_Store;
 use WC_Webhook;
 use WP_Error;
@@ -436,23 +437,17 @@ class Webhook_Manager
                     );
                 }
 
-                $webhook->set_name($this->get_webhook_name($topic));
-                $webhook->set_topic($topic);
-                $webhook->set_status($desired_status);
-                $webhook->set_delivery_url($endpoint_url);
-                $webhook->set_secret($settings["secret"]);
-                $webhook->set_user_id($user_id);
-                $webhook->set_api_version(self::API_VERSION);
+                $save_result = $this->save_managed_webhook(
+                    $webhook,
+                    $topic,
+                    $desired_status,
+                    $endpoint_url,
+                    $settings["secret"],
+                    $user_id,
+                );
 
-                try {
-                    $webhook->save();
-                } catch (\Exception $exception) {
-                    return $this->record_sync_error(
-                        new WP_Error(
-                            "ahpc_webhook_save_failed",
-                            $exception->getMessage(),
-                        ),
-                    );
+                if (is_wp_error($save_result)) {
+                    return $this->record_sync_error($save_result);
                 }
 
                 $webhook_ids[$topic] = absint($webhook->get_id());
@@ -473,10 +468,6 @@ class Webhook_Manager
 
             delete_option(self::OPTION_LAST_SYNC_ERROR);
 
-            if ("active" === $desired_status) {
-                $this->ping_active_webhooks($webhook_ids);
-            }
-
             return true;
         } finally {
             $this->syncing = false;
@@ -493,9 +484,43 @@ class Webhook_Manager
      */
     private function register_webhook_secret($shop_id, $api_key, $secret)
     {
-        $url = self::get_shop_registration_url($shop_id);
+        $request_body = new PatchShopData();
+        $request_body->setWoocommerceWebhookSecret($secret);
 
-        if ("" === $url) {
+        $client = new Backend_Api_Client(self::get_backend_base_url());
+        $response = $client->patch_shop_by_id(
+            $shop_id,
+            $api_key,
+            $request_body,
+        );
+
+        if (is_wp_error($response)) {
+            return $this->translate_backend_registration_error($response);
+        }
+
+        return true;
+    }
+
+    /**
+     * Converts a low-level backend client error into the existing admin-facing
+     * secret-registration error wording.
+     *
+     * @param WP_Error $error Backend client error.
+     * @return WP_Error
+     */
+    private function translate_backend_registration_error(WP_Error $error)
+    {
+        $error_code = $error->get_error_code();
+        $error_message = sanitize_text_field(
+            (string) $error->get_error_message(),
+        );
+        $error_data = $error->get_error_data($error_code);
+        $response_code =
+            is_array($error_data) && isset($error_data["response_code"])
+                ? (int) $error_data["response_code"]
+                : 0;
+
+        if ("ahpc_backend_invalid_url" === $error_code) {
             return new WP_Error(
                 "ahpc_invalid_registration_url",
                 __(
@@ -505,40 +530,45 @@ class Webhook_Manager
             );
         }
 
-        $response = wp_safe_remote_request($url, [
-            "method" => "PATCH",
-            "timeout" => 15,
-            "redirection" => 0,
-            "httpversion" => "1.1",
-            "blocking" => true,
-            "headers" => [
-                "Content-Type" => "application/json",
-                "Accept" => "application/json",
-                "x-api-key" => $api_key,
-            ],
-            "body" => wp_json_encode([
-                "woocommerceWebhookSecret" => $secret,
-            ]),
-        ]);
-
-        if (is_wp_error($response)) {
+        if ("ahpc_backend_client_unavailable" === $error_code) {
             return new WP_Error(
                 "ahpc_backend_registration_failed",
-                sprintf(
-                    /* translators: %s: WP_Error message. */
-                    __(
-                        "The backend rejected the secret registration request: %s",
-                        self::TEXT_DOMAIN,
-                    ),
-                    $response->get_error_message(),
+                __(
+                    "The plugin installation is incomplete and cannot contact Aura Historia right now.",
+                    self::TEXT_DOMAIN,
                 ),
             );
         }
 
-        $response_code = (int) wp_remote_retrieve_response_code($response);
+        if ("ahpc_backend_invalid_request" === $error_code) {
+            return new WP_Error(
+                "ahpc_backend_registration_failed",
+                sprintf(
+                    /* translators: %s: error detail. */
+                    __(
+                        "The backend request could not be prepared: %s",
+                        self::TEXT_DOMAIN,
+                    ),
+                    $error_message,
+                ),
+            );
+        }
 
-        if ($response_code < 200 || $response_code >= 300) {
-            $response_message = $this->extract_response_message($response);
+        if ("ahpc_backend_request_failed" === $error_code) {
+            return new WP_Error(
+                "ahpc_backend_registration_failed",
+                sprintf(
+                    /* translators: %s: error detail. */
+                    __(
+                        "The backend rejected the secret registration request: %s",
+                        self::TEXT_DOMAIN,
+                    ),
+                    $error_message,
+                ),
+            );
+        }
+
+        if ($response_code > 0) {
             $message = sprintf(
                 /* translators: %d: HTTP response code. */
                 __(
@@ -547,46 +577,18 @@ class Webhook_Manager
                 ),
                 $response_code,
             );
-
-            if ("" !== $response_message) {
-                $message .= " " . $response_message;
-            }
-
-            return new WP_Error("ahpc_backend_registration_failed", $message);
+        } else {
+            $message = __(
+                "The backend returned an invalid response while storing the WooCommerce webhook secret.",
+                self::TEXT_DOMAIN,
+            );
         }
 
-        return true;
-    }
-
-    /**
-     * Extracts a short error message from a backend HTTP response.
-     *
-     * @param array $response HTTP response.
-     * @return string
-     */
-    private function extract_response_message($response)
-    {
-        $body = trim((string) wp_remote_retrieve_body($response));
-
-        if ("" === $body) {
-            return "";
+        if ("" !== $error_message) {
+            $message .= " " . $error_message;
         }
 
-        $decoded = json_decode($body, true);
-
-        if (is_array($decoded)) {
-            foreach (["message", "error", "detail"] as $key) {
-                if (!empty($decoded[$key]) && is_string($decoded[$key])) {
-                    return sanitize_text_field(
-                        wp_strip_all_tags($decoded[$key]),
-                    );
-                }
-            }
-        }
-
-        return sanitize_text_field(
-            wp_html_excerpt(wp_strip_all_tags($body), 200, "…"),
-        );
+        return new WP_Error("ahpc_backend_registration_failed", $message);
     }
 
     /**
@@ -763,20 +765,115 @@ class Webhook_Manager
     }
 
     /**
-     * Sends a ping to each active managed webhook to verify connectivity.
+     * Saves a managed webhook while avoiding WooCommerce's built-in ping flow.
      *
-     * @param array<string,int> $webhook_ids Topic-to-ID map of managed webhooks.
-     * @return void
+     * WooCommerce automatically sends a delivery ping when an active webhook is
+     * saved with a changed delivery URL or a pending-delivery flag. The plugin
+     * does not use these pings, so it first persists any delivery URL change in
+     * a paused state and always clears the pending-delivery flag.
+     *
+     * @param WC_Webhook $webhook      Webhook instance.
+     * @param string     $topic        Webhook topic.
+     * @param string     $status       Desired webhook status.
+     * @param string     $delivery_url Desired delivery URL.
+     * @param string     $secret       Signing secret.
+     * @param int        $user_id      Delivery user ID.
+     * @return true|WP_Error
      */
-    private function ping_active_webhooks($webhook_ids)
-    {
-        foreach ($webhook_ids as $topic => $webhook_id) {
-            $webhook = $this->load_webhook($webhook_id);
+    private function save_managed_webhook(
+        $webhook,
+        $topic,
+        $status,
+        $delivery_url,
+        $secret,
+        $user_id,
+    ) {
+        $current_delivery_url = (string) $webhook->get_delivery_url("edit");
+        $requires_paused_url_update =
+            $webhook->get_id() &&
+            "active" === $status &&
+            untrailingslashit($current_delivery_url) !==
+                untrailingslashit($delivery_url);
 
-            if ($webhook && method_exists($webhook, "deliver_ping")) {
-                $webhook->deliver_ping();
+        if ($requires_paused_url_update) {
+            $this->apply_managed_webhook_configuration(
+                $webhook,
+                $topic,
+                "paused",
+                $delivery_url,
+                $secret,
+                $user_id,
+            );
+
+            $save_result = $this->persist_managed_webhook($webhook);
+
+            if (is_wp_error($save_result)) {
+                return $save_result;
             }
         }
+
+        $this->apply_managed_webhook_configuration(
+            $webhook,
+            $topic,
+            $status,
+            $delivery_url,
+            $secret,
+            $user_id,
+        );
+
+        return $this->persist_managed_webhook($webhook);
+    }
+
+    /**
+     * Applies the managed webhook configuration to a webhook instance.
+     *
+     * @param WC_Webhook $webhook      Webhook instance.
+     * @param string     $topic        Webhook topic.
+     * @param string     $status       Desired webhook status.
+     * @param string     $delivery_url Desired delivery URL.
+     * @param string     $secret       Signing secret.
+     * @param int        $user_id      Delivery user ID.
+     * @return void
+     */
+    private function apply_managed_webhook_configuration(
+        $webhook,
+        $topic,
+        $status,
+        $delivery_url,
+        $secret,
+        $user_id,
+    ) {
+        $webhook->set_name($this->get_webhook_name($topic));
+        $webhook->set_topic($topic);
+        $webhook->set_status($status);
+        $webhook->set_delivery_url($delivery_url);
+        $webhook->set_secret($secret);
+        $webhook->set_user_id($user_id);
+        $webhook->set_api_version(self::API_VERSION);
+
+        if (method_exists($webhook, "set_pending_delivery")) {
+            $webhook->set_pending_delivery(false);
+        }
+    }
+
+    /**
+     * Persists a managed webhook and converts exceptions to WP_Error.
+     *
+     * @param WC_Webhook $webhook Webhook instance.
+     * @return true|WP_Error
+     */
+    private function persist_managed_webhook($webhook)
+    {
+        try {
+            $webhook->save();
+        } catch (\Exception $exception) {
+            return new WP_Error(
+                "ahpc_webhook_save_failed",
+                $exception->getMessage(),
+            );
+        }
+
+        return true;
     }
 
     /**

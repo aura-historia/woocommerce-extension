@@ -295,13 +295,7 @@ class Plugin
                 );
 
                 if ("" === $api_key) {
-                    if (!empty($current["api_key"])) {
-                        $sanitized[
-                            "api_key"
-                        ] = Webhook_Manager::normalize_api_key(
-                            $current["api_key"],
-                        );
-                    }
+                    $sanitized["api_key"] = "";
                 } elseif (Webhook_Manager::is_valid_api_key($api_key)) {
                     $sanitized["api_key"] = $api_key;
                 } else {
@@ -364,14 +358,11 @@ class Plugin
         }
 
         $is_webhook_delivery =
-            !empty($args["headers"]["X-WC-Webhook-ID"]) ||
-            !empty($args["headers"]["X-WC-Webhook-Topic"]);
-        $is_webhook_ping =
-            !empty($args["body"]) &&
-            is_string($args["body"]) &&
-            false !== strpos($args["body"], "webhook_id=");
+            $this->has_request_header($args, "X-WC-Webhook-ID") ||
+            $this->has_request_header($args, "X-WC-Webhook-Topic") ||
+            $this->has_request_header($args, "X-WC-Webhook-Signature");
 
-        if (!$is_webhook_delivery && !$is_webhook_ping) {
+        if (!$is_webhook_delivery) {
             return $args;
         }
 
@@ -382,6 +373,34 @@ class Plugin
         $args["headers"]["x-api-key"] = $settings["api_key"];
 
         return $args;
+    }
+
+    /**
+     * Returns whether the request already contains a header, using
+     * case-insensitive matching.
+     *
+     * @param array  $args        HTTP request arguments.
+     * @param string $header_name Header name to check.
+     * @return bool
+     */
+    private function has_request_header($args, $header_name)
+    {
+        if (empty($args["headers"]) || !is_array($args["headers"])) {
+            return false;
+        }
+
+        $normalized_target = strtolower($header_name);
+
+        foreach ($args["headers"] as $key => $value) {
+            if (
+                strtolower((string) $key) === $normalized_target &&
+                !empty($value)
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -544,12 +563,20 @@ class Plugin
         $sync_success =
             isset($_GET["ahpc_synced"]) &&
             "1" === wp_unslash($_GET["ahpc_synced"]);
+        $settings_updated =
+            isset($_GET["settings-updated"]) &&
+            "true" === wp_unslash($_GET["settings-updated"]);
         $logs_url = admin_url("admin.php?page=wc-status&tab=logs");
         $webhooks_url = admin_url(
             "admin.php?page=wc-settings&tab=advanced&section=webhooks",
         );
         $has_shop_id = "" !== $settings["shop_id"];
         $has_api_key = "" !== $settings["api_key"];
+        $connection_status = $this->get_connection_status($settings);
+        $hide_default_updated_notice =
+            $settings_updated &&
+            empty($sync_error) &&
+            "success" === $connection_status["type"];
         ?>
 		<div class="wrap">
 			<h1><?php echo esc_html__(
@@ -560,7 +587,7 @@ class Plugin
        "Connect this WooCommerce store to Aura Historia so your products can appear there and stay up to date automatically.",
        Webhook_Manager::TEXT_DOMAIN,
    ); ?></p>
-			<?php settings_errors(Webhook_Manager::OPTION_SETTINGS); ?>
+			<?php $this->render_setting_messages($hide_default_updated_notice); ?>
 
 			<?php if (!$this->is_woocommerce_available()): ?>
 				<?php $this->render_inline_notice(
@@ -582,6 +609,14 @@ class Plugin
 
 			<?php if (!empty($sync_error)): ?>
 				<?php $this->render_inline_notice("error", esc_html($sync_error)); ?>
+			<?php elseif ($settings_updated && "success" === $connection_status["type"]): ?>
+				<?php $this->render_inline_notice(
+        "success",
+        esc_html__(
+            "Configuration saved and Aura Historia connection verified.",
+            Webhook_Manager::TEXT_DOMAIN,
+        ),
+    ); ?>
 			<?php elseif (empty($backend_base_url)): ?>
 				<?php $this->render_inline_notice(
         "warning",
@@ -638,6 +673,11 @@ class Plugin
             Webhook_Manager::TEXT_DOMAIN,
         ),
     ); ?>
+			<?php elseif ("error" === $connection_status["type"]): ?>
+				<?php $this->render_inline_notice(
+        "error",
+        esc_html($connection_status["message"]),
+    ); ?>
 			<?php endif; ?>
 
 			<form action="options.php" method="post">
@@ -656,7 +696,7 @@ class Plugin
             Webhook_Manager::OPTION_SETTINGS,
         ); ?>[shop_id]" type="text" class="regular-text" value="<?php echo esc_attr(
     $settings["shop_id"],
-); ?>" placeholder="123e4567-e89b-12d3-a456-426614174000" spellcheck="false" />
+); ?>" spellcheck="false" />
 								<p class="description"><?php echo esc_html__(
             "Paste the Shop ID from Aura Historia for this store. It tells Aura Historia where your WooCommerce products should appear.",
             Webhook_Manager::TEXT_DOMAIN,
@@ -673,20 +713,25 @@ class Plugin
 							<td>
 								<input id="ahpc-api-key" name="<?php echo esc_attr(
             Webhook_Manager::OPTION_SETTINGS,
-        ); ?>[api_key]" type="password" class="regular-text" value="" autocomplete="new-password" spellcheck="false" />
-								<p class="description">
-									<?php echo esc_html__(
-             "Paste the API key from Aura Historia for this store. It lets Aura Historia securely receive product updates from your shop. Leave this blank if you want to keep the key that is already saved.",
-             Webhook_Manager::TEXT_DOMAIN,
-         ); ?>
-									<?php if (!empty($settings["api_key"])): ?>
-										<?php echo " " .
-              esc_html__(
-                  "An API key is already saved.",
-                  Webhook_Manager::TEXT_DOMAIN,
-              ); ?>
-									<?php endif; ?>
-								</p>
+        ); ?>[api_key]" type="text" class="regular-text" value="<?php echo esc_attr(
+    $settings["api_key"],
+); ?>" autocomplete="off" spellcheck="false" />
+								<p class="description"><?php echo esc_html__(
+            "Paste the API key from Aura Historia for this store. It lets Aura Historia securely receive product updates from your shop.",
+            Webhook_Manager::TEXT_DOMAIN,
+        ); ?></p>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><?php echo esc_html__(
+           "Connection status",
+           Webhook_Manager::TEXT_DOMAIN,
+       ); ?></th>
+							<td>
+								<strong><?php echo esc_html($connection_status["label"]); ?></strong>
+								<p class="description"><?php echo esc_html(
+            $connection_status["message"],
+        ); ?></p>
 							</td>
 						</tr>
 					</tbody>
@@ -787,6 +832,105 @@ class Plugin
 			<?php endif; ?>
 		</div>
 		<?php
+    }
+
+    /**
+     * Renders settings messages for the plugin page.
+     *
+     * @param bool $hide_updated_notice Whether the generic updated notice should be hidden.
+     * @return void
+     */
+    private function render_setting_messages($hide_updated_notice = false)
+    {
+        if (!function_exists("get_settings_errors")) {
+            return;
+        }
+
+        foreach (
+            get_settings_errors(Webhook_Manager::OPTION_SETTINGS)
+            as $error
+        ) {
+            $code = isset($error["code"]) ? (string) $error["code"] : "";
+            $type = isset($error["type"]) ? (string) $error["type"] : "error";
+            $message = isset($error["message"])
+                ? (string) $error["message"]
+                : "";
+
+            if ($hide_updated_notice && "settings_updated" === $code) {
+                continue;
+            }
+
+            $this->render_inline_notice(
+                "updated" === $type ? "success" : $type,
+                esc_html($message),
+            );
+        }
+    }
+
+    /**
+     * Returns the current Aura Historia connection status for the settings page.
+     *
+     * @param array<string,mixed> $settings Current plugin settings.
+     * @return array<string,string>
+     */
+    private function get_connection_status($settings)
+    {
+        if ("" === Webhook_Manager::get_backend_base_url()) {
+            return [
+                "type" => "warning",
+                "label" => __("Not configured", Webhook_Manager::TEXT_DOMAIN),
+                "message" => __(
+                    "Define AHPC_BACKEND_BASE_URL before verifying the Aura Historia connection.",
+                    Webhook_Manager::TEXT_DOMAIN,
+                ),
+            ];
+        }
+
+        if (
+            !Webhook_Manager::is_valid_shop_id($settings["shop_id"]) ||
+            !Webhook_Manager::is_valid_api_key($settings["api_key"])
+        ) {
+            return [
+                "type" => "warning",
+                "label" => __("Not verified", Webhook_Manager::TEXT_DOMAIN),
+                "message" => __(
+                    "Save a valid Shop ID and API key to verify the Aura Historia connection.",
+                    Webhook_Manager::TEXT_DOMAIN,
+                ),
+            ];
+        }
+
+        $client = new Backend_Api_Client(
+            Webhook_Manager::get_backend_base_url(),
+        );
+        $result = $client->verify_shop_connection(
+            $settings["shop_id"],
+            $settings["api_key"],
+        );
+
+        if (is_wp_error($result)) {
+            return [
+                "type" => "error",
+                "label" => __("Check failed", Webhook_Manager::TEXT_DOMAIN),
+                "message" => sprintf(
+                    /* translators: %s: connection check error detail. */
+                    __(
+                        "Aura Historia did not accept the saved Shop ID and API key: %s",
+                        Webhook_Manager::TEXT_DOMAIN,
+                    ),
+                    $result->get_error_message(),
+                ),
+            ];
+        }
+
+        return [
+            "type" => "success",
+            "label" => __("Connected", Webhook_Manager::TEXT_DOMAIN),
+            "message" => __(
+                "Aura Historia is responding and the saved Shop ID and API key are still valid.",
+                Webhook_Manager::TEXT_DOMAIN,
+            ),
+        ];
     }
 
     /**

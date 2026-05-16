@@ -37,9 +37,18 @@ if (!defined("AHPC_PLUGIN_BASENAME")) {
 }
 
 if (!defined("AHPC_BACKEND_BASE_URL")) {
-    define("AHPC_BACKEND_BASE_URL", "https://example.com");
+    define("AHPC_BACKEND_BASE_URL", "https://api.dev.aura-historia.com");
 }
 
+$ahpc_autoload = AHPC_PLUGIN_DIR . "vendor/autoload.php";
+
+if (file_exists($ahpc_autoload)) {
+    require_once $ahpc_autoload;
+}
+
+require_once AHPC_PLUGIN_DIR . "includes/class-internal-api-autoloader.php";
+\AuraHistoria\PartnerConnect\Internal_Api_Autoloader::register();
+require_once AHPC_PLUGIN_DIR . "includes/class-backend-api-client.php";
 require_once AHPC_PLUGIN_DIR . "includes/class-webhook-manager.php";
 require_once AHPC_PLUGIN_DIR . "includes/class-plugin.php";
 
