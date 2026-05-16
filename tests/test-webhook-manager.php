@@ -373,14 +373,155 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             }),
         );
 
-        $this->assertNotEmpty($delivery_requests);
+        $this->assertSame([], $delivery_requests);
+    }
 
-        foreach ($delivery_requests as $request) {
-            $this->assertSame(
-                $api_key,
-                $request["args"]["headers"]["x-api-key"],
-            );
-        }
+    /**
+     * It adds the backend API key to real webhook deliveries.
+     *
+     * @return void
+     */
+    public function test_plugin_adds_api_key_to_real_webhook_deliveries()
+    {
+        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+        $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+
+        update_option(
+            Webhook_Manager::OPTION_SETTINGS,
+            [
+                "shop_id" => $shop_id,
+                "api_key" => $api_key,
+                "secret" => "test-secret",
+            ],
+            false,
+        );
+        update_option(
+            Webhook_Manager::OPTION_PLUGIN_VERSION,
+            AHPC_VERSION,
+            false,
+        );
+        update_option(Webhook_Manager::OPTION_NEEDS_SYNC, "no", false);
+
+        $plugin = new Plugin();
+        $plugin->bootstrap_woocommerce();
+
+        $args = [
+            "headers" => [
+                "x-wc-webhook-id" => "20",
+                "x-wc-webhook-topic" => "product.created",
+                "x-wc-webhook-signature" => "test-signature",
+            ],
+            "body" => '{"id":30}',
+        ];
+
+        $filtered_args = $plugin->maybe_add_webhook_api_key_header(
+            $args,
+            "https://example.com/api/v1/webhooks/woocommerce/" . $shop_id,
+        );
+
+        $this->assertSame($api_key, $filtered_args["headers"]["x-api-key"]);
+    }
+
+    /**
+     * It does not add the backend API key to webhook ping requests.
+     *
+     * @return void
+     */
+    public function test_plugin_does_not_add_api_key_to_webhook_pings()
+    {
+        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+        $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+
+        update_option(
+            Webhook_Manager::OPTION_SETTINGS,
+            [
+                "shop_id" => $shop_id,
+                "api_key" => $api_key,
+                "secret" => "test-secret",
+            ],
+            false,
+        );
+        update_option(
+            Webhook_Manager::OPTION_PLUGIN_VERSION,
+            AHPC_VERSION,
+            false,
+        );
+        update_option(Webhook_Manager::OPTION_NEEDS_SYNC, "no", false);
+
+        $plugin = new Plugin();
+        $plugin->bootstrap_woocommerce();
+
+        $args = [
+            "headers" => [],
+            "body" => "webhook_id=20",
+        ];
+
+        $filtered_args = $plugin->maybe_add_webhook_api_key_header(
+            $args,
+            "https://example.com/api/v1/webhooks/woocommerce/" . $shop_id,
+        );
+
+        $this->assertArrayNotHasKey("x-api-key", $filtered_args["headers"]);
+    }
+
+    /**
+     * It does not emit WooCommerce delivery pings when paused managed webhooks
+     * transition to an active configured endpoint.
+     *
+     * @return void
+     */
+    public function test_sync_webhooks_does_not_emit_ping_requests_when_activating_existing_webhooks()
+    {
+        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+        $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+
+        update_option(
+            Webhook_Manager::OPTION_SETTINGS,
+            [
+                "shop_id" => "",
+                "api_key" => "",
+                "secret" => "test-secret",
+            ],
+            false,
+        );
+
+        $manager = new Webhook_Manager();
+        $first_result = $manager->sync_webhooks();
+        $first_ids = $manager->get_webhook_ids();
+
+        $this->assertTrue($first_result);
+        $this->assertCount(3, $first_ids);
+
+        $this->http_requests = [];
+        $this->set_backend_mock_responses([
+            $this->mock_backend_registration_response(),
+        ]);
+
+        update_option(
+            Webhook_Manager::OPTION_SETTINGS,
+            [
+                "shop_id" => $shop_id,
+                "api_key" => $api_key,
+                "secret" => "test-secret",
+            ],
+            false,
+        );
+
+        $second_result = $manager->sync_webhooks();
+        $second_ids = $manager->get_webhook_ids();
+        $delivery_requests = array_values(
+            array_filter($this->http_requests, static function ($request) use (
+                $shop_id,
+            ) {
+                return "https://example.com/api/v1/webhooks/woocommerce/" .
+                    $shop_id ===
+                    $request["url"];
+            }),
+        );
+
+        $this->assertTrue($second_result);
+        $this->assertSame($first_ids, $second_ids);
+        $this->assertSame([], $delivery_requests);
     }
 
     /**

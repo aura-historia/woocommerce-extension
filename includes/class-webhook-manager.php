@@ -437,23 +437,17 @@ class Webhook_Manager
                     );
                 }
 
-                $webhook->set_name($this->get_webhook_name($topic));
-                $webhook->set_topic($topic);
-                $webhook->set_status($desired_status);
-                $webhook->set_delivery_url($endpoint_url);
-                $webhook->set_secret($settings["secret"]);
-                $webhook->set_user_id($user_id);
-                $webhook->set_api_version(self::API_VERSION);
+                $save_result = $this->save_managed_webhook(
+                    $webhook,
+                    $topic,
+                    $desired_status,
+                    $endpoint_url,
+                    $settings["secret"],
+                    $user_id,
+                );
 
-                try {
-                    $webhook->save();
-                } catch (\Exception $exception) {
-                    return $this->record_sync_error(
-                        new WP_Error(
-                            "ahpc_webhook_save_failed",
-                            $exception->getMessage(),
-                        ),
-                    );
+                if (is_wp_error($save_result)) {
+                    return $this->record_sync_error($save_result);
                 }
 
                 $webhook_ids[$topic] = absint($webhook->get_id());
@@ -473,10 +467,6 @@ class Webhook_Manager
             }
 
             delete_option(self::OPTION_LAST_SYNC_ERROR);
-
-            if ("active" === $desired_status) {
-                $this->ping_active_webhooks($webhook_ids);
-            }
 
             return true;
         } finally {
@@ -775,20 +765,115 @@ class Webhook_Manager
     }
 
     /**
-     * Sends a ping to each active managed webhook to verify connectivity.
+     * Saves a managed webhook while avoiding WooCommerce's built-in ping flow.
      *
-     * @param array<string,int> $webhook_ids Topic-to-ID map of managed webhooks.
-     * @return void
+     * WooCommerce automatically sends a delivery ping when an active webhook is
+     * saved with a changed delivery URL or a pending-delivery flag. The plugin
+     * does not use these pings, so it first persists any delivery URL change in
+     * a paused state and always clears the pending-delivery flag.
+     *
+     * @param WC_Webhook $webhook      Webhook instance.
+     * @param string     $topic        Webhook topic.
+     * @param string     $status       Desired webhook status.
+     * @param string     $delivery_url Desired delivery URL.
+     * @param string     $secret       Signing secret.
+     * @param int        $user_id      Delivery user ID.
+     * @return true|WP_Error
      */
-    private function ping_active_webhooks($webhook_ids)
-    {
-        foreach ($webhook_ids as $topic => $webhook_id) {
-            $webhook = $this->load_webhook($webhook_id);
+    private function save_managed_webhook(
+        $webhook,
+        $topic,
+        $status,
+        $delivery_url,
+        $secret,
+        $user_id,
+    ) {
+        $current_delivery_url = (string) $webhook->get_delivery_url("edit");
+        $requires_paused_url_update =
+            $webhook->get_id() &&
+            "active" === $status &&
+            untrailingslashit($current_delivery_url) !==
+                untrailingslashit($delivery_url);
 
-            if ($webhook && method_exists($webhook, "deliver_ping")) {
-                $webhook->deliver_ping();
+        if ($requires_paused_url_update) {
+            $this->apply_managed_webhook_configuration(
+                $webhook,
+                $topic,
+                "paused",
+                $delivery_url,
+                $secret,
+                $user_id,
+            );
+
+            $save_result = $this->persist_managed_webhook($webhook);
+
+            if (is_wp_error($save_result)) {
+                return $save_result;
             }
         }
+
+        $this->apply_managed_webhook_configuration(
+            $webhook,
+            $topic,
+            $status,
+            $delivery_url,
+            $secret,
+            $user_id,
+        );
+
+        return $this->persist_managed_webhook($webhook);
+    }
+
+    /**
+     * Applies the managed webhook configuration to a webhook instance.
+     *
+     * @param WC_Webhook $webhook      Webhook instance.
+     * @param string     $topic        Webhook topic.
+     * @param string     $status       Desired webhook status.
+     * @param string     $delivery_url Desired delivery URL.
+     * @param string     $secret       Signing secret.
+     * @param int        $user_id      Delivery user ID.
+     * @return void
+     */
+    private function apply_managed_webhook_configuration(
+        $webhook,
+        $topic,
+        $status,
+        $delivery_url,
+        $secret,
+        $user_id,
+    ) {
+        $webhook->set_name($this->get_webhook_name($topic));
+        $webhook->set_topic($topic);
+        $webhook->set_status($status);
+        $webhook->set_delivery_url($delivery_url);
+        $webhook->set_secret($secret);
+        $webhook->set_user_id($user_id);
+        $webhook->set_api_version(self::API_VERSION);
+
+        if (method_exists($webhook, "set_pending_delivery")) {
+            $webhook->set_pending_delivery(false);
+        }
+    }
+
+    /**
+     * Persists a managed webhook and converts exceptions to WP_Error.
+     *
+     * @param WC_Webhook $webhook Webhook instance.
+     * @return true|WP_Error
+     */
+    private function persist_managed_webhook($webhook)
+    {
+        try {
+            $webhook->save();
+        } catch (\Exception $exception) {
+            return new WP_Error(
+                "ahpc_webhook_save_failed",
+                $exception->getMessage(),
+            );
+        }
+
+        return true;
     }
 
     /**

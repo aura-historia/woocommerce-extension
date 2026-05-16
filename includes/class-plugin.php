@@ -358,14 +358,11 @@ class Plugin
         }
 
         $is_webhook_delivery =
-            !empty($args["headers"]["X-WC-Webhook-ID"]) ||
-            !empty($args["headers"]["X-WC-Webhook-Topic"]);
-        $is_webhook_ping =
-            !empty($args["body"]) &&
-            is_string($args["body"]) &&
-            false !== strpos($args["body"], "webhook_id=");
+            $this->has_request_header($args, "X-WC-Webhook-ID") ||
+            $this->has_request_header($args, "X-WC-Webhook-Topic") ||
+            $this->has_request_header($args, "X-WC-Webhook-Signature");
 
-        if (!$is_webhook_delivery && !$is_webhook_ping) {
+        if (!$is_webhook_delivery) {
             return $args;
         }
 
@@ -376,6 +373,34 @@ class Plugin
         $args["headers"]["x-api-key"] = $settings["api_key"];
 
         return $args;
+    }
+
+    /**
+     * Returns whether the request already contains a header, using
+     * case-insensitive matching.
+     *
+     * @param array  $args        HTTP request arguments.
+     * @param string $header_name Header name to check.
+     * @return bool
+     */
+    private function has_request_header($args, $header_name)
+    {
+        if (empty($args["headers"]) || !is_array($args["headers"])) {
+            return false;
+        }
+
+        $normalized_target = strtolower($header_name);
+
+        foreach ($args["headers"] as $key => $value) {
+            if (
+                strtolower((string) $key) === $normalized_target &&
+                !empty($value)
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
