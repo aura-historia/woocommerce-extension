@@ -138,6 +138,66 @@ class Backend_Api_Client
     }
 
     /**
+     * Calls `POST /api/v1/shops/{shopId}/products` using the generated OpenAPI
+     * client, uploading a batch of WooCommerce product objects for backfill.
+     *
+     * @param string  $shop_id  Shop UUID.
+     * @param string  $api_key  Backend API key.
+     * @param array[] $products Array of WooCommerce product objects in WC REST API v3 format.
+     * @return true|WP_Error
+     */
+    public function post_shop_products($shop_id, $api_key, array $products)
+    {
+        $shop_id = Webhook_Manager::normalize_shop_id($shop_id);
+
+        if (
+            "" === $this->base_url ||
+            !Webhook_Manager::is_valid_shop_id($shop_id)
+        ) {
+            return new WP_Error(
+                "ahpc_backend_invalid_url",
+                __(
+                    "The backend shop URL could not be built from the configured Shop ID.",
+                    self::TEXT_DOMAIN,
+                ),
+            );
+        }
+
+        if (!$this->is_runtime_available()) {
+            return new WP_Error(
+                "ahpc_backend_client_unavailable",
+                __(
+                    "The plugin's generated backend API client dependencies are not available.",
+                    self::TEXT_DOMAIN,
+                ),
+            );
+        }
+
+        $request_body = ["products" => $products];
+
+        try {
+            $this->create_shops_api($api_key)->createShopProducts(
+                $shop_id,
+                $request_body,
+            );
+        } catch (ApiException $exception) {
+            return $this->translate_api_exception($exception);
+        } catch (\InvalidArgumentException $exception) {
+            return new WP_Error(
+                "ahpc_backend_invalid_request",
+                $this->sanitize_error_fragment($exception->getMessage()),
+            );
+        } catch (\Throwable $throwable) {
+            return new WP_Error(
+                "ahpc_backend_request_failed",
+                $this->sanitize_error_fragment($throwable->getMessage()),
+            );
+        }
+
+        return true;
+    }
+
+    /**
      * Returns whether the generated client runtime dependencies are available.
      *
      * @return bool

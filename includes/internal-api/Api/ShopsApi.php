@@ -77,6 +77,9 @@ class ShopsApi
         'patchShopById' => [
             'application/json',
         ],
+        'createShopProducts' => [
+            'application/json',
+        ],
     ];
 
     /**
@@ -549,6 +552,200 @@ class ShopsApi
             $response->getStatusCode(),
             $response->getHeaders()
         ];
+    }
+
+    /**
+     * Operation createShopProducts
+     *
+     * Batch-create or update shop products
+     *
+     * @param  string $shop_id      Unique identifier of the shop (UUID format) (required)
+     * @param  array  $products_data Batch of WooCommerce product objects to upsert (required)
+     * @param  string $contentType  The value for the Content-Type header. Check self::contentTypes['createShopProducts'] to see the possible values for this operation
+     *
+     * @throws \AuraHistoria\PartnerConnect\InternalApi\ApiException on non-2xx response or if the response body is not in the expected format
+     * @throws \InvalidArgumentException
+     * @return void
+     */
+    public function createShopProducts($shop_id, array $products_data, string $contentType = self::contentTypes['createShopProducts'][0])
+    {
+        $this->createShopProductsWithHttpInfo($shop_id, $products_data, $contentType);
+    }
+
+    /**
+     * Operation createShopProductsWithHttpInfo
+     *
+     * Batch-create or update shop products
+     *
+     * @param  string $shop_id      Unique identifier of the shop (UUID format) (required)
+     * @param  array  $products_data Batch of WooCommerce product objects to upsert (required)
+     * @param  string $contentType  The value for the Content-Type header. Check self::contentTypes['createShopProducts'] to see the possible values for this operation
+     *
+     * @throws \AuraHistoria\PartnerConnect\InternalApi\ApiException on non-2xx response or if the response body is not in the expected format
+     * @throws \InvalidArgumentException
+     * @return array of null, HTTP status code, HTTP response headers (array of strings)
+     */
+    public function createShopProductsWithHttpInfo($shop_id, array $products_data, string $contentType = self::contentTypes['createShopProducts'][0])
+    {
+        $request = $this->createShopProductsRequest($shop_id, $products_data, $contentType);
+
+        try {
+            $options = $this->createHttpClientOption();
+            try {
+                $response = $this->client->send($request, $options);
+            } catch (RequestException $e) {
+                throw new ApiException(
+                    "[{$e->getCode()}] {$e->getMessage()}",
+                    (int) $e->getCode(),
+                    $e->getResponse() ? $e->getResponse()->getHeaders() : null,
+                    $e->getResponse() ? (string) $e->getResponse()->getBody() : null
+                );
+            } catch (ConnectException $e) {
+                throw new ApiException(
+                    "[{$e->getCode()}] {$e->getMessage()}",
+                    (int) $e->getCode(),
+                    null,
+                    null
+                );
+            }
+
+            $statusCode = $response->getStatusCode();
+
+            if ($statusCode < 200 || $statusCode > 299) {
+                throw new ApiException(
+                    sprintf(
+                        '[%d] Error connecting to the API (%s)',
+                        $statusCode,
+                        (string) $request->getUri()
+                    ),
+                    $statusCode,
+                    $response->getHeaders(),
+                    (string) $response->getBody()
+                );
+            }
+
+            return [null, $statusCode, $response->getHeaders()];
+        } catch (ApiException $e) {
+            switch ($e->getCode()) {
+                case 400:
+                case 401:
+                case 403:
+                case 500:
+                    $data = ObjectSerializer::deserialize(
+                        $e->getResponseBody(),
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
+                        $e->getResponseHeaders()
+                    );
+                    $e->setResponseObject($data);
+                    throw $e;
+            }
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Create request for operation 'createShopProducts'
+     *
+     * @param  string $shop_id      Unique identifier of the shop (UUID format) (required)
+     * @param  array  $products_data Batch of WooCommerce product objects to upsert (required)
+     * @param  string $contentType  The value for the Content-Type header. Check self::contentTypes['createShopProducts'] to see the possible values for this operation
+     *
+     * @throws \InvalidArgumentException
+     * @return \GuzzleHttp\Psr7\Request
+     */
+    public function createShopProductsRequest($shop_id, array $products_data, string $contentType = self::contentTypes['createShopProducts'][0])
+    {
+        // verify the required parameter 'shop_id' is set
+        if ($shop_id === null || (is_array($shop_id) && count($shop_id) === 0)) {
+            throw new \InvalidArgumentException(
+                'Missing the required parameter $shop_id when calling createShopProducts'
+            );
+        }
+
+        $resourcePath = '/api/v1/shops/{shopId}/products';
+        $formParams = [];
+        $queryParams = [];
+        $headerParams = [];
+        $httpBody = '';
+        $multipart = false;
+
+        // path params
+        if ($shop_id !== null) {
+            $resourcePath = str_replace(
+                '{shopId}',
+                ObjectSerializer::toPathValue($shop_id),
+                $resourcePath
+            );
+        }
+
+        $headers = $this->headerSelector->selectHeaders(
+            ['application/json', 'application/problem+json', ],
+            $contentType,
+            $multipart
+        );
+
+        // for model (json/xml)
+        if (isset($products_data)) {
+            if (stripos($headers['Content-Type'], 'application/json') !== false) {
+                # if Content-Type contains "application/json", json_encode the body
+                $httpBody = \GuzzleHttp\Utils::jsonEncode(ObjectSerializer::sanitizeForSerialization($products_data));
+            } else {
+                $httpBody = $products_data;
+            }
+        } elseif (count($formParams) > 0) {
+            if ($multipart) {
+                $multipartContents = [];
+                foreach ($formParams as $formParamName => $formParamValue) {
+                    $formParamValueItems = is_array($formParamValue) ? $formParamValue : [$formParamValue];
+                    foreach ($formParamValueItems as $formParamValueItem) {
+                        $multipartContents[] = [
+                            'name' => $formParamName,
+                            'contents' => $formParamValueItem
+                        ];
+                    }
+                }
+                // for HTTP post (form)
+                $httpBody = new MultipartStream($multipartContents);
+
+            } elseif (stripos($headers['Content-Type'], 'application/json') !== false) {
+                # if Content-Type contains "application/json", json_encode the form parameters
+                $httpBody = \GuzzleHttp\Utils::jsonEncode($formParams);
+            } else {
+                // for HTTP post (form)
+                $httpBody = ObjectSerializer::buildQuery($formParams);
+            }
+        }
+
+        // this endpoint requires API key authentication
+        $apiKey = $this->config->getApiKeyWithPrefix('x-api-key');
+        if ($apiKey !== null) {
+            $headers['x-api-key'] = $apiKey;
+        }
+        // this endpoint requires Bearer (JWT) authentication (access token)
+        if (!empty($this->config->getAccessToken())) {
+            $headers['Authorization'] = 'Bearer ' . $this->config->getAccessToken();
+        }
+
+        $defaultHeaders = [];
+        if ($this->config->getUserAgent()) {
+            $defaultHeaders['User-Agent'] = $this->config->getUserAgent();
+        }
+
+        $headers = array_merge(
+            $defaultHeaders,
+            $headerParams,
+            $headers
+        );
+
+        $operationHost = $this->config->getHost();
+        $query = ObjectSerializer::buildQuery($queryParams);
+        return new Request(
+            'POST',
+            $operationHost . $resourcePath . ($query ? "?{$query}" : ''),
+            $headers,
+            $httpBody
+        );
     }
 
     private function responseWithinRangeCode(

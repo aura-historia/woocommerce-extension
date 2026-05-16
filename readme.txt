@@ -27,6 +27,7 @@ Features:
 * PATCHes the generated secret to `/api/v1/shops/{shopId}` before activating delivery
 * sends webhook deliveries to `/api/v1/webhooks/woocommerce/{shopId}`
 * includes `x-api-key` on outgoing webhook requests
+* asynchronously backfills all existing products to `POST /api/v1/shops/{shopId}/products` in batches of 100 via Action Scheduler when a valid connection is configured
 * repairs plugin-owned webhooks after manual edits or deletions
 * pauses plugin-owned webhooks on deactivation
 * removes plugin-owned webhooks on uninstall
@@ -57,7 +58,7 @@ Important notes:
 
 = Does this backfill my existing products? =
 
-No. The plugin only manages future WooCommerce webhook events.
+Yes. When a valid Shop ID and API key are saved, the plugin automatically backfills all existing WooCommerce products to `POST /api/v1/shops/{shopId}/products`.  Products are sent in batches of 100 via Action Scheduler (bundled with WooCommerce) so large catalogs do not block the page.  Batches that fail are retried automatically by Action Scheduler.  The backfill is restarted whenever valid connection settings are saved.
 
 = Which events are sent? =
 

@@ -468,6 +468,8 @@ class Webhook_Manager
 
             delete_option(self::OPTION_LAST_SYNC_ERROR);
 
+            $this->maybe_schedule_backfill($settings, $desired_status);
+
             return true;
         } finally {
             $this->syncing = false;
@@ -592,6 +594,35 @@ class Webhook_Manager
     }
 
     /**
+     * Schedules or cancels a product backfill depending on the desired status.
+     *
+     * Called at the end of a successful sync.  When the webhooks are active,
+     * a fresh backfill is (re)scheduled so that all existing products are sent
+     * to the backend.  When the webhooks are paused, any pending backfill is
+     * cancelled because the backend connection is not active.
+     *
+     * @param array<string,mixed> $settings       Current plugin settings.
+     * @param string              $desired_status Webhook status chosen by the sync.
+     * @return void
+     */
+    private function maybe_schedule_backfill($settings, $desired_status)
+    {
+        if (!class_exists(Product_Backfill::class)) {
+            return;
+        }
+
+        $backfill = new Product_Backfill();
+
+        if ("active" === $desired_status) {
+            $backfill->schedule_backfill(
+                isset($settings["shop_id"]) ? (string) $settings["shop_id"] : "",
+            );
+        } else {
+            $backfill->cancel_backfill();
+        }
+    }
+
+    /**
      * Pauses all managed webhooks.
      *
      * @return void
@@ -670,6 +701,10 @@ class Webhook_Manager
         delete_option(self::OPTION_PLUGIN_VERSION);
         delete_option(self::OPTION_LAST_SYNC_ERROR);
         delete_option(self::OPTION_LAST_SYNC_AT);
+
+        if (class_exists(Product_Backfill::class)) {
+            (new Product_Backfill())->cancel_backfill();
+        }
     }
 
     /**

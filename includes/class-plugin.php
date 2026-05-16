@@ -176,6 +176,17 @@ class Plugin
             add_filter("woocommerce_webhook_deliver_async", "__return_false");
         }
 
+        if (class_exists(Product_Backfill::class)) {
+            add_action(
+                Product_Backfill::ACTION_HOOK,
+                static function ($shop_id, $page) {
+                    (new Product_Backfill())->process_batch($shop_id, $page);
+                },
+                10,
+                2,
+            );
+        }
+
         add_action(
             "woocommerce_webhook_updated",
             [$this, "maybe_mark_managed_webhook_out_of_sync"],
