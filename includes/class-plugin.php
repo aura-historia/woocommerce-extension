@@ -145,6 +145,10 @@ class Plugin
                 $this,
                 "handle_sync_request",
             ]);
+            add_action("admin_post_ahpc_queue_backfill", [
+                $this,
+                "handle_backfill_request",
+            ]);
             add_action("admin_notices", [
                 $this,
                 "maybe_show_dependency_notice",
@@ -180,7 +184,7 @@ class Plugin
             add_action(
                 Product_Backfill::ACTION_HOOK,
                 static function ($shop_id, $page) {
-                    new Product_Backfill()->process_batch($shop_id, $page);
+                    (new Product_Backfill())->process_batch($shop_id, $page);
                 },
                 10,
                 2,
@@ -464,6 +468,130 @@ class Plugin
     }
 
     /**
+     * Handles the manual backfill action.
+     *
+     * @return void
+     */
+    public function handle_backfill_request()
+    {
+        if (!current_user_can("manage_woocommerce")) {
+            wp_die(
+                esc_html__(
+                    "You are not allowed to queue a product backfill.",
+                    Webhook_Manager::TEXT_DOMAIN,
+                ),
+                403,
+            );
+        }
+
+        check_admin_referer("ahpc_queue_backfill");
+
+        $redirect_url = $this->get_settings_page_url();
+        $result = $this->queue_manual_backfill();
+
+        if (!is_wp_error($result)) {
+            $redirect_url = add_query_arg(
+                "ahpc_backfill",
+                "queued",
+                $redirect_url,
+            );
+        } else {
+            $status = "failed";
+
+            switch ($result->get_error_code()) {
+                case "ahpc_backfill_unavailable":
+                    $status = "unavailable";
+                    break;
+                case "ahpc_backfill_invalid_settings":
+                    $status = "invalid";
+                    break;
+            }
+
+            $redirect_url = add_query_arg(
+                "ahpc_backfill",
+                $status,
+                $redirect_url,
+            );
+        }
+
+        wp_safe_redirect($redirect_url);
+        exit();
+    }
+
+    /**
+     * Queues a fresh full product backfill using the currently saved settings.
+     *
+     * @return true|WP_Error
+     */
+    public function queue_manual_backfill()
+    {
+        if (!$this->is_woocommerce_available()) {
+            return new WP_Error(
+                "ahpc_backfill_unavailable",
+                __(
+                    "WooCommerce is not active, so the product backfill cannot be queued yet.",
+                    Webhook_Manager::TEXT_DOMAIN,
+                ),
+            );
+        }
+
+        if (!class_exists(Product_Backfill::class)) {
+            return new WP_Error(
+                "ahpc_backfill_unavailable",
+                __(
+                    "The product backfill component is not available right now.",
+                    Webhook_Manager::TEXT_DOMAIN,
+                ),
+            );
+        }
+
+        $this->bootstrap_woocommerce();
+
+        $settings = $this->get_current_settings();
+
+        if (
+            !Webhook_Manager::is_valid_shop_id($settings["shop_id"]) ||
+            !Webhook_Manager::is_valid_api_key($settings["api_key"])
+        ) {
+            return new WP_Error(
+                "ahpc_backfill_invalid_settings",
+                __(
+                    "Save a valid Shop ID and API key before queueing a full product backfill.",
+                    Webhook_Manager::TEXT_DOMAIN,
+                ),
+            );
+        }
+
+        if (!$this->manager instanceof Webhook_Manager) {
+            return new WP_Error(
+                "ahpc_backfill_unavailable",
+                __(
+                    "The webhook manager could not be initialized.",
+                    Webhook_Manager::TEXT_DOMAIN,
+                ),
+            );
+        }
+
+        $sync_result = $this->manager->sync_webhooks();
+
+        if (is_wp_error($sync_result)) {
+            return $sync_result;
+        }
+
+        if (!(new Product_Backfill())->schedule_backfill($settings["shop_id"])) {
+            return new WP_Error(
+                "ahpc_backfill_failed",
+                __(
+                    "The product backfill could not be queued. Check the backfill status below and the WooCommerce Action Scheduler screen for more detail.",
+                    Webhook_Manager::TEXT_DOMAIN,
+                ),
+            );
+        }
+
+        return true;
+    }
+
+    /**
      * Marks the plugin webhooks as out of sync after a manual edit or deletion.
      *
      * @param int             $webhook_id Webhook ID.
@@ -574,6 +702,9 @@ class Plugin
         $sync_success =
             isset($_GET["ahpc_synced"]) &&
             "1" === wp_unslash($_GET["ahpc_synced"]);
+        $backfill_request_status = isset($_GET["ahpc_backfill"])
+            ? sanitize_key(wp_unslash($_GET["ahpc_backfill"]))
+            : "";
         $settings_updated =
             isset($_GET["settings-updated"]) &&
             "true" === wp_unslash($_GET["settings-updated"]);
@@ -614,6 +745,40 @@ class Plugin
         "success",
         esc_html__(
             "Managed WooCommerce webhooks synced successfully.",
+            Webhook_Manager::TEXT_DOMAIN,
+        ),
+    ); ?>
+			<?php endif; ?>
+
+			<?php if ("queued" === $backfill_request_status): ?>
+				<?php $this->render_inline_notice(
+        "success",
+        esc_html__(
+            "A fresh product backfill was queued. Existing products will be re-sent in the background.",
+            Webhook_Manager::TEXT_DOMAIN,
+        ),
+    ); ?>
+			<?php elseif ("invalid" === $backfill_request_status): ?>
+				<?php $this->render_inline_notice(
+        "warning",
+        esc_html__(
+            "Save a valid Shop ID and API key before queueing a full product backfill.",
+            Webhook_Manager::TEXT_DOMAIN,
+        ),
+    ); ?>
+			<?php elseif ("unavailable" === $backfill_request_status): ?>
+				<?php $this->render_inline_notice(
+        "error",
+        esc_html__(
+            "The product backfill could not be queued because WooCommerce or Action Scheduler is not available yet.",
+            Webhook_Manager::TEXT_DOMAIN,
+        ),
+    ); ?>
+			<?php elseif ("failed" === $backfill_request_status): ?>
+				<?php $this->render_inline_notice(
+        "error",
+        esc_html__(
+            "The product backfill could not be queued. Check the backfill status below for more detail.",
             Webhook_Manager::TEXT_DOMAIN,
         ),
     ); ?>
@@ -762,6 +927,36 @@ class Plugin
         esc_html__("Save changes", Webhook_Manager::TEXT_DOMAIN),
     ); ?>
 			</form>
+
+			<h2><?php echo esc_html__(
+       "Existing product backfill",
+       Webhook_Manager::TEXT_DOMAIN,
+   ); ?></h2>
+			<p><?php echo esc_html__(
+       "Use this if the initial product backfill did not start, was interrupted, or you want to re-send the entire current catalog. It queues a fresh background backfill for the saved Shop ID and replaces any pending backfill batches.",
+       Webhook_Manager::TEXT_DOMAIN,
+   ); ?></p>
+			<?php if ($this->is_woocommerce_available()): ?>
+				<form method="post" action="<?php echo esc_url(
+        admin_url("admin-post.php"),
+    ); ?>">
+					<input type="hidden" name="action" value="ahpc_queue_backfill" />
+					<?php wp_nonce_field("ahpc_queue_backfill"); ?>
+					<?php submit_button(
+         esc_html__(
+             "Re-send all existing products",
+             Webhook_Manager::TEXT_DOMAIN,
+         ),
+         "secondary",
+         "submit",
+         false,
+     ); ?>
+				</form>
+				<p class="description"><?php echo esc_html__(
+        "The backfill runs in the background via Action Scheduler. On large catalogs it may take some time, and queueing it again restarts the pending backfill from the beginning.",
+        Webhook_Manager::TEXT_DOMAIN,
+    ); ?></p>
+			<?php endif; ?>
 
 			<h2><?php echo esc_html__(
        "Managed webhooks",
@@ -987,7 +1182,7 @@ class Plugin
             ];
         }
 
-        $details = new Product_Backfill()->get_status_details();
+        $details = (new Product_Backfill())->get_status_details();
         $hook = isset($details["hook"])
             ? (string) $details["hook"]
             : Product_Backfill::ACTION_HOOK;

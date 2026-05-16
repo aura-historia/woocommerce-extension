@@ -43,6 +43,7 @@ Important notes:
 * Deleted payloads only include an `id`.
 * Saving a valid Shop ID and API key sends product data to your configured external endpoint.
 * The current backfill status is shown on `WooCommerce > Aura Historia`.
+* Merchants can manually queue a fresh full product backfill from `WooCommerce > Aura Historia`.
 
 == Installation ==
 
@@ -59,7 +60,7 @@ Important notes:
 
 = Does this backfill my existing products? =
 
-Yes. When a valid Shop ID and API key are saved, the plugin automatically backfills all existing WooCommerce products to `PUT /api/v1/shops/{shopId}/products`. Products are sent in batches of 100 via Action Scheduler (bundled with WooCommerce) so large catalogs do not block the page. Batches that fail are retried automatically by Action Scheduler. The backfill is restarted whenever valid connection settings are saved, and the current backfill status is shown on `WooCommerce > Aura Historia`.
+Yes. When a valid Shop ID and API key are saved, the plugin automatically backfills all existing WooCommerce products to `PUT /api/v1/shops/{shopId}/products`. Products are sent in batches of 100 via Action Scheduler (bundled with WooCommerce) so large catalogs do not block the page. Batches that fail are retried automatically by Action Scheduler. The backfill is restarted whenever valid connection settings are saved, the current backfill status is shown on `WooCommerce > Aura Historia`, and merchants can manually queue a fresh full backfill from that screen.
 
 = Which events are sent? =
 

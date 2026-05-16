@@ -705,7 +705,7 @@ class Webhook_Manager
         delete_option(self::OPTION_LAST_SYNC_AT);
 
         if (class_exists(Product_Backfill::class)) {
-            new Product_Backfill()->cancel_backfill();
+            (new Product_Backfill())->cancel_backfill();
         }
 
         delete_option("ahpc_backfill_state");

@@ -858,6 +858,75 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
     }
 
     /**
+     * It shows the manual full backfill action and explanation on the settings page.
+     *
+     * @return void
+     */
+    public function test_render_settings_page_shows_manual_backfill_action()
+    {
+        update_option(
+            Webhook_Manager::OPTION_SETTINGS,
+            [
+                "shop_id" => "123e4567-e89b-12d3-a456-426614174000",
+                "api_key" =>
+                    "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
+                "secret" => "test-secret",
+            ],
+            false,
+        );
+
+        $this->set_backend_mock_responses([
+            $this->mock_backend_registration_response(),
+        ]);
+
+        $output = $this->render_plugin_settings_page();
+
+        $this->assertStringContainsString("Existing product backfill", $output);
+        $this->assertStringContainsString(
+            "Re-send all existing products",
+            $output,
+        );
+        $this->assertStringContainsString(
+            "initial product backfill did not start",
+            $output,
+        );
+    }
+
+    /**
+     * It queues a fresh manual backfill for valid saved settings.
+     *
+     * @return void
+     */
+    public function test_queue_manual_backfill_schedules_backfill()
+    {
+        if (!function_exists("as_has_scheduled_action")) {
+            $this->markTestSkipped("Action Scheduler is not available.");
+        }
+
+        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+        $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+
+        update_option(
+            Webhook_Manager::OPTION_SETTINGS,
+            [
+                "shop_id" => $shop_id,
+                "api_key" => $api_key,
+                "secret" => "test-secret",
+            ],
+            false,
+        );
+
+        $backfill = new Product_Backfill();
+        $backfill->cancel_backfill();
+
+        $plugin = new Plugin();
+        $result = $plugin->queue_manual_backfill();
+
+        $this->assertTrue($result);
+        $this->assertTrue($backfill->is_backfill_scheduled());
+    }
+
+    /**
      * It shows the latest successful backfill details on the settings page.
      *
      * @return void
