@@ -111,7 +111,8 @@ jobs:
 
       - name: Print wp-env logs on failure
         if: failure()
-        run: npm run env:logs || true
+        timeout-minutes: 2
+        run: npm run env:logs -- --no-follow || true
 
       - name: Destroy wp-env environment
         if: always()
