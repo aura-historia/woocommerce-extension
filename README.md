@@ -1,52 +1,156 @@
-# Aura Historia Partner Connect
+<h1 align="center">Aura Historia Partner Connect</h1>
 
-This repository contains a lean WordPress plugin that keeps exactly three WooCommerce webhooks in sync for your SaaS backend:
+<p align="center">
+  <strong>Lean WooCommerce plugin that keeps Aura Historia product webhooks configured, synced, and repairable.</strong>
+</p>
+
+<p align="center">
+  <a href="https://aura-historia.com"><img src="https://img.shields.io/badge/Aura%20Historia-Website-8B4513?style=flat" alt="Aura Historia website" /></a>
+  <a href="https://github.com/aura-historia/woocommerce-extension/actions/workflows/integrate.yml"><img src="https://github.com/aura-historia/woocommerce-extension/actions/workflows/integrate.yml/badge.svg" alt="CI" /></a>
+  <img src="https://img.shields.io/badge/WordPress-6.5%2B-21759B?style=flat&logo=wordpress&logoColor=white" alt="WordPress 6.5+" />
+  <img src="https://img.shields.io/badge/WooCommerce-required-96588A?style=flat&logo=woocommerce&logoColor=white" alt="WooCommerce required" />
+  <img src="https://img.shields.io/badge/PHP-8.1%2B-777BB4?style=flat&logo=php&logoColor=white" alt="PHP 8.1+" />
+  <img src="https://img.shields.io/badge/License-GPLv2%20or%20later-blue?style=flat" alt="GPLv2 or later" />
+</p>
+
+<p align="center">
+  <img src="https://aura-historia.com/logo-banner.png" alt="Aura Historia" />
+</p>
+
+## Overview
+
+Aura Historia Partner Connect is a focused WordPress plugin for WooCommerce stores that already use Aura Historia.
+
+Its job is intentionally narrow: it owns exactly three WooCommerce product webhooks and keeps them correctly configured for the connected Aura Historia shop without creating duplicates or exposing unnecessary settings.
+
+Managed webhook topics:
 
 - `product.created`
 - `product.updated`
 - `product.deleted`
 
-The plugin auto-registers those webhooks, repairs manual edits or deletions, exposes a small admin settings screen, pauses its webhooks on deactivation, and removes them on uninstall.
+## At a glance
 
-## Connection model
+- creates and maintains exactly three managed WooCommerce webhooks
+- keeps webhook sync idempotent and repairs manual drift
+- generates the WooCommerce signing secret automatically and keeps it hidden from merchants
+- sends the generated secret to Aura Historia before activating delivery
+- injects `x-api-key` late in the WordPress HTTP stack for outgoing webhook deliveries
+- can backfill the current catalog in the background after a successful connection
+- pauses plugin-owned webhooks on deactivation
+- removes plugin-owned webhooks and plugin options on uninstall
 
-The plugin uses a built-in backend base URL that defaults to the development/staging environment (`https://api.dev.aura-historia.com`).
+## Compatibility
 
-To point the plugin at the production backend (`https://api.aura-historia.com`), set the `AHPC_BACKEND_BASE_URL` environment variable before PHP runs, or define the constant in `wp-config.php`:
+| Item | Value |
+| --- | --- |
+| Plugin version | `0.1.0` |
+| WordPress | `6.5+` |
+| WooCommerce | Required |
+| PHP | `8.1+` |
+| License | `GPLv2 or later` |
+| Release artifact | `aura-historia-partner-connect.zip` |
 
-```php
-define( 'AHPC_BACKEND_BASE_URL', 'https://api.aura-historia.com' );
-```
+## Who this is for
 
-The resolution order is:
+This plugin is for merchants and integrators who already have:
 
-1. A PHP constant defined before the plugin loads (e.g. in `wp-config.php`).
-2. A server-level PHP environment variable named `AHPC_BACKEND_BASE_URL` (suitable for CI/CD pipelines and container deployments).
-3. The built-in development default `https://api.dev.aura-historia.com`.
+- an Aura Historia account
+- an Aura Historia Shop ID
+- an Aura Historia API key
+- a WooCommerce store that should sync product events to Aura Historia
 
-Store owners do **not** configure:
+It is **not** a general-purpose WooCommerce webhook manager.
 
-- the webhook endpoint URL
-- the webhook secret
+## How it works
 
-Store owners **do** configure:
+1. A merchant installs the plugin and opens `WooCommerce > Aura Historia`.
+2. The merchant saves the Aura Historia Shop ID and API key.
+3. The plugin generates a WooCommerce webhook signing secret and registers it with Aura Historia via `PATCH /api/v1/shops/{shopId}`.
+4. The plugin creates or repairs the three managed WooCommerce webhooks.
+5. WooCommerce sends live webhook deliveries to `POST /api/v1/webhooks/woocommerce/{shopId}`.
+6. The plugin can also backfill the current catalog to `PUT /api/v1/shops/{shopId}/products` in background batches.
+
+## External service behavior
+
+This plugin depends on the Aura Historia service.
+
+### What gets sent
+
+Depending on the action, the plugin may send:
+
+- Shop ID
+- Aura Historia API key in the `x-api-key` header
+- generated WooCommerce webhook secret
+- store language and currency
+- WooCommerce product webhook payloads
+- current product data during catalog backfill
+
+### When it gets sent
+
+- when valid settings are saved and a webhook sync runs
+- when WooCommerce triggers one of the managed webhook events
+- when the plugin schedules or processes a product backfill
+
+### Service endpoints
+
+- `PATCH https://api.aura-historia.com/api/v1/shops/{shopId}`
+- `POST https://api.aura-historia.com/api/v1/webhooks/woocommerce/{shopId}`
+- `PUT https://api.aura-historia.com/api/v1/shops/{shopId}/products`
+
+### Service policies
+
+- Website: <https://aura-historia.com>
+- Privacy policy: <https://aura-historia.com/privacy>
+- Terms and conditions: <https://aura-historia.com/terms-and-conditions>
+- Imprint / contact: <https://aura-historia.com/imprint>
+
+## Installation
+
+### Install on a WooCommerce shop
+
+1. Install and activate WooCommerce.
+2. Build or obtain the plugin release ZIP `aura-historia-partner-connect.zip`.
+3. Upload the ZIP through `Plugins > Add New > Upload Plugin`, or extract it into `/wp-content/plugins/`.
+4. Activate the plugin.
+5. Open `WooCommerce > Aura Historia`.
+6. Save the Shop ID and API key from Aura Historia.
+
+Once the settings are valid, the plugin syncs the managed webhooks automatically.
+
+## Configuration model
+
+The distributed plugin defaults to the production Aura Historia API base URL:
+
+- `https://api.aura-historia.com`
+
+Merchants configure only:
 
 - `Shop ID`
 - `API key`
 
-As soon as both values are saved and valid, the plugin starts delivery automatically.
+Merchants do **not** configure:
 
-When a valid Shop ID and API key are saved, the plugin:
+- the webhook delivery URL
+- the webhook secret
 
-1. auto-generates and stores a hidden WooCommerce webhook secret
-2. uses a typed OpenAPI-backed backend client to `PATCH /api/v1/shops/{shopId}` with the configured `x-api-key`
-3. keeps the WooCommerce webhooks active only if that backend sync succeeds
-4. sends webhook deliveries to `/api/v1/webhooks/woocommerce/{shopId}`
-5. includes the configured `x-api-key` on outgoing webhook requests
-6. asynchronously backfills all existing WooCommerce products to `PUT /api/v1/shops/{shopId}/products` in batches of 100
-7. lets a merchant manually queue a fresh full product backfill from `WooCommerce > Aura Historia`
+### Override the backend base URL for non-production environments
 
-WooCommerce also signs the request body with `X-WC-Webhook-Signature` using the generated secret.
+For staging, local development, or custom test environments, override the base URL before the plugin runs.
+
+Using `wp-config.php`:
+
+```php
+define( 'AHPC_BACKEND_BASE_URL', 'https://api.dev.aura-historia.com' );
+```
+
+Using a server-level environment variable:
+
+```sh
+AHPC_BACKEND_BASE_URL=https://api.dev.aura-historia.com
+```
+
+Tests can also override the URL via the `ahpc_backend_base_url` filter.
 
 ## Local development
 
@@ -57,119 +161,90 @@ WooCommerce also signs the request body with `X-WC-Webhook-Signature` using the 
 - Node.js
 - npm
 
-### Start a local WordPress + WooCommerce site
+### Quick start
 
-1. Install PHP dependencies:
-   - `composer install`
-2. Install Node.js dependencies:
-   - `npm install`
-3. Start the local environment:
-   - `npm run env:start`
-4. Open WordPress:
-   - `http://localhost:8888`
-5. Log in with:
-   - username: `admin`
-   - password: `password`
+```sh
+composer install
+npm install
+npm run env:start
+```
 
-The repository ships with a `.wp-env.json` file that:
+Then open <http://localhost:8888> and log in with:
 
-- mounts this plugin into WordPress
-- installs WooCommerce from WordPress.org
+- username: `admin`
+- password: `password`
+
+### Local environment notes
+
+The repository uses `@wordpress/env` and the checked-in `.wp-env.json`:
+
+- installs WordPress and WooCommerce locally
 - enables `WP_DEBUG`
-- defines `AHPC_FORCE_SYNC_DELIVERY=true` so webhook delivery happens synchronously in local development
+- enables `AHPC_FORCE_SYNC_DELIVERY=true` for synchronous local webhook delivery
+- overrides `AHPC_BACKEND_BASE_URL` to `https://api.dev.aura-historia.com` for local development safety
 
-If you want completely reproducible local or CI runs, pin the WooCommerce ZIP in `.wp-env.json` to a specific version instead of `latest-stable`.
-
-If port `8888` is already busy, create a local `.wp-env.override.json` file and set a different `port` there.
-
-## Manual local test flow
-
-1. Point the plugin at a test or staging backend by either:
-   - Adding `define( 'AHPC_BACKEND_BASE_URL', 'https://your-test-backend.example.com' );` to `.wp-env.json`'s `config` block, or
-   - Setting the `AHPC_BACKEND_BASE_URL` environment variable in the server environment.
-   The backend must support:
-   - `PATCH /api/v1/shops/{shopId}`
-   - `POST /api/v1/webhooks/woocommerce/{shopId}`
-   - `PUT /api/v1/shops/{shopId}/products`
-2. Start the local environment.
-3. In WordPress admin, go to `WooCommerce > Aura Historia`.
-4. Enter the Shop ID and API key from Aura Historia and save the settings.
-5. Create, update, and trash a product.
-6. Confirm the backend accepted the setup PATCH call, received the product backfill, and received live webhook deliveries. The current backfill status is shown in `WooCommerce > Aura Historia`, where you can also manually queue a fresh full backfill. The Action Scheduler hook name is `ahpc_backfill_products_batch` if you inspect `WooCommerce > Tools > Action Scheduler`.
-
-Useful WooCommerce screens:
-
-- `WooCommerce > Settings > Advanced > Webhooks`
-- `WooCommerce > Status > Logs`
+If you need a different port, create a local `.wp-env.override.json` file.
 
 ## Useful commands
 
-- `composer install` — install the runtime PHP dependencies, including Guzzle
-- `npm run env:start` — start WordPress locally
-- `npm run env:update` — restart and refresh remote sources
-- `npm run env:stop` — stop the local environment
-- `npm run env:reset` — reset the local database
-- `npm run env:destroy` — remove the local environment entirely
+- `npm run env:start` — start the local WordPress environment
+- `npm run env:update` — refresh remote sources and restart the environment
+- `npm run env:stop` — stop the environment
+- `npm run env:destroy` — remove the environment entirely
 - `npm run wp -- plugin list` — run WP-CLI commands inside the environment
-- `npm run openapi:generate` — regenerate the generated Guzzle backend client from the pinned internal API spec
-- `npm run release:zip` — build a release ZIP that includes the Composer-installed runtime dependencies
-- `npm test` — run the PHP integration tests
+- `npm test` — run the WordPress integration test suite
+- `npm run release:zip` — build the distributable plugin ZIP
+- `npm run openapi:generate` — regenerate the typed internal API client
 
-## OpenAPI client generation
+## Testing
 
-The plugin uses a generated Guzzle-based OpenAPI client so backend calls stay strongly typed as the integration grows.
+The test suite runs inside `wp-env` and uses mocked outbound HTTP.
 
-The generator setup is pinned and deterministic:
+Coverage focuses on the plugin's main contract, including:
 
-- upstream source: `https://github.com/aura-historia/internal-api`
-- pinned commit: `a9464cd344463588656e57ce3c52481e5f1f74ce`
-- generator image: `openapitools/openapi-generator-cli:v7.22.0`
-- config: `openapi/internal-api-client.config.json`
-- filtered spec snapshot: `openapi/internal-api.filtered.yaml`
+- managed webhook creation
+- backend secret registration
+- `x-api-key` header handling
+- idempotent updates without duplicates
+- pause/delete cleanup
+- drift recovery
+- product backfill behavior
 
-Regenerate the client with:
+Run the suite with:
 
-- `npm run openapi:generate`
+```sh
+npm test
+```
 
-## Tests
+## Architecture
 
-The test suite uses WordPress integration tests and runs inside `wp-env`.
+| Path | Responsibility |
+| --- | --- |
+| `aura-historia-partner-connect.php` | Plugin header, bootstrap, constants, hardcoded backend base URL |
+| `includes/class-plugin.php` | WordPress/WooCommerce bootstrap, admin UI, settings handling, manual actions |
+| `includes/class-webhook-manager.php` | Webhook ownership, idempotent sync, backend registration, cleanup, drift recovery |
+| `includes/class-product-backfill.php` | Background catalog resend via Action Scheduler |
+| `includes/class-backend-api-client.php` | Typed Aura Historia API integration |
+| `uninstall.php` | Uninstall cleanup |
+| `tests/` | WordPress integration tests |
 
-`npm test` installs the required PHPUnit Polyfills dependency through Composer inside the `wp-env` test container and then runs the suite.
+## Release process
 
-Current coverage focuses on the plugin's core contract:
+Build the release ZIP with:
 
-- creating the three managed WooCommerce webhooks
-- syncing the hidden secret to the backend
-- attaching `x-api-key` to outgoing webhook requests
-- updating those webhooks idempotently without duplicates
-- pausing managed webhooks when requested
-- scheduling and processing asynchronous product backfill batches
+```sh
+npm run release:zip
+```
 
-Run the tests with:
+The release build:
 
-- `npm test`
+- creates a clean plugin tree in `build-release/`
+- installs production Composer dependencies into that tree
+- removes development-only files from the artifact
+- writes `aura-historia-partner-connect.zip` to the project root
 
-## Behavior notes
+For WordPress.org submission, use the clean release tree or equivalent release contents rather than the raw development repository checkout.
 
-- `product.deleted` uses WooCommerce's built-in topic and fires when a product is trashed.
-- Deleted payloads only include an `id`.
-- WooCommerce signs webhook requests with `X-WC-Webhook-Signature`.
-- When a valid Shop ID and API key are saved, the plugin schedules a product backfill via Action Scheduler (bundled with WooCommerce). Products are sent to `PUT /api/v1/shops/{shopId}/products` in batches of 100. The backfill is restartable and retries failed batches automatically through Action Scheduler's built-in retry mechanism. The batch action hook is `ahpc_backfill_products_batch`.
-- Merchants can manually queue a fresh full product backfill from `WooCommerce > Aura Historia`. Queueing it again replaces any pending backfill batches and restarts the catalog resend.
+## License
 
-## Release notes
-
-Build a release ZIP with:
-
-- `npm run release:zip`
-
-This runs `build-release.sh`, assembles a clean release tree, installs production Composer dependencies inside it, and creates `aura-historia-partner-connect.zip` in the project root.
-
-The repository already includes the basics you need for a WordPress.org-style release:
-
-- plugin metadata in `aura-historia-partner-connect.php`
-- a WordPress.org `readme.txt`
-- `.gitattributes` rules to exclude dev-only files from release archives
-
-The repository license is currently MIT, which is GPL-compatible. If you want the most typical WordPress.org release posture, you may still choose to align the top-level license to `GPL-2.0-or-later` before publishing.
+This project is licensed under **GPLv2 or later**.
