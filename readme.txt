@@ -2,84 +2,119 @@
 Requires at least: 6.5
 Tested up to: 6.9
 Requires PHP: 8.1
-Requires Plugins: woocommerce
 Stable tag: 0.1.0
-License: MIT
-License URI: https://opensource.org/licenses/MIT
-Tags: woocommerce, webhooks, products, integration
+Contributors: aurahistoria
+License: GPLv2 or later
+License URI: https://www.gnu.org/licenses/gpl-2.0.html
+Tags: woocommerce, webhooks, product-sync, catalog-sync, aura-historia
 
-Automatically creates and maintains the WooCommerce product webhooks your Aura Historia backend needs.
+Connects WooCommerce to Aura Historia by creating and maintaining the product webhooks your store needs.
 
 == Description ==
 
-This plugin owns exactly three WooCommerce webhooks and keeps them in sync with your configured settings:
+Aura Historia Partner Connect connects a WooCommerce store to Aura Historia.
 
-* `product.created`
-* `product.updated`
-* `product.deleted`
+After you save the Shop ID and API key from Aura Historia, the plugin automatically:
 
-Features:
-
-* auto-registers the managed WooCommerce webhooks
-* uses a built-in backend base URL configured in code
-* lets the merchant configure only a Shop ID and API key, then starts delivery automatically once both are valid
-* auto-generates the WooCommerce webhook secret and keeps it hidden from the merchant
-* PATCHes the generated secret to `/api/v1/shops/{shopId}` before activating delivery
-* sends webhook deliveries to `/api/v1/webhooks/woocommerce/{shopId}`
-* includes `x-api-key` on outgoing webhook requests
-* asynchronously backfills all existing products to `PUT /api/v1/shops/{shopId}/products` in batches of 100 via Action Scheduler when a valid connection is configured
-* repairs plugin-owned webhooks after manual edits or deletions
+* creates and maintains exactly three WooCommerce product webhooks:
+  * `product.created`
+  * `product.updated`
+  * `product.deleted`
+* keeps those managed webhooks in sync without creating duplicates
+* repairs plugin-owned webhooks after manual edits or deletion
+* generates and stores the WooCommerce webhook signing secret automatically
+* sends webhook deliveries to Aura Historia using the built-in endpoint pattern
 * pauses plugin-owned webhooks on deactivation
-* removes plugin-owned webhooks on uninstall
-* includes a small admin screen under WooCommerce
-* includes local development support via `@wordpress/env`
+* removes plugin-owned webhooks and plugin options on uninstall
+* can re-send the current catalog in the background after a successful connection
 
-Important notes:
+The plugin keeps the settings surface intentionally small. Merchants only enter:
 
-* Store owners do not configure the delivery endpoint URL in wp-admin.
-* Store owners do not configure the webhook secret in wp-admin.
-* WooCommerce uses the generated secret to create the `X-WC-Webhook-Signature` header.
-* `product.deleted` is WooCommerce's built-in delete topic and fires when a product is trashed.
-* Deleted payloads only include an `id`.
-* Saving a valid Shop ID and API key sends product data to your configured external endpoint.
-* The current backfill status is shown on `WooCommerce > Aura Historia`.
-* Merchants can manually queue a fresh full product backfill from `WooCommerce > Aura Historia`.
+* Shop ID
+* API key
+
+Merchants do not enter:
+
+* a webhook delivery URL
+* a webhook secret
+
+This plugin is intended for merchants who already use Aura Historia. Once valid settings are saved, the plugin sends product data to Aura Historia so the connected catalog can stay in sync.
+
+== External services ==
+
+This plugin connects to Aura Historia, a hosted service required for the plugin to work.
+
+It sends data only after a merchant saves a valid Shop ID and API key, and later when WooCommerce sends managed webhook events or the plugin runs a product backfill.
+
+The service is used to:
+
+* register the generated WooCommerce webhook secret and current store locale details
+* receive ongoing product webhook deliveries
+* receive background product backfill batches
+
+Data sent to the service may include:
+
+* Shop ID
+* Aura Historia API key in the `x-api-key` header
+* generated WooCommerce webhook secret
+* store language and currency
+* product webhook payloads for `product.created`, `product.updated`, and `product.deleted`
+* existing product data during an automatic or manual backfill
+
+Service endpoints:
+
+* `PATCH https://api.aura-historia.com/api/v1/shops/{shopId}`
+* `POST https://api.aura-historia.com/api/v1/webhooks/woocommerce/{shopId}`
+* `PUT https://api.aura-historia.com/api/v1/shops/{shopId}/products`
+
+Service provider and policies:
+
+* Website: https://aura-historia.com
+* Privacy policy: https://aura-historia.com/privacy
+* Terms and conditions: https://aura-historia.com/terms-and-conditions
+* Imprint / contact: https://aura-historia.com/imprint
 
 == Installation ==
 
 1. Install and activate WooCommerce.
-2. Upload this plugin to `/wp-content/plugins/` or install it through the WordPress plugin screen.
+2. Install Aura Historia Partner Connect from a release ZIP or upload it to `/wp-content/plugins/`.
 3. Activate the plugin.
 4. Go to `WooCommerce > Aura Historia`.
 5. Enter the Shop ID from Aura Historia for this store.
-6. Enter the Aura Historia API key for that store.
-7. Save the settings. Delivery starts automatically once both values are valid.
+6. Enter the API key from Aura Historia for this store.
+7. Save the settings.
+
+After a successful save, the plugin syncs the managed webhooks automatically and starts sending product updates to Aura Historia.
 
 == Frequently Asked Questions ==
 
-= Does this backfill my existing products? =
+= Do I need an Aura Historia account? =
 
-Yes. When a valid Shop ID and API key are saved, the plugin automatically backfills all existing WooCommerce products to `PUT /api/v1/shops/{shopId}/products`. Products are sent in batches of 100 via Action Scheduler (bundled with WooCommerce) so large catalogs do not block the page. Batches that fail are retried automatically by Action Scheduler. The backfill is restarted whenever valid connection settings are saved, the current backfill status is shown on `WooCommerce > Aura Historia`, and merchants can manually queue a fresh full backfill from that screen.
+Yes. This plugin is intended for merchants who already use Aura Historia and have a Shop ID and API key for their store.
 
-= Which events are sent? =
+= Which WooCommerce events are sent? =
 
 Only `product.created`, `product.updated`, and `product.deleted`.
 
+= What data is sent to Aura Historia? =
+
+After configuration, the plugin sends the generated WooCommerce webhook secret, store language and currency, product webhook payloads, and existing product data during backfill. See the `External services` section above for the full overview.
+
+= Can I change the delivery URL or webhook secret in wp-admin? =
+
+No. The plugin keeps the Aura Historia delivery URL built in and generates the WooCommerce webhook secret automatically.
+
+= What happens if I edit or delete one of the managed webhooks? =
+
+The plugin repairs plugin-owned webhooks during its sync flow so the required configuration is restored.
+
+= Does this plugin backfill existing products? =
+
+Yes. After a successful connection, the plugin can send the current catalog to Aura Historia in the background. Merchants can also manually restart that backfill from `WooCommerce > Aura Historia`.
+
 = What happens when the plugin is disabled? =
 
-It pauses the plugin-owned webhooks so WooCommerce stops sending deliveries.
-
-= Do merchants need to enter a webhook secret? =
-
-No. The plugin generates the WooCommerce webhook secret automatically and keeps it hidden.
-
-= Can I use my backend API key here? =
-
-Yes. The plugin sends the configured API key in the `x-api-key` header for the shop registration PATCH call and for outgoing webhook requests.
-
-= Can I test this locally? =
-
-Yes. The repository includes `@wordpress/env` configuration and WordPress integration tests.
+Plugin-owned webhooks are paused on deactivation so WooCommerce stops sending deliveries.
 
 == Changelog ==
 

@@ -1,6 +1,7 @@
 {
   "name": "aura-historia/aura-historia-partner-connect",
   "type": "wordpress-plugin",
+  "license": "GPL-2.0-or-later",
   "require": {
     "php": ">=8.1",
     "ext-json": "*",
