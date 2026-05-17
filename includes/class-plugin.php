@@ -1146,10 +1146,10 @@ class Plugin
         if ("yes" === get_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes")) {
             return [
                 "type" => "warning",
-                "label" => __("Sync pending", Webhook_Manager::TEXT_DOMAIN),
+                "label" => __("Sync pending", "aura-historia-partner-connect"),
                 "message" => __(
                     "The saved Shop ID and API key are waiting for the next webhook sync before the Aura Historia connection can be verified.",
-                    Webhook_Manager::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
             ];
         }
@@ -1172,10 +1172,10 @@ class Plugin
         if ("" !== $last_sync_at) {
             return [
                 "type" => "success",
-                "label" => __("Connected", Webhook_Manager::TEXT_DOMAIN),
+                "label" => __("Connected", "aura-historia-partner-connect"),
                 "message" => __(
                     "Aura Historia accepted the saved Shop ID and API key during the most recent webhook sync.",
-                    Webhook_Manager::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
             ];
         }
