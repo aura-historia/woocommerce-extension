@@ -114,7 +114,7 @@ class Product_Backfill
             $this->record_failed(
                 __(
                     "Action Scheduler is not available, so the product backfill could not be queued.",
-                    self::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
             );
 
@@ -325,15 +325,18 @@ class Product_Backfill
             $result = $client->put_shop_products($shop_id, $api_key, $payloads);
 
             if (is_wp_error($result)) {
-                $message = sprintf(
-                    "Aura Historia backfill batch (page %d) failed: %s",
-                    $page,
-                    $result->get_error_message(),
+                $message = sanitize_text_field(
+                    sprintf(
+                        "Aura Historia backfill batch (page %d) failed: %s",
+                        $page,
+                        $result->get_error_message(),
+                    ),
                 );
 
                 $this->record_failed($message);
 
                 // Throw so Action Scheduler retries this batch automatically.
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception message is internal and already sanitized above.
                 throw new \RuntimeException($message);
             }
         }
@@ -353,13 +356,16 @@ class Product_Backfill
             );
 
             if (!$next_action_id) {
-                $message = sprintf(
-                    "Aura Historia backfill batch (page %d) could not schedule page %d.",
-                    $page,
-                    $page + 1,
+                $message = sanitize_text_field(
+                    sprintf(
+                        "Aura Historia backfill batch (page %d) could not schedule page %d.",
+                        $page,
+                        $page + 1,
+                    ),
                 );
 
                 $this->record_failed($message);
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception message is internal and already sanitized above.
                 throw new \RuntimeException($message);
             }
 
@@ -713,7 +719,7 @@ class Product_Backfill
             $this->record_failed(
                 __(
                     "The initial product backfill batch could not be scheduled.",
-                    self::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
             );
 

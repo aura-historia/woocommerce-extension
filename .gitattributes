@@ -5,7 +5,6 @@
 /.tmp-openapi-inspect export-ignore
 /README.md export-ignore
 /build-release.sh export-ignore
-/composer.json export-ignore
 /composer.lock export-ignore
 /package-lock.json export-ignore
 /package.json export-ignore

@@ -79,7 +79,7 @@ class Backend_Api_Client
                 "ahpc_backend_invalid_url",
                 __(
                     "The backend shop URL could not be built from the configured Shop ID.",
-                    self::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
             );
         }
@@ -89,7 +89,7 @@ class Backend_Api_Client
                 "ahpc_backend_client_unavailable",
                 __(
                     "The plugin's generated backend API client dependencies are not available.",
-                    self::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
             );
         }
@@ -118,7 +118,7 @@ class Backend_Api_Client
                 "ahpc_backend_invalid_response",
                 __(
                     "The backend returned an unexpected response shape.",
-                    self::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
             );
         }
@@ -163,7 +163,7 @@ class Backend_Api_Client
                 "ahpc_backend_invalid_url",
                 __(
                     "The backend shop URL could not be built from the configured Shop ID.",
-                    self::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
             );
         }
@@ -173,7 +173,7 @@ class Backend_Api_Client
                 "ahpc_backend_client_unavailable",
                 __(
                     "The plugin's generated backend API client dependencies are not available.",
-                    self::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
             );
         }

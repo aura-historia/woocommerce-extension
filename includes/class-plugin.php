@@ -120,12 +120,6 @@ class Plugin
 
         $this->booted = true;
 
-        load_plugin_textdomain(
-            Webhook_Manager::TEXT_DOMAIN,
-            false,
-            dirname(AHPC_PLUGIN_BASENAME) . "/languages",
-        );
-
         add_filter("plugin_action_links_" . AHPC_PLUGIN_BASENAME, [
             $this,
             "add_plugin_action_links",
@@ -229,9 +223,9 @@ class Plugin
             "woocommerce",
             esc_html__(
                 "Aura Historia Partner Connect",
-                Webhook_Manager::TEXT_DOMAIN,
+                "aura-historia-partner-connect",
             ),
-            esc_html__("Aura Historia", Webhook_Manager::TEXT_DOMAIN),
+            esc_html__("Aura Historia", "aura-historia-partner-connect"),
             "manage_woocommerce",
             self::PAGE_SLUG,
             [$this, "render_settings_page"],
@@ -315,7 +309,7 @@ class Plugin
                         "ahpc_invalid_shop_id",
                         __(
                             "The Shop ID doesn't look right. Copy it again from Aura Historia and try once more.",
-                            Webhook_Manager::TEXT_DOMAIN,
+                            "aura-historia-partner-connect",
                         ),
                     );
                 }
@@ -336,7 +330,7 @@ class Plugin
                         "ahpc_invalid_api_key",
                         __(
                             "The API key doesn't look right. Copy it again from Aura Historia and try once more.",
-                            Webhook_Manager::TEXT_DOMAIN,
+                            "aura-historia-partner-connect",
                         ),
                     );
                 }
@@ -446,7 +440,7 @@ class Plugin
             wp_die(
                 esc_html__(
                     "You are not allowed to sync these webhooks.",
-                    Webhook_Manager::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
                 403,
             );
@@ -470,7 +464,7 @@ class Plugin
                     "ahpc_missing_manager",
                     __(
                         "The webhook manager could not be initialized.",
-                        Webhook_Manager::TEXT_DOMAIN,
+                        "aura-historia-partner-connect",
                     ),
                 );
 
@@ -495,7 +489,7 @@ class Plugin
             wp_die(
                 esc_html__(
                     "You are not allowed to queue a product backfill.",
-                    Webhook_Manager::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
                 403,
             );
@@ -547,7 +541,7 @@ class Plugin
                 "ahpc_backfill_unavailable",
                 __(
                     "WooCommerce is not active, so the product backfill cannot be queued yet.",
-                    Webhook_Manager::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
             );
         }
@@ -557,7 +551,7 @@ class Plugin
                 "ahpc_backfill_unavailable",
                 __(
                     "The product backfill component is not available right now.",
-                    Webhook_Manager::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
             );
         }
@@ -574,7 +568,7 @@ class Plugin
                 "ahpc_backfill_invalid_settings",
                 __(
                     "Save a valid Shop ID and API key before queueing a full product backfill.",
-                    Webhook_Manager::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
             );
         }
@@ -584,7 +578,7 @@ class Plugin
                 "ahpc_backfill_unavailable",
                 __(
                     "The webhook manager could not be initialized.",
-                    Webhook_Manager::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
             );
         }
@@ -600,7 +594,7 @@ class Plugin
                 "ahpc_backfill_failed",
                 __(
                     "The product backfill could not be queued. Check the backfill status below and the WooCommerce Action Scheduler screen for more detail.",
-                    Webhook_Manager::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
             );
         }
@@ -657,7 +651,7 @@ class Plugin
         echo '<div class="notice notice-error"><p>' .
             esc_html__(
                 "Aura Historia Partner Connect requires WooCommerce to be installed and active.",
-                Webhook_Manager::TEXT_DOMAIN,
+                "aura-historia-partner-connect",
             ) .
             "</p></div>";
     }
@@ -675,7 +669,7 @@ class Plugin
             sprintf(
                 '<a href="%s">%s</a>',
                 esc_url($this->get_settings_page_url()),
-                esc_html__("Settings", Webhook_Manager::TEXT_DOMAIN),
+                esc_html__("Settings", "aura-historia-partner-connect"),
             ),
         );
 
@@ -716,15 +710,12 @@ class Plugin
             $this->manager instanceof Webhook_Manager
                 ? $this->manager->get_webhook_summaries()
                 : [];
-        $sync_success =
-            isset($_GET["ahpc_synced"]) &&
-            "1" === wp_unslash($_GET["ahpc_synced"]);
-        $backfill_request_status = isset($_GET["ahpc_backfill"])
-            ? sanitize_key(wp_unslash($_GET["ahpc_backfill"]))
-            : "";
+        $sync_success = "1" === $this->get_query_param("ahpc_synced");
+        $backfill_request_status = sanitize_key(
+            $this->get_query_param("ahpc_backfill"),
+        );
         $settings_updated =
-            isset($_GET["settings-updated"]) &&
-            "true" === wp_unslash($_GET["settings-updated"]);
+            "true" === $this->get_query_param("settings-updated");
         $logs_url = admin_url("admin.php?page=wc-status&tab=logs");
         $webhooks_url = admin_url(
             "admin.php?page=wc-settings&tab=advanced&section=webhooks",
@@ -745,11 +736,11 @@ class Plugin
 		<div class="wrap">
 			<h1><?php echo esc_html__(
        "Aura Historia Partner Connect",
-       Webhook_Manager::TEXT_DOMAIN,
+       "aura-historia-partner-connect",
    ); ?></h1>
 			<p><?php echo esc_html__(
        "Connect this WooCommerce store to Aura Historia so your products can appear there and stay up to date automatically.",
-       Webhook_Manager::TEXT_DOMAIN,
+       "aura-historia-partner-connect",
    ); ?></p>
 			<?php $this->render_setting_messages($hide_default_updated_notice); ?>
 
@@ -758,7 +749,7 @@ class Plugin
         "error",
         esc_html__(
             "WooCommerce is not active, so the managed webhooks cannot be created yet.",
-            Webhook_Manager::TEXT_DOMAIN,
+            "aura-historia-partner-connect",
         ),
     ); ?>
 			<?php elseif ($sync_success): ?>
@@ -766,7 +757,7 @@ class Plugin
         "success",
         esc_html__(
             "Managed WooCommerce webhooks synced successfully.",
-            Webhook_Manager::TEXT_DOMAIN,
+            "aura-historia-partner-connect",
         ),
     ); ?>
 			<?php endif; ?>
@@ -776,7 +767,7 @@ class Plugin
         "success",
         esc_html__(
             "A fresh product backfill was queued. Existing products will be re-sent in the background.",
-            Webhook_Manager::TEXT_DOMAIN,
+            "aura-historia-partner-connect",
         ),
     ); ?>
 			<?php elseif ("invalid" === $backfill_request_status): ?>
@@ -784,7 +775,7 @@ class Plugin
         "warning",
         esc_html__(
             "Save a valid Shop ID and API key before queueing a full product backfill.",
-            Webhook_Manager::TEXT_DOMAIN,
+            "aura-historia-partner-connect",
         ),
     ); ?>
 			<?php elseif ("unavailable" === $backfill_request_status): ?>
@@ -792,7 +783,7 @@ class Plugin
         "error",
         esc_html__(
             "The product backfill could not be queued because WooCommerce or Action Scheduler is not available yet.",
-            Webhook_Manager::TEXT_DOMAIN,
+            "aura-historia-partner-connect",
         ),
     ); ?>
 			<?php elseif ("failed" === $backfill_request_status): ?>
@@ -800,7 +791,7 @@ class Plugin
         "error",
         esc_html__(
             "The product backfill could not be queued. Check the backfill status below for more detail.",
-            Webhook_Manager::TEXT_DOMAIN,
+            "aura-historia-partner-connect",
         ),
     ); ?>
 			<?php endif; ?>
@@ -812,7 +803,7 @@ class Plugin
         "success",
         esc_html__(
             "Configuration saved and Aura Historia connection verified.",
-            Webhook_Manager::TEXT_DOMAIN,
+            "aura-historia-partner-connect",
         ),
     ); ?>
 			<?php elseif (empty($backend_base_url)): ?>
@@ -820,7 +811,7 @@ class Plugin
         "warning",
         esc_html__(
             "Aura Historia is not fully configured inside the plugin yet. Define AHPC_BACKEND_BASE_URL before connecting a store.",
-            Webhook_Manager::TEXT_DOMAIN,
+            "aura-historia-partner-connect",
         ),
     ); ?>
 			<?php elseif (!$has_shop_id && !$has_api_key): ?>
@@ -828,7 +819,7 @@ class Plugin
         "warning",
         esc_html__(
             "Add your Shop ID and API key from Aura Historia to connect this store. Product updates start automatically after both are saved.",
-            Webhook_Manager::TEXT_DOMAIN,
+            "aura-historia-partner-connect",
         ),
     ); ?>
 			<?php elseif (!$has_shop_id): ?>
@@ -836,7 +827,7 @@ class Plugin
         "warning",
         esc_html__(
             "Add the Shop ID from Aura Historia to finish connecting this store.",
-            Webhook_Manager::TEXT_DOMAIN,
+            "aura-historia-partner-connect",
         ),
     ); ?>
 			<?php elseif (!Webhook_Manager::is_valid_shop_id($settings["shop_id"])): ?>
@@ -844,7 +835,7 @@ class Plugin
         "warning",
         esc_html__(
             "The Shop ID doesn't look right. Copy it again from Aura Historia and try once more.",
-            Webhook_Manager::TEXT_DOMAIN,
+            "aura-historia-partner-connect",
         ),
     ); ?>
 			<?php elseif (!$has_api_key): ?>
@@ -852,7 +843,7 @@ class Plugin
         "warning",
         esc_html__(
             "Add the API key from Aura Historia to finish connecting this store.",
-            Webhook_Manager::TEXT_DOMAIN,
+            "aura-historia-partner-connect",
         ),
     ); ?>
 			<?php elseif (!Webhook_Manager::is_valid_api_key($settings["api_key"])): ?>
@@ -860,7 +851,7 @@ class Plugin
         "warning",
         esc_html__(
             "The API key doesn't look right. Copy it again from Aura Historia and try once more.",
-            Webhook_Manager::TEXT_DOMAIN,
+            "aura-historia-partner-connect",
         ),
     ); ?>
 			<?php elseif (empty($webhook_endpoint_url)): ?>
@@ -868,7 +859,7 @@ class Plugin
         "warning",
         esc_html__(
             "The webhook delivery URL could not be built from the current settings.",
-            Webhook_Manager::TEXT_DOMAIN,
+            "aura-historia-partner-connect",
         ),
     ); ?>
 			<?php elseif ("error" === $connection_status["type"]): ?>
@@ -886,7 +877,7 @@ class Plugin
 							<th scope="row">
 								<label for="ahpc-shop-id"><?php echo esc_html__(
             "Shop ID",
-            Webhook_Manager::TEXT_DOMAIN,
+            "aura-historia-partner-connect",
         ); ?></label>
 							</th>
 							<td>
@@ -897,7 +888,7 @@ class Plugin
 ); ?>" spellcheck="false" />
 								<p class="description"><?php echo esc_html__(
             "Paste the Shop ID from Aura Historia for this store. It tells Aura Historia where your WooCommerce products should appear.",
-            Webhook_Manager::TEXT_DOMAIN,
+            "aura-historia-partner-connect",
         ); ?></p>
 							</td>
 						</tr>
@@ -905,7 +896,7 @@ class Plugin
 							<th scope="row">
 								<label for="ahpc-api-key"><?php echo esc_html__(
             "API key",
-            Webhook_Manager::TEXT_DOMAIN,
+            "aura-historia-partner-connect",
         ); ?></label>
 							</th>
 							<td>
@@ -916,14 +907,14 @@ class Plugin
 ); ?>" autocomplete="off" spellcheck="false" />
 								<p class="description"><?php echo esc_html__(
             "Paste the API key from Aura Historia for this store. It lets Aura Historia securely receive product updates from your shop.",
-            Webhook_Manager::TEXT_DOMAIN,
+            "aura-historia-partner-connect",
         ); ?></p>
 							</td>
 						</tr>
 						<tr>
 							<th scope="row"><?php echo esc_html__(
            "Connection status",
-           Webhook_Manager::TEXT_DOMAIN,
+           "aura-historia-partner-connect",
        ); ?></th>
 							<td>
 								<strong><?php echo esc_html($connection_status["label"]); ?></strong>
@@ -935,7 +926,7 @@ class Plugin
 						<tr>
 							<th scope="row"><?php echo esc_html__(
            "Product backfill",
-           Webhook_Manager::TEXT_DOMAIN,
+           "aura-historia-partner-connect",
        ); ?></th>
 							<td>
 								<strong><?php echo esc_html($backfill_status["label"]); ?></strong>
@@ -945,17 +936,17 @@ class Plugin
 					</tbody>
 				</table>
 				<?php submit_button(
-        esc_html__("Save changes", Webhook_Manager::TEXT_DOMAIN),
+        esc_html__("Save changes", "aura-historia-partner-connect"),
     ); ?>
 			</form>
 
 			<h2><?php echo esc_html__(
        "Existing product backfill",
-       Webhook_Manager::TEXT_DOMAIN,
+       "aura-historia-partner-connect",
    ); ?></h2>
 			<p><?php echo esc_html__(
        "Use this if the initial product backfill did not start, was interrupted, or you want to re-send the entire current catalog. It queues a fresh background backfill for the saved Shop ID and replaces any pending backfill batches.",
-       Webhook_Manager::TEXT_DOMAIN,
+       "aura-historia-partner-connect",
    ); ?></p>
 			<?php if ($this->is_woocommerce_available()): ?>
 				<form method="post" action="<?php echo esc_url(
@@ -966,7 +957,7 @@ class Plugin
 					<?php submit_button(
          esc_html__(
              "Re-send all existing products",
-             Webhook_Manager::TEXT_DOMAIN,
+             "aura-historia-partner-connect",
          ),
          "secondary",
          "submit",
@@ -975,25 +966,25 @@ class Plugin
 				</form>
 				<p class="description"><?php echo esc_html__(
         "The backfill runs in the background via Action Scheduler. On large catalogs it may take some time, and queueing it again restarts the pending backfill from the beginning.",
-        Webhook_Manager::TEXT_DOMAIN,
+        "aura-historia-partner-connect",
     ); ?></p>
 			<?php endif; ?>
 
 			<h2><?php echo esc_html__(
        "Managed webhooks",
-       Webhook_Manager::TEXT_DOMAIN,
+       "aura-historia-partner-connect",
    ); ?></h2>
 			<p>
 				<?php
     echo esc_html__(
         "The plugin owns exactly three WooCommerce webhooks and keeps them in sync with the built-in backend endpoint pattern and the settings above.",
-        Webhook_Manager::TEXT_DOMAIN,
+        "aura-historia-partner-connect",
     );
     if ($last_sync_at) {
         echo " " .
             sprintf(
                 /* translators: %s: formatted sync time. */
-                esc_html__("Last sync: %s.", Webhook_Manager::TEXT_DOMAIN),
+                esc_html__("Last sync: %s.", "aura-historia-partner-connect"),
                 esc_html(
                     mysql2date(
                         get_option("date_format") .
@@ -1011,10 +1002,16 @@ class Plugin
 				<table class="widefat striped">
 					<thead>
 						<tr>
-							<th><?php echo esc_html__("Topic", Webhook_Manager::TEXT_DOMAIN); ?></th>
-							<th><?php echo esc_html__("Webhook ID", Webhook_Manager::TEXT_DOMAIN); ?></th>
-							<th><?php echo esc_html__("Status", Webhook_Manager::TEXT_DOMAIN); ?></th>
-							<th><?php echo esc_html__("Delivery URL", Webhook_Manager::TEXT_DOMAIN); ?></th>
+							<th><?php echo esc_html__("Topic", "aura-historia-partner-connect"); ?></th>
+							<th><?php echo esc_html__(
+           "Webhook ID",
+           "aura-historia-partner-connect",
+       ); ?></th>
+							<th><?php echo esc_html__("Status", "aura-historia-partner-connect"); ?></th>
+							<th><?php echo esc_html__(
+           "Delivery URL",
+           "aura-historia-partner-connect",
+       ); ?></th>
 						</tr>
 					</thead>
 					<tbody>
@@ -1035,7 +1032,7 @@ class Plugin
 			<?php else: ?>
 				<p><?php echo esc_html__(
         "Managed webhook details will appear here after WooCommerce is available and a sync has run.",
-        Webhook_Manager::TEXT_DOMAIN,
+        "aura-historia-partner-connect",
     ); ?></p>
 			<?php endif; ?>
 
@@ -1044,13 +1041,13 @@ class Plugin
         $webhooks_url,
     ); ?>"><?php echo esc_html__(
     "Open WooCommerce webhooks",
-    Webhook_Manager::TEXT_DOMAIN,
+    "aura-historia-partner-connect",
 ); ?></a>
 				<a class="button button-secondary" href="<?php echo esc_url(
         $logs_url,
     ); ?>"><?php echo esc_html__(
     "Open webhook delivery logs",
-    Webhook_Manager::TEXT_DOMAIN,
+    "aura-historia-partner-connect",
 ); ?></a>
 			</p>
 
@@ -1061,7 +1058,7 @@ class Plugin
 					<input type="hidden" name="action" value="ahpc_sync_webhooks" />
 					<?php wp_nonce_field("ahpc_sync_webhooks"); ?>
 					<?php submit_button(
-         esc_html__("Sync webhooks now", Webhook_Manager::TEXT_DOMAIN),
+         esc_html__("Sync webhooks now", "aura-historia-partner-connect"),
          "secondary",
          "submit",
          false,
@@ -1121,10 +1118,13 @@ class Plugin
         if ("" === Webhook_Manager::get_backend_base_url()) {
             return [
                 "type" => "warning",
-                "label" => __("Not configured", Webhook_Manager::TEXT_DOMAIN),
+                "label" => __(
+                    "Not configured",
+                    "aura-historia-partner-connect",
+                ),
                 "message" => __(
                     "Define AHPC_BACKEND_BASE_URL before verifying the Aura Historia connection.",
-                    Webhook_Manager::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
             ];
         }
@@ -1135,10 +1135,10 @@ class Plugin
         ) {
             return [
                 "type" => "warning",
-                "label" => __("Not verified", Webhook_Manager::TEXT_DOMAIN),
+                "label" => __("Not verified", "aura-historia-partner-connect"),
                 "message" => __(
                     "Save a valid Shop ID and API key to verify the Aura Historia connection.",
-                    Webhook_Manager::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
             ];
         }
@@ -1146,10 +1146,10 @@ class Plugin
         if ("yes" === get_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes")) {
             return [
                 "type" => "warning",
-                "label" => __("Sync pending", Webhook_Manager::TEXT_DOMAIN),
+                "label" => __("Sync pending", "aura-historia-partner-connect"),
                 "message" => __(
                     "The saved Shop ID and API key are waiting for the next webhook sync before the Aura Historia connection can be verified.",
-                    Webhook_Manager::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
             ];
         }
@@ -1157,12 +1157,12 @@ class Plugin
         if ("" !== $sync_error) {
             return [
                 "type" => "error",
-                "label" => __("Check failed", Webhook_Manager::TEXT_DOMAIN),
+                "label" => __("Check failed", "aura-historia-partner-connect"),
                 "message" => sprintf(
                     /* translators: %s: connection check error detail. */
                     __(
                         "Aura Historia did not accept the saved Shop ID and API key: %s",
-                        Webhook_Manager::TEXT_DOMAIN,
+                        "aura-historia-partner-connect",
                     ),
                     $sync_error,
                 ),
@@ -1172,20 +1172,20 @@ class Plugin
         if ("" !== $last_sync_at) {
             return [
                 "type" => "success",
-                "label" => __("Connected", Webhook_Manager::TEXT_DOMAIN),
+                "label" => __("Connected", "aura-historia-partner-connect"),
                 "message" => __(
                     "Aura Historia accepted the saved Shop ID and API key during the most recent webhook sync.",
-                    Webhook_Manager::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
             ];
         }
 
         return [
             "type" => "warning",
-            "label" => __("Not verified", Webhook_Manager::TEXT_DOMAIN),
+            "label" => __("Not verified", "aura-historia-partner-connect"),
             "message" => __(
                 "Run a webhook sync to verify the saved Shop ID and API key.",
-                Webhook_Manager::TEXT_DOMAIN,
+                "aura-historia-partner-connect",
             ),
         ];
     }
@@ -1200,22 +1200,22 @@ class Plugin
     {
         if (!class_exists(Product_Backfill::class)) {
             return [
-                "label" => __("Unavailable", Webhook_Manager::TEXT_DOMAIN),
+                "label" => __("Unavailable", "aura-historia-partner-connect"),
                 "message" => __(
                     "The product backfill component is not loaded right now.",
-                    Webhook_Manager::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
             ];
         }
 
         if (!function_exists("as_schedule_single_action")) {
             return [
-                "label" => __("Unavailable", Webhook_Manager::TEXT_DOMAIN),
+                "label" => __("Unavailable", "aura-historia-partner-connect"),
                 "message" => sprintf(
                     /* translators: %s: Action Scheduler hook name. */
                     __(
                         'Action Scheduler is not available, so the product backfill action "%s" cannot be queued.',
-                        Webhook_Manager::TEXT_DOMAIN,
+                        "aura-historia-partner-connect",
                     ),
                     Product_Backfill::ACTION_HOOK,
                 ),
@@ -1262,7 +1262,7 @@ class Plugin
                     /* translators: 1: Action Scheduler hook name, 2: formatted time. */
                     __(
                         'Action Scheduler hook "%1$s" is queued to run at %2$s.',
-                        Webhook_Manager::TEXT_DOMAIN,
+                        "aura-historia-partner-connect",
                     ),
                     $hook,
                     $scheduled_at,
@@ -1271,7 +1271,7 @@ class Plugin
                     /* translators: %s: Action Scheduler hook name. */
                     __(
                         'Action Scheduler hook "%s" is queued and waiting for Action Scheduler to finish initializing.',
-                        Webhook_Manager::TEXT_DOMAIN,
+                        "aura-historia-partner-connect",
                     ),
                     $hook,
                 );
@@ -1283,14 +1283,14 @@ class Plugin
                         /* translators: %s: formatted time. */
                         __(
                             "Last successful backfill: %s.",
-                            Webhook_Manager::TEXT_DOMAIN,
+                            "aura-historia-partner-connect",
                         ),
                         $completed_at,
                     );
             }
 
             return [
-                "label" => __("Queued", Webhook_Manager::TEXT_DOMAIN),
+                "label" => __("Queued", "aura-historia-partner-connect"),
                 "message" => $message,
             ];
         }
@@ -1301,7 +1301,7 @@ class Plugin
                     /* translators: 1: Action Scheduler hook name, 2: formatted time. */
                     __(
                         'Action Scheduler hook "%1$s" started processing at %2$s.',
-                        Webhook_Manager::TEXT_DOMAIN,
+                        "aura-historia-partner-connect",
                     ),
                     $hook,
                     $started_at,
@@ -1310,7 +1310,7 @@ class Plugin
                     /* translators: %s: Action Scheduler hook name. */
                     __(
                         'Action Scheduler hook "%s" is currently processing existing products.',
-                        Webhook_Manager::TEXT_DOMAIN,
+                        "aura-historia-partner-connect",
                     ),
                     $hook,
                 );
@@ -1322,27 +1322,27 @@ class Plugin
                         /* translators: %s: formatted time. */
                         __(
                             "Last successful backfill: %s.",
-                            Webhook_Manager::TEXT_DOMAIN,
+                            "aura-historia-partner-connect",
                         ),
                         $completed_at,
                     );
             }
 
             return [
-                "label" => __("Running", Webhook_Manager::TEXT_DOMAIN),
+                "label" => __("Running", "aura-historia-partner-connect"),
                 "message" => $message,
             ];
         }
 
         if (Product_Backfill::STATUS_COMPLETE === $status) {
             return [
-                "label" => __("Completed", Webhook_Manager::TEXT_DOMAIN),
+                "label" => __("Completed", "aura-historia-partner-connect"),
                 "message" => $completed_at
                     ? sprintf(
                         /* translators: 1: formatted time, 2: Action Scheduler hook name. */
                         __(
                             'The most recent product backfill completed successfully at %1$s using Action Scheduler hook "%2$s".',
-                            Webhook_Manager::TEXT_DOMAIN,
+                            "aura-historia-partner-connect",
                         ),
                         $completed_at,
                         $hook,
@@ -1351,7 +1351,7 @@ class Plugin
                         /* translators: %s: Action Scheduler hook name. */
                         __(
                             'The most recent product backfill completed successfully using Action Scheduler hook "%s".',
-                            Webhook_Manager::TEXT_DOMAIN,
+                            "aura-historia-partner-connect",
                         ),
                         $hook,
                     ),
@@ -1364,7 +1364,7 @@ class Plugin
                     /* translators: 1: formatted time, 2: error detail. */
                     __(
                         'The most recent product backfill batch failed at %1$s: %2$s',
-                        Webhook_Manager::TEXT_DOMAIN,
+                        "aura-historia-partner-connect",
                     ),
                     $failed_at,
                     $last_error,
@@ -1374,14 +1374,14 @@ class Plugin
                     /* translators: %s: error detail. */
                     __(
                         "The most recent product backfill batch failed: %s",
-                        Webhook_Manager::TEXT_DOMAIN,
+                        "aura-historia-partner-connect",
                     ),
                     $last_error,
                 );
             } else {
                 $message = __(
                     "The most recent product backfill batch failed.",
-                    Webhook_Manager::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 );
             }
 
@@ -1391,7 +1391,7 @@ class Plugin
                     /* translators: %s: Action Scheduler hook name. */
                     __(
                         'Action Scheduler hook "%s" will retry the batch if another attempt is allowed.',
-                        Webhook_Manager::TEXT_DOMAIN,
+                        "aura-historia-partner-connect",
                     ),
                     $hook,
                 );
@@ -1403,14 +1403,14 @@ class Plugin
                         /* translators: %s: formatted time. */
                         __(
                             "Last successful backfill: %s.",
-                            Webhook_Manager::TEXT_DOMAIN,
+                            "aura-historia-partner-connect",
                         ),
                         $completed_at,
                     );
             }
 
             return [
-                "label" => __("Failed", Webhook_Manager::TEXT_DOMAIN),
+                "label" => __("Failed", "aura-historia-partner-connect"),
                 "message" => $message,
             ];
         }
@@ -1420,12 +1420,12 @@ class Plugin
             !Webhook_Manager::is_valid_api_key($settings["api_key"])
         ) {
             return [
-                "label" => __("Not queued", Webhook_Manager::TEXT_DOMAIN),
+                "label" => __("Not queued", "aura-historia-partner-connect"),
                 "message" => sprintf(
                     /* translators: %s: Action Scheduler hook name. */
                     __(
                         'Save a valid Shop ID and API key to queue the product backfill action "%s".',
-                        Webhook_Manager::TEXT_DOMAIN,
+                        "aura-historia-partner-connect",
                     ),
                     $hook,
                 ),
@@ -1436,7 +1436,7 @@ class Plugin
             /* translators: %s: Action Scheduler hook name. */
             __(
                 'No product backfill batch is currently queued. The plugin uses Action Scheduler hook "%s" to backfill existing products after a successful sync.',
-                Webhook_Manager::TEXT_DOMAIN,
+                "aura-historia-partner-connect",
             ),
             $hook,
         );
@@ -1448,14 +1448,14 @@ class Plugin
                     /* translators: %s: formatted time. */
                     __(
                         "Last successful backfill: %s.",
-                        Webhook_Manager::TEXT_DOMAIN,
+                        "aura-historia-partner-connect",
                     ),
                     $completed_at,
                 );
         }
 
         return [
-            "label" => __("Not queued", Webhook_Manager::TEXT_DOMAIN),
+            "label" => __("Not queued", "aura-historia-partner-connect"),
             "message" => $message,
         ];
     }
@@ -1494,6 +1494,30 @@ class Plugin
             get_option("date_format") . " " . get_option("time_format"),
             $timestamp,
         );
+    }
+
+    /**
+     * Returns a sanitized query parameter value.
+     *
+     * @param string $key Query parameter key.
+     * @return string
+     */
+    private function get_query_param($key)
+    {
+        $value = filter_input(INPUT_GET, $key, FILTER_UNSAFE_RAW);
+
+        if (is_string($value)) {
+            return sanitize_text_field($value);
+        }
+
+        if (
+            !isset($_GET[$key]) // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only admin notice query parameter.
+        ) {
+            return "";
+        }
+
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended,WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Read-only admin notice query parameter.
+        return sanitize_text_field(wp_unslash((string) $_GET[$key]));
     }
 
     /**

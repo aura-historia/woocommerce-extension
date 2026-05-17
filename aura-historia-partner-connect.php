@@ -4,7 +4,7 @@
  *
  * @wordpress-plugin
  * Plugin Name:       Aura Historia Partner Connect
- * Description:       Keeps the required WooCommerce product webhooks in sync for Aura Historia-connected stores.
+ * Description:       Synchronizes WooCommerce Products to Aura Historia to help you reach a global audience for your antiques, art and collectables.
  * Version:           0.1.0
  * Requires at least: 6.5
  * Requires PHP:      8.1

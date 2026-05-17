@@ -36,7 +36,7 @@ rsync -a "$PROJECT_ROOT/" "$RELEASE_DIR/" \
 (
   cd "$RELEASE_DIR"
   composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
-  rm -f composer.json composer.lock
+  rm -f composer.lock
 )
 
 (
