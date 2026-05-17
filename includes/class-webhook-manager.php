@@ -251,9 +251,18 @@ class Webhook_Manager
     public function get_managed_topics()
     {
         return [
-            "product.created" => __("Product created", self::TEXT_DOMAIN),
-            "product.updated" => __("Product updated", self::TEXT_DOMAIN),
-            "product.deleted" => __("Product deleted", self::TEXT_DOMAIN),
+            "product.created" => __(
+                "Product created",
+                "aura-historia-partner-connect",
+            ),
+            "product.updated" => __(
+                "Product updated",
+                "aura-historia-partner-connect",
+            ),
+            "product.deleted" => __(
+                "Product deleted",
+                "aura-historia-partner-connect",
+            ),
         ];
     }
 
@@ -320,7 +329,7 @@ class Webhook_Manager
                     "ahpc_missing_woocommerce",
                     __(
                         "WooCommerce webhook APIs are not available yet.",
-                        self::TEXT_DOMAIN,
+                        "aura-historia-partner-connect",
                     ),
                 ),
             );
@@ -346,7 +355,7 @@ class Webhook_Manager
                         "ahpc_missing_user",
                         __(
                             "No administrator or shop manager account was found for webhook delivery context.",
-                            self::TEXT_DOMAIN,
+                            "aura-historia-partner-connect",
                         ),
                     ),
                 );
@@ -358,7 +367,7 @@ class Webhook_Manager
                         "ahpc_missing_backend_base_url",
                         __(
                             "Aura Historia is not fully configured inside the plugin. Define AHPC_BACKEND_BASE_URL before connecting a store.",
-                            self::TEXT_DOMAIN,
+                            "aura-historia-partner-connect",
                         ),
                     );
                 } elseif ($has_shop_id && !self::is_valid_shop_id($shop_id)) {
@@ -366,7 +375,7 @@ class Webhook_Manager
                         "ahpc_invalid_shop_id",
                         __(
                             "The Shop ID does not match the value shown in Aura Historia. Copy it again and save once more.",
-                            self::TEXT_DOMAIN,
+                            "aura-historia-partner-connect",
                         ),
                     );
                 } elseif ($has_api_key && !self::is_valid_api_key($api_key)) {
@@ -374,7 +383,7 @@ class Webhook_Manager
                         "ahpc_invalid_api_key",
                         __(
                             "The API key does not match the value shown in Aura Historia. Copy it again and save once more.",
-                            self::TEXT_DOMAIN,
+                            "aura-historia-partner-connect",
                         ),
                     );
                 } elseif (!$has_shop_id || !$has_api_key) {
@@ -384,7 +393,7 @@ class Webhook_Manager
                         "ahpc_empty_webhook_endpoint_url",
                         __(
                             "The built-in webhook delivery URL could not be built from the current configuration.",
-                            self::TEXT_DOMAIN,
+                            "aura-historia-partner-connect",
                         ),
                     );
                 } else {
@@ -415,7 +424,7 @@ class Webhook_Manager
                                 /* translators: %s: webhook topic. */
                                 __(
                                     'WooCommerce does not recognise the webhook topic "%s".',
-                                    self::TEXT_DOMAIN,
+                                    "aura-historia-partner-connect",
                                 ),
                                 $topic,
                             ),
@@ -537,7 +546,7 @@ class Webhook_Manager
                 "ahpc_invalid_registration_url",
                 __(
                     "The backend registration URL could not be built from the configured Shop ID.",
-                    self::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
             );
         }
@@ -547,7 +556,7 @@ class Webhook_Manager
                 "ahpc_backend_registration_failed",
                 __(
                     "The plugin installation is incomplete and cannot contact Aura Historia right now.",
-                    self::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
             );
         }
@@ -559,7 +568,7 @@ class Webhook_Manager
                     /* translators: %s: error detail. */
                     __(
                         "The backend request could not be prepared: %s",
-                        self::TEXT_DOMAIN,
+                        "aura-historia-partner-connect",
                     ),
                     $error_message,
                 ),
@@ -573,7 +582,7 @@ class Webhook_Manager
                     /* translators: %s: error detail. */
                     __(
                         "The backend rejected the secret registration request: %s",
-                        self::TEXT_DOMAIN,
+                        "aura-historia-partner-connect",
                     ),
                     $error_message,
                 ),
@@ -585,14 +594,14 @@ class Webhook_Manager
                 /* translators: %d: HTTP response code. */
                 __(
                     "The backend returned HTTP %d while storing the WooCommerce webhook secret.",
-                    self::TEXT_DOMAIN,
+                    "aura-historia-partner-connect",
                 ),
                 $response_code,
             );
         } else {
             $message = __(
                 "The backend returned an invalid response while storing the WooCommerce webhook secret.",
-                self::TEXT_DOMAIN,
+                "aura-historia-partner-connect",
             );
         }
 
@@ -698,11 +707,13 @@ class Webhook_Manager
             }
 
             if (isset($wpdb) && $this->webhook_table_exists()) {
+                // phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- WooCommerce CRUD may be unavailable during cleanup, so this fallback removes only this plugin's managed webhook row.
                 $wpdb->delete(
                     $wpdb->prefix . "wc_webhooks",
                     ["webhook_id" => $webhook_id],
                     ["%d"],
                 );
+                // phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
             }
         }
 
@@ -715,7 +726,7 @@ class Webhook_Manager
         delete_option(self::OPTION_LAST_SYNC_AT);
 
         if (class_exists(Product_Backfill::class)) {
-            (new Product_Backfill())->cancel_backfill();
+            new Product_Backfill()->cancel_backfill();
         }
 
         delete_option("ahpc_backfill_state");
@@ -746,7 +757,7 @@ class Webhook_Manager
                 "status" =>
                     $webhook && method_exists($webhook, "get_i18n_status")
                         ? $webhook->get_i18n_status()
-                        : __("Missing", self::TEXT_DOMAIN),
+                        : __("Missing", "aura-historia-partner-connect"),
                 "delivery_url" => $webhook ? $webhook->get_delivery_url() : "",
             ];
         }
@@ -1019,6 +1030,7 @@ class Webhook_Manager
         }
 
         $table_name = $wpdb->prefix . "wc_webhooks";
+        // phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- WooCommerce's data store API may be unavailable here; the fallback performs a scoped lookup against the current site's webhook table.
         $webhook_id = $wpdb->get_var(
             $wpdb->prepare(
                 "SELECT webhook_id FROM {$table_name} WHERE name = %s AND topic = %s ORDER BY webhook_id DESC LIMIT 1",
@@ -1026,6 +1038,7 @@ class Webhook_Manager
                 $topic,
             ),
         );
+        // phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter
 
         return absint($webhook_id);
     }
@@ -1159,6 +1172,7 @@ class Webhook_Manager
             return;
         }
 
+        // phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- WooCommerce CRUD may be unavailable during deactivation, so this fallback only pauses the targeted managed webhook row.
         $wpdb->update(
             $wpdb->prefix . "wc_webhooks",
             [
@@ -1172,6 +1186,7 @@ class Webhook_Manager
             ["%s", "%s", "%s"],
             ["%d"],
         );
+        // phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
     }
 
     /**
@@ -1188,9 +1203,11 @@ class Webhook_Manager
         }
 
         $table_name = $wpdb->prefix . "wc_webhooks";
+        // phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange -- This table-existence check is only used to guard the narrow direct-database fallback paths in this class.
         $found_table = $wpdb->get_var(
             $wpdb->prepare("SHOW TABLES LIKE %s", $table_name),
         );
+        // phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange
 
         return $table_name === $found_table;
     }
