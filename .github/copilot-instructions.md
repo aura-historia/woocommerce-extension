@@ -118,6 +118,8 @@ Prefer targeted, minimal changes.
 
 Before changing architecture, ask whether the change is really needed. In most cases, the right answer for this repository is the simplest WordPress-native implementation.
 
+For PHP syntax compatibility, do not rewrite `(new Foo())->method()` or `(new Foo())->property` into `new Foo()->method()` / `new Foo()->property`. Keep the wrapping parentheses around inline `new` expressions when dereferencing them.
+
 If you change behavior, update the relevant docs too:
 
 - `README.md`

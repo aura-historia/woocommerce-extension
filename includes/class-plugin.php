@@ -182,7 +182,7 @@ class Plugin
             add_action(
                 Product_Backfill::ACTION_HOOK,
                 static function ($shop_id, $page) {
-                    new Product_Backfill()->process_batch($shop_id, $page);
+                    (new Product_Backfill())->process_batch($shop_id, $page);
                 },
                 10,
                 2,
@@ -589,7 +589,7 @@ class Plugin
             return $sync_result;
         }
 
-        if (!new Product_Backfill()->schedule_backfill($settings["shop_id"])) {
+        if (!(new Product_Backfill())->schedule_backfill($settings["shop_id"])) {
             return new WP_Error(
                 "ahpc_backfill_failed",
                 __(
@@ -1222,7 +1222,7 @@ class Plugin
             ];
         }
 
-        $details = new Product_Backfill()->get_status_details();
+        $details = (new Product_Backfill())->get_status_details();
         $hook = isset($details["hook"])
             ? (string) $details["hook"]
             : Product_Backfill::ACTION_HOOK;
