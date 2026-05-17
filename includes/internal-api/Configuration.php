@@ -562,11 +562,12 @@ class Configuration
 
         // check array index out of bound
         if ($hostIndex < 0 || $hostIndex >= count($hostSettings)) {
-            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Generated configuration exception message includes runtime host selection data.
+            // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Generated configuration exception message includes runtime host selection data.
             throw new \InvalidArgumentException(
                 "Invalid index $hostIndex when selecting the host. Must be less than " .
                     count($hostSettings),
             );
+            // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
         }
 
         $host = $hostSettings[$hostIndex];
@@ -587,7 +588,7 @@ class Configuration
                         $url,
                     );
                 } else {
-                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Generated configuration exception message includes runtime host variable diagnostics.
+                    // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Generated configuration exception message includes runtime host variable diagnostics.
                     throw new \InvalidArgumentException(
                         "The variable `$name` in the host URL has invalid value " .
                             $variables[$name] .
@@ -595,6 +596,7 @@ class Configuration
                             join(",", $variable["enum_values"]) .
                             ".",
                     );
+                    // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
                 }
             } else {
                 // use default value

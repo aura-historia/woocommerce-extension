@@ -551,11 +551,12 @@ class ShopsApi
                 "a",
             );
             if (!$options[RequestOptions::DEBUG]) {
-                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Generated client exception message includes the configured debug file path.
+                // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Generated client exception message includes the configured debug file path.
                 throw new \RuntimeException(
                     "Failed to open the debug file: " .
                         $this->config->getDebugFile(),
                 );
+                // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
             }
         }
 

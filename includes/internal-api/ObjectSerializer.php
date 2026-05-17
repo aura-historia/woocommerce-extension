@@ -121,10 +121,11 @@ class ObjectSerializer
                             $allowedEnumTypes = $callable();
                             if (!in_array($value, $allowedEnumTypes, true)) {
                                 $imploded = implode("', '", $allowedEnumTypes);
-                                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Generated serializer exception message includes runtime enum metadata.
+                                // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Generated serializer exception message includes runtime enum metadata.
                                 throw new \InvalidArgumentException(
                                     "Invalid value for enum '$openAPIType', must be one of: '$imploded'",
                                 );
+                                // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
                             }
                         }
                     }
@@ -595,10 +596,11 @@ class ObjectSerializer
         if (method_exists($class, "getAllowableEnumValues")) {
             if (!in_array($data, $class::getAllowableEnumValues(), true)) {
                 $imploded = implode("', '", $class::getAllowableEnumValues());
-                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Generated serializer exception message includes runtime enum metadata.
+                // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Generated serializer exception message includes runtime enum metadata.
                 throw new \InvalidArgumentException(
                     "Invalid value for enum '$class', must be one of: '$imploded'",
                 );
+                // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
             }
             return $data;
         } else {

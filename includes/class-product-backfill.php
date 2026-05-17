@@ -336,7 +336,8 @@ class Product_Backfill
                 $this->record_failed($message);
 
                 // Throw so Action Scheduler retries this batch automatically.
-                throw new \RuntimeException(sanitize_text_field($message));
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception message is internal and already sanitized above.
+                throw new \RuntimeException($message);
             }
         }
 
@@ -364,7 +365,8 @@ class Product_Backfill
                 );
 
                 $this->record_failed($message);
-                throw new \RuntimeException(sanitize_text_field($message));
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception message is internal and already sanitized above.
+                throw new \RuntimeException($message);
             }
 
             $this->record_scheduled();
