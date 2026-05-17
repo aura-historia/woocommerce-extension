@@ -21,8 +21,8 @@ info:
     name: License
     url: https://github.com/aura-historia/backend/blob/develop/LICENSE
 servers:
-  - url: https://api.dev.aura-historia.com
-    description: Full Development-Server
+  - url: https://api.aura-historia.com
+    description: Aura Historia Production API
 paths:
   /api/v1/shops/{shopId}/products:
     put:
@@ -140,7 +140,8 @@ paths:
                     errors:
                       baroque-violin-002: UPSERT_FAILED
         "400":
-          description: Bad request — request body is missing, empty, or contains invalid
+          description:
+            Bad request — request body is missing, empty, or contains invalid
             JSON
           content:
             application/problem+json:
@@ -378,7 +379,8 @@ paths:
                     error: BAD_BODY_VALUE
                     detail: Cannot geocode an empty structured address
         "401":
-          description: Unauthorized – invalid or missing Cognito JWT when using bearer
+          description:
+            Unauthorized – invalid or missing Cognito JWT when using bearer
             auth, or missing/malformed/mismatched `x-api-key` when using partner
             API-key auth.
           content:
@@ -393,7 +395,8 @@ paths:
                     title: Unauthorized
                     error: UNAUTHORIZED
                 missing_api_key:
-                  summary: x-api-key header is missing or empty when no Cognito identity is
+                  summary:
+                    x-api-key header is missing or empty when no Cognito identity is
                     present
                   value:
                     status: 401
@@ -413,7 +416,8 @@ paths:
                 status: 403
                 title: Forbidden
                 error: PARTNER_SHOP_NOT_PARTNERED
-                detail: User '550e8400-e29b-41d4-a716-446655440111' is not the partner of shop
+                detail:
+                  User '550e8400-e29b-41d4-a716-446655440111' is not the partner of shop
                   '550e8400-e29b-41d4-a716-446655440000'
         "404":
           description: Shop not found
@@ -460,38 +464,44 @@ components:
       properties:
         shopsProductId:
           type: string
-          description: The shop's own identifier for the product. Must be unique within
+          description:
+            The shop's own identifier for the product. Must be unique within
             the shop.
           example: baroque-violin-001
         title:
           allOf:
             - $ref: "#/components/schemas/LocalizedTextData"
           nullable: true
-          description: Optional localized title for the product. Used only when creating a
+          description:
+            Optional localized title for the product. Used only when creating a
             new product.
         description:
           allOf:
             - $ref: "#/components/schemas/LocalizedTextData"
           nullable: true
-          description: Optional localized description of the product. Used only when
+          description:
+            Optional localized description of the product. Used only when
             creating a new product.
         price:
           allOf:
             - $ref: "#/components/schemas/PriceData"
           nullable: true
-          description: Optional asking price for the product. Applied on both create and
+          description:
+            Optional asking price for the product. Applied on both create and
             update paths.
         priceEstimateMin:
           allOf:
             - $ref: "#/components/schemas/PriceData"
           nullable: true
-          description: Optional lower bound of the estimated price range. Used only when
+          description:
+            Optional lower bound of the estimated price range. Used only when
             creating a new product.
         priceEstimateMax:
           allOf:
             - $ref: "#/components/schemas/PriceData"
           nullable: true
-          description: Optional upper bound of the estimated price range. Used only when
+          description:
+            Optional upper bound of the estimated price range. Used only when
             creating a new product.
         state:
           allOf:
@@ -502,7 +512,8 @@ components:
           type: string
           format: uri
           nullable: true
-          description: URL to the product on the shop's website. Used only when creating a
+          description:
+            URL to the product on the shop's website. Used only when creating a
             new product.
           example: https://my-shop.com/products/baroque-violin
         images:
@@ -511,7 +522,8 @@ components:
             type: string
             format: uri
           nullable: true
-          description: List of image URLs for the product. Used only when creating a new
+          description:
+            List of image URLs for the product. Used only when creating a new
             product.
           example:
             - https://my-shop.com/images/violin-1.jpg
@@ -556,13 +568,15 @@ components:
           allOf:
             - $ref: "#/components/schemas/StructuredAddressData"
           nullable: true
-          description: Optional structured address to attach to the product for geo-aware
+          description:
+            Optional structured address to attach to the product for geo-aware
             indexing and search. Used only when creating a new product.
         geoAddress:
           allOf:
             - $ref: "#/components/schemas/GeoAddressData"
           nullable: true
-          description: Optional coordinates to attach to the product for geo-aware
+          description:
+            Optional coordinates to attach to the product for geo-aware
             indexing and search. Used only when creating a new product.
     PutProductsResponse:
       type: object
@@ -756,14 +770,16 @@ components:
         phone:
           type: string
           nullable: true
-          description: Optional updated public contact phone number. When omitted or set
+          description:
+            Optional updated public contact phone number. When omitted or set
             to `null`, the current phone number remains unchanged.
           example: +49 30 123456
         email:
           type: string
           format: email
           nullable: true
-          description: Optional updated public contact email address. When omitted or set
+          description:
+            Optional updated public contact email address. When omitted or set
             to `null`, the current email address remains unchanged.
           example: contact@tech-store-premium.com
     GetShopData:
@@ -832,7 +848,8 @@ components:
           allOf:
             - $ref: "#/components/schemas/CurrencyData"
           nullable: true
-          description: Optional Shopify currency configured for the shop, serialized as an
+          description:
+            Optional Shopify currency configured for the shop, serialized as an
             ISO 4217 code.
         shopifyLanguage:
           allOf:
@@ -877,7 +894,8 @@ components:
           type: string
           format: uri
           nullable: true
-          description: Optional primary URL of the shop website. Read responses may
+          description:
+            Optional primary URL of the shop website. Read responses may
             include backend-managed UTM tracking parameters.
           example: https://tech-store-premium.com/?utm_source=aura_historia&utm_medium=referral
         image:
@@ -934,7 +952,8 @@ components:
           $ref: "#/components/schemas/CurrencyData"
         amount:
           type: integer
-          description: Price amount in minor currency units (e.g., cents for most
+          description:
+            Price amount in minor currency units (e.g., cents for most
             supported currencies, whole yen for JPY)
           minimum: 0
           example: 2999
@@ -978,7 +997,8 @@ components:
           example: Pariser Platz 1
         addresslineExtra:
           type: string
-          description: Optional secondary address line such as floor, suite, building, or
+          description:
+            Optional secondary address line such as floor, suite, building, or
             c/o information.
           example: 2. Etage
         locality:

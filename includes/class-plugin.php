@@ -141,6 +141,10 @@ class Plugin
         if (is_admin()) {
             add_action("admin_menu", [$this, "register_admin_page"]);
             add_action("admin_init", [$this, "register_settings"]);
+            add_filter(
+                "option_page_capability_" . Webhook_Manager::SETTINGS_GROUP,
+                [$this, "filter_settings_page_capability"],
+            );
             add_action("admin_post_ahpc_sync_webhooks", [
                 $this,
                 "handle_sync_request",
@@ -184,7 +188,7 @@ class Plugin
             add_action(
                 Product_Backfill::ACTION_HOOK,
                 static function ($shop_id, $page) {
-                    (new Product_Backfill())->process_batch($shop_id, $page);
+                    new Product_Backfill()->process_batch($shop_id, $page);
                 },
                 10,
                 2,
@@ -251,6 +255,19 @@ class Plugin
                 "show_in_rest" => false,
             ],
         );
+    }
+
+    /**
+     * Aligns the settings form capability with the WooCommerce submenu capability.
+     *
+     * @param string $capability Current capability.
+     * @return string
+     */
+    public function filter_settings_page_capability($capability)
+    {
+        unset($capability);
+
+        return "manage_woocommerce";
     }
 
     /**
@@ -578,7 +595,7 @@ class Plugin
             return $sync_result;
         }
 
-        if (!(new Product_Backfill())->schedule_backfill($settings["shop_id"])) {
+        if (!new Product_Backfill()->schedule_backfill($settings["shop_id"])) {
             return new WP_Error(
                 "ahpc_backfill_failed",
                 __(
@@ -714,7 +731,11 @@ class Plugin
         );
         $has_shop_id = "" !== $settings["shop_id"];
         $has_api_key = "" !== $settings["api_key"];
-        $connection_status = $this->get_connection_status($settings);
+        $connection_status = $this->get_connection_status(
+            $settings,
+            $sync_error,
+            $last_sync_at,
+        );
         $backfill_status = $this->get_backfill_status($settings);
         $hide_default_updated_notice =
             $settings_updated &&
@@ -1087,11 +1108,16 @@ class Plugin
     /**
      * Returns the current Aura Historia connection status for the settings page.
      *
-     * @param array<string,mixed> $settings Current plugin settings.
+     * @param array<string,mixed> $settings     Current plugin settings.
+     * @param string              $sync_error   Last saved sync error.
+     * @param string              $last_sync_at Last successful sync timestamp.
      * @return array<string,string>
      */
-    private function get_connection_status($settings)
-    {
+    private function get_connection_status(
+        $settings,
+        $sync_error = "",
+        $last_sync_at = "",
+    ) {
         if ("" === Webhook_Manager::get_backend_base_url()) {
             return [
                 "type" => "warning",
@@ -1117,15 +1143,18 @@ class Plugin
             ];
         }
 
-        $client = new Backend_Api_Client(
-            Webhook_Manager::get_backend_base_url(),
-        );
-        $result = $client->verify_shop_connection(
-            $settings["shop_id"],
-            $settings["api_key"],
-        );
+        if ("yes" === get_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes")) {
+            return [
+                "type" => "warning",
+                "label" => __("Sync pending", Webhook_Manager::TEXT_DOMAIN),
+                "message" => __(
+                    "The saved Shop ID and API key are waiting for the next webhook sync before the Aura Historia connection can be verified.",
+                    Webhook_Manager::TEXT_DOMAIN,
+                ),
+            ];
+        }
 
-        if (is_wp_error($result)) {
+        if ("" !== $sync_error) {
             return [
                 "type" => "error",
                 "label" => __("Check failed", Webhook_Manager::TEXT_DOMAIN),
@@ -1135,16 +1164,27 @@ class Plugin
                         "Aura Historia did not accept the saved Shop ID and API key: %s",
                         Webhook_Manager::TEXT_DOMAIN,
                     ),
-                    $result->get_error_message(),
+                    $sync_error,
+                ),
+            ];
+        }
+
+        if ("" !== $last_sync_at) {
+            return [
+                "type" => "success",
+                "label" => __("Connected", Webhook_Manager::TEXT_DOMAIN),
+                "message" => __(
+                    "Aura Historia accepted the saved Shop ID and API key during the most recent webhook sync.",
+                    Webhook_Manager::TEXT_DOMAIN,
                 ),
             ];
         }
 
         return [
-            "type" => "success",
-            "label" => __("Connected", Webhook_Manager::TEXT_DOMAIN),
+            "type" => "warning",
+            "label" => __("Not verified", Webhook_Manager::TEXT_DOMAIN),
             "message" => __(
-                "Aura Historia is responding and the saved Shop ID and API key are still valid.",
+                "Run a webhook sync to verify the saved Shop ID and API key.",
                 Webhook_Manager::TEXT_DOMAIN,
             ),
         ];
@@ -1182,7 +1222,7 @@ class Plugin
             ];
         }
 
-        $details = (new Product_Backfill())->get_status_details();
+        $details = new Product_Backfill()->get_status_details();
         $hook = isset($details["hook"])
             ? (string) $details["hook"]
             : Product_Backfill::ACTION_HOOK;

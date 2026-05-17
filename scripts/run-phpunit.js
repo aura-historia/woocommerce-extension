@@ -17,8 +17,16 @@ const result = spawnSync(
 		`--env-cwd=wp-content/plugins/${pluginDir}`,
 		'vendor/bin/phpunit',
 	],
-	{ stdio: 'inherit' }
+	{ encoding: 'utf8' }
 );
+
+if ( result.stdout ) {
+	process.stdout.write(result.stdout);
+}
+
+if ( result.stderr ) {
+	process.stderr.write(result.stderr);
+}
 
 if ( result.error ) {
 	console.error(result.error.message);

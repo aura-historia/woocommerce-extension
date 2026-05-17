@@ -259,6 +259,29 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
     }
 
     /**
+     * It aligns the settings save capability with the WooCommerce submenu capability.
+     *
+     * @return void
+     */
+    public function test_settings_page_capability_matches_manage_woocommerce()
+    {
+        if (function_exists("set_current_screen")) {
+            set_current_screen("dashboard");
+        }
+
+        $plugin = new Plugin();
+        $plugin->boot();
+
+        $this->assertSame(
+            "manage_woocommerce",
+            apply_filters(
+                "option_page_capability_" . Webhook_Manager::SETTINGS_GROUP,
+                "manage_options",
+            ),
+        );
+    }
+
+    /**
      * Prevents real WordPress HTTP requests during webhook ping or delivery.
      *
      * @param mixed  $preempt Existing preempted response.
@@ -784,8 +807,8 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
     }
 
     /**
-     * It shows the live Aura Historia connection status and uses an empty JSON
-     * object for the lightweight health check.
+     * It shows the saved Aura Historia connection status without triggering
+     * another remote verification request during page rendering.
      *
      * @return void
      */
@@ -804,23 +827,16 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             false,
         );
 
-        $this->set_backend_mock_responses([
-            $this->mock_backend_registration_response(),
-        ]);
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
 
+        $request_count = count($this->backend_http_requests);
         $output = $this->render_plugin_settings_page();
-        $requests = $this->get_backend_requests_for_url(
-            "https://example.com/api/v1/shops/" . $shop_id,
-        );
 
         $this->assertStringContainsString("Connection status", $output);
         $this->assertStringContainsString("Connected", $output);
-        $this->assertStringContainsString(
-            "saved Shop ID and API key are still valid",
-            $output,
-        );
-        $this->assertCount(1, $requests);
-        $this->assertSame("{}", (string) $requests[0]["request"]->getBody());
+        $this->assertStringContainsString("most recent webhook sync", $output);
+        $this->assertCount($request_count, $this->backend_http_requests);
     }
 
     /**
@@ -989,10 +1005,10 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             false,
         );
 
-        $this->set_backend_mock_responses([
-            $this->mock_backend_registration_response(),
-        ]);
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
 
+        $request_count = count($this->backend_http_requests);
         $output = $this->render_plugin_settings_page([
             "settings-updated" => "true",
         ]);
@@ -1001,6 +1017,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             "Configuration saved and Aura Historia connection verified.",
             $output,
         );
+        $this->assertCount($request_count, $this->backend_http_requests);
     }
 
     /**
