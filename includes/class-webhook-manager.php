@@ -479,6 +479,10 @@ class Webhook_Manager
     /**
      * Pushes the generated WooCommerce webhook secret to the backend.
      *
+     * Also sends the current store currency and language so that the backend
+     * can immediately process WooCommerce webhook payloads without requiring a
+     * separate configuration step.
+     *
      * @param string $shop_id Shop UUID.
      * @param string $api_key Backend API key.
      * @param string $secret  Generated webhook secret.
@@ -488,6 +492,12 @@ class Webhook_Manager
     {
         $request_body = new PatchShopData();
         $request_body->setWoocommerceWebhookSecret($secret);
+        $request_body->setWoocommerceLanguage(Store_Locale::get_language());
+
+        $currency = Store_Locale::get_currency();
+        if (null !== $currency) {
+            $request_body->setWoocommerceCurrency($currency);
+        }
 
         $client = new Backend_Api_Client(self::get_backend_base_url());
         $response = $client->patch_shop_by_id(

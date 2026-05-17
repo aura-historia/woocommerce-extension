@@ -96,7 +96,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             array_fill(
                 0,
                 20,
-                new Response(200, ["Content-Type" => "application/json"], ""),
+                new Response(200, ["Content-Type" => "application/json"], '{"errors":{}}'),
             ),
         );
 

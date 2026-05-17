@@ -1,6 +1,6 @@
 <?php
 /**
- * ShopsApi
+ * ProductsApi
  * PHP version 8.1
  *
  * @category Class
@@ -43,14 +43,14 @@ use AuraHistoria\PartnerConnect\InternalApi\HeaderSelector;
 use AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
 
 /**
- * ShopsApi Class Doc Comment
+ * ProductsApi Class Doc Comment
  *
  * @category Class
  * @package  AuraHistoria\PartnerConnect\InternalApi
  * @author   OpenAPI Generator team
  * @link     https://openapi-generator.tech
  */
-class ShopsApi
+class ProductsApi
 {
     /**
      * @var ClientInterface
@@ -74,7 +74,7 @@ class ShopsApi
 
     /** @var string[] $contentTypes **/
     public const contentTypes = [
-        'patchShopById' => [
+        'putPartnerProducts' => [
             'application/json',
         ],
     ];
@@ -126,40 +126,40 @@ class ShopsApi
     }
 
     /**
-     * Operation patchShopById
+     * Operation putPartnerProducts
      *
-     * Update shop details
+     * Batch upsert products (Partner API)
      *
-     * @param  string $shop_id Unique identifier of the shop (UUID format) (required)
-     * @param  \AuraHistoria\PartnerConnect\InternalApi\Model\PatchShopData $patch_shop_data Partial shop update payload. Send only the fields that should change. (required)
-     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['patchShopById'] to see the possible values for this operation
+     * @param  string $shop_id Unique identifier of the partner shop (required)
+     * @param  \AuraHistoria\PartnerConnect\InternalApi\Model\PutProductData[] $put_product_data Array of products to upsert. Must not be empty. (required)
+     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['putPartnerProducts'] to see the possible values for this operation
      *
      * @throws \AuraHistoria\PartnerConnect\InternalApi\ApiException on non-2xx response or if the response body is not in the expected format
      * @throws \InvalidArgumentException
-     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\GetShopData|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError
+     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\PutProductsResponse|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError
      */
-    public function patchShopById($shop_id, $patch_shop_data, string $contentType = self::contentTypes['patchShopById'][0])
+    public function putPartnerProducts($shop_id, $put_product_data, string $contentType = self::contentTypes['putPartnerProducts'][0])
     {
-        list($response) = $this->patchShopByIdWithHttpInfo($shop_id, $patch_shop_data, $contentType);
+        list($response) = $this->putPartnerProductsWithHttpInfo($shop_id, $put_product_data, $contentType);
         return $response;
     }
 
     /**
-     * Operation patchShopByIdWithHttpInfo
+     * Operation putPartnerProductsWithHttpInfo
      *
-     * Update shop details
+     * Batch upsert products (Partner API)
      *
-     * @param  string $shop_id Unique identifier of the shop (UUID format) (required)
-     * @param  \AuraHistoria\PartnerConnect\InternalApi\Model\PatchShopData $patch_shop_data Partial shop update payload. Send only the fields that should change. (required)
-     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['patchShopById'] to see the possible values for this operation
+     * @param  string $shop_id Unique identifier of the partner shop (required)
+     * @param  \AuraHistoria\PartnerConnect\InternalApi\Model\PutProductData[] $put_product_data Array of products to upsert. Must not be empty. (required)
+     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['putPartnerProducts'] to see the possible values for this operation
      *
      * @throws \AuraHistoria\PartnerConnect\InternalApi\ApiException on non-2xx response or if the response body is not in the expected format
      * @throws \InvalidArgumentException
-     * @return array of \AuraHistoria\PartnerConnect\InternalApi\Model\GetShopData|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError, HTTP status code, HTTP response headers (array of strings)
+     * @return array of \AuraHistoria\PartnerConnect\InternalApi\Model\PutProductsResponse|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError, HTTP status code, HTTP response headers (array of strings)
      */
-    public function patchShopByIdWithHttpInfo($shop_id, $patch_shop_data, string $contentType = self::contentTypes['patchShopById'][0])
+    public function putPartnerProductsWithHttpInfo($shop_id, $put_product_data, string $contentType = self::contentTypes['putPartnerProducts'][0])
     {
-        $request = $this->patchShopByIdRequest($shop_id, $patch_shop_data, $contentType);
+        $request = $this->putPartnerProductsRequest($shop_id, $put_product_data, $contentType);
 
         try {
             $options = $this->createHttpClientOption();
@@ -187,7 +187,7 @@ class ShopsApi
             switch($statusCode) {
                 case 200:
                     return $this->handleResponseWithDataType(
-                        '\AuraHistoria\PartnerConnect\InternalApi\Model\GetShopData',
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\PutProductsResponse',
                         $request,
                         $response,
                     );
@@ -239,7 +239,7 @@ class ShopsApi
             }
 
             return $this->handleResponseWithDataType(
-                '\AuraHistoria\PartnerConnect\InternalApi\Model\GetShopData',
+                '\AuraHistoria\PartnerConnect\InternalApi\Model\PutProductsResponse',
                 $request,
                 $response,
             );
@@ -248,7 +248,7 @@ class ShopsApi
                 case 200:
                     $data = ObjectSerializer::deserialize(
                         $e->getResponseBody(),
-                        '\AuraHistoria\PartnerConnect\InternalApi\Model\GetShopData',
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\PutProductsResponse',
                         $e->getResponseHeaders()
                     );
                     $e->setResponseObject($data);
@@ -301,20 +301,20 @@ class ShopsApi
     }
 
     /**
-     * Operation patchShopByIdAsync
+     * Operation putPartnerProductsAsync
      *
-     * Update shop details
+     * Batch upsert products (Partner API)
      *
-     * @param  string $shop_id Unique identifier of the shop (UUID format) (required)
-     * @param  \AuraHistoria\PartnerConnect\InternalApi\Model\PatchShopData $patch_shop_data Partial shop update payload. Send only the fields that should change. (required)
-     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['patchShopById'] to see the possible values for this operation
+     * @param  string $shop_id Unique identifier of the partner shop (required)
+     * @param  \AuraHistoria\PartnerConnect\InternalApi\Model\PutProductData[] $put_product_data Array of products to upsert. Must not be empty. (required)
+     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['putPartnerProducts'] to see the possible values for this operation
      *
      * @throws \InvalidArgumentException
      * @return \GuzzleHttp\Promise\PromiseInterface
      */
-    public function patchShopByIdAsync($shop_id, $patch_shop_data, string $contentType = self::contentTypes['patchShopById'][0])
+    public function putPartnerProductsAsync($shop_id, $put_product_data, string $contentType = self::contentTypes['putPartnerProducts'][0])
     {
-        return $this->patchShopByIdAsyncWithHttpInfo($shop_id, $patch_shop_data, $contentType)
+        return $this->putPartnerProductsAsyncWithHttpInfo($shop_id, $put_product_data, $contentType)
             ->then(
                 function ($response) {
                     return $response[0];
@@ -323,21 +323,21 @@ class ShopsApi
     }
 
     /**
-     * Operation patchShopByIdAsyncWithHttpInfo
+     * Operation putPartnerProductsAsyncWithHttpInfo
      *
-     * Update shop details
+     * Batch upsert products (Partner API)
      *
-     * @param  string $shop_id Unique identifier of the shop (UUID format) (required)
-     * @param  \AuraHistoria\PartnerConnect\InternalApi\Model\PatchShopData $patch_shop_data Partial shop update payload. Send only the fields that should change. (required)
-     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['patchShopById'] to see the possible values for this operation
+     * @param  string $shop_id Unique identifier of the partner shop (required)
+     * @param  \AuraHistoria\PartnerConnect\InternalApi\Model\PutProductData[] $put_product_data Array of products to upsert. Must not be empty. (required)
+     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['putPartnerProducts'] to see the possible values for this operation
      *
      * @throws \InvalidArgumentException
      * @return \GuzzleHttp\Promise\PromiseInterface
      */
-    public function patchShopByIdAsyncWithHttpInfo($shop_id, $patch_shop_data, string $contentType = self::contentTypes['patchShopById'][0])
+    public function putPartnerProductsAsyncWithHttpInfo($shop_id, $put_product_data, string $contentType = self::contentTypes['putPartnerProducts'][0])
     {
-        $returnType = '\AuraHistoria\PartnerConnect\InternalApi\Model\GetShopData';
-        $request = $this->patchShopByIdRequest($shop_id, $patch_shop_data, $contentType);
+        $returnType = '\AuraHistoria\PartnerConnect\InternalApi\Model\PutProductsResponse';
+        $request = $this->putPartnerProductsRequest($shop_id, $put_product_data, $contentType);
 
         return $this->client
             ->sendAsync($request, $this->createHttpClientOption())
@@ -376,34 +376,34 @@ class ShopsApi
     }
 
     /**
-     * Create request for operation 'patchShopById'
+     * Create request for operation 'putPartnerProducts'
      *
-     * @param  string $shop_id Unique identifier of the shop (UUID format) (required)
-     * @param  \AuraHistoria\PartnerConnect\InternalApi\Model\PatchShopData $patch_shop_data Partial shop update payload. Send only the fields that should change. (required)
-     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['patchShopById'] to see the possible values for this operation
+     * @param  string $shop_id Unique identifier of the partner shop (required)
+     * @param  \AuraHistoria\PartnerConnect\InternalApi\Model\PutProductData[] $put_product_data Array of products to upsert. Must not be empty. (required)
+     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['putPartnerProducts'] to see the possible values for this operation
      *
      * @throws \InvalidArgumentException
      * @return \GuzzleHttp\Psr7\Request
      */
-    public function patchShopByIdRequest($shop_id, $patch_shop_data, string $contentType = self::contentTypes['patchShopById'][0])
+    public function putPartnerProductsRequest($shop_id, $put_product_data, string $contentType = self::contentTypes['putPartnerProducts'][0])
     {
 
         // verify the required parameter 'shop_id' is set
         if ($shop_id === null || (is_array($shop_id) && count($shop_id) === 0)) {
             throw new \InvalidArgumentException(
-                'Missing the required parameter $shop_id when calling patchShopById'
+                'Missing the required parameter $shop_id when calling putPartnerProducts'
             );
         }
 
-        // verify the required parameter 'patch_shop_data' is set
-        if ($patch_shop_data === null || (is_array($patch_shop_data) && count($patch_shop_data) === 0)) {
+        // verify the required parameter 'put_product_data' is set
+        if ($put_product_data === null || (is_array($put_product_data) && count($put_product_data) === 0)) {
             throw new \InvalidArgumentException(
-                'Missing the required parameter $patch_shop_data when calling patchShopById'
+                'Missing the required parameter $put_product_data when calling putPartnerProducts'
             );
         }
 
 
-        $resourcePath = '/api/v1/shops/{shopId}';
+        $resourcePath = '/api/v1/shops/{shopId}/products';
         $formParams = [];
         $queryParams = [];
         $headerParams = [];
@@ -429,12 +429,12 @@ class ShopsApi
         );
 
         // for model (json/xml)
-        if (isset($patch_shop_data)) {
+        if (isset($put_product_data)) {
             if (stripos($headers['Content-Type'], 'application/json') !== false) {
                 # if Content-Type contains "application/json", json_encode the body
-                $httpBody = \GuzzleHttp\Utils::jsonEncode(ObjectSerializer::sanitizeForSerialization($patch_shop_data));
+                $httpBody = \GuzzleHttp\Utils::jsonEncode(ObjectSerializer::sanitizeForSerialization($put_product_data));
             } else {
-                $httpBody = $patch_shop_data;
+                $httpBody = $put_product_data;
             }
         } elseif (count($formParams) > 0) {
             if ($multipart) {
@@ -465,10 +465,6 @@ class ShopsApi
         if ($apiKey !== null) {
             $headers['x-api-key'] = $apiKey;
         }
-        // this endpoint requires Bearer (JWT) authentication (access token)
-        if (!empty($this->config->getAccessToken())) {
-            $headers['Authorization'] = 'Bearer ' . $this->config->getAccessToken();
-        }
 
         $defaultHeaders = [];
         if ($this->config->getUserAgent()) {
@@ -484,7 +480,7 @@ class ShopsApi
         $operationHost = $this->config->getHost();
         $query = ObjectSerializer::buildQuery($queryParams);
         return new Request(
-            'PATCH',
+            'PUT',
             $operationHost . $resourcePath . ($query ? "?{$query}" : ''),
             $headers,
             $httpBody

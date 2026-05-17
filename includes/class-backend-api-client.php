@@ -7,6 +7,7 @@
 
 namespace AuraHistoria\PartnerConnect;
 
+use AuraHistoria\PartnerConnect\InternalApi\Api\ProductsApi;
 use AuraHistoria\PartnerConnect\InternalApi\Api\ShopsApi;
 use AuraHistoria\PartnerConnect\InternalApi\ApiException;
 use AuraHistoria\PartnerConnect\InternalApi\Configuration;
@@ -178,7 +179,7 @@ class Backend_Api_Client
         }
 
         try {
-            $this->create_shops_api($api_key)->upsertShopProducts(
+            $this->create_products_api($api_key)->putPartnerProducts(
                 $shop_id,
                 $products,
             );
@@ -223,6 +224,21 @@ class Backend_Api_Client
         $configuration->setApiKey("x-api-key", $api_key);
 
         return new ShopsApi($this->create_http_client(), $configuration);
+    }
+
+    /**
+     * Creates the generated `ProductsApi` client.
+     *
+     * @param string $api_key Backend API key.
+     * @return ProductsApi
+     */
+    private function create_products_api($api_key)
+    {
+        $configuration = new Configuration();
+        $configuration->setHost($this->base_url);
+        $configuration->setApiKey("x-api-key", $api_key);
+
+        return new ProductsApi($this->create_http_client(), $configuration);
     }
 
     /**

@@ -1,6 +1,6 @@
 <?php
 /**
- * PatchShopData
+ * PutProductData
  *
  * PHP version 8.1
  *
@@ -32,16 +32,16 @@ use \ArrayAccess;
 use \AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
 
 /**
- * PatchShopData Class Doc Comment
+ * PutProductData Class Doc Comment
  *
  * @category Class
- * @description Partial update for a shop. Only the fields present in the request body are applied; omitted or &#x60;null&#x60; fields are left unchanged. All fields are optional, so &#x60;{}&#x60; is accepted as a no-op update when sent as the JSON request body.
+ * @description Data for upserting a single product via the partner batch-upsert endpoint. Only &#x60;shopsProductId&#x60; is required. All other fields are optional.  - If the product **does not yet exist**, it is created using all provided fields.   Omitting &#x60;title&#x60;, &#x60;url&#x60;, or &#x60;state&#x60; will result in placeholder defaults being applied   internally (empty title, a placeholder URL, and &#x60;LISTED&#x60; state respectively). - If the product **already exists**, only &#x60;state&#x60; and &#x60;price&#x60; are updated; all other   fields are ignored for the update path.  to &#x60;UNKNOWN&#x60; when omitted.
  * @package  AuraHistoria\PartnerConnect\InternalApi
  * @author   OpenAPI Generator team
  * @link     https://openapi-generator.tech
  * @implements \ArrayAccess<string, mixed>
  */
-class PatchShopData implements ModelInterface, ArrayAccess, \JsonSerializable
+class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
 {
     public const DISCRIMINATOR = null;
 
@@ -50,7 +50,7 @@ class PatchShopData implements ModelInterface, ArrayAccess, \JsonSerializable
      *
      * @var string
      */
-    protected static $openAPIModelName = 'PatchShopData';
+    protected static $openAPIModelName = 'PutProductData';
 
     /**
      * Array of property to type mappings. Used for (de)serialization
@@ -58,19 +58,20 @@ class PatchShopData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $openAPITypes = [
-        'shop_type' => '\AuraHistoria\PartnerConnect\InternalApi\Model\ShopTypeData',
-        'domains' => 'string[]',
-        'shopify_domain' => 'string',
-        'shopify_currency' => '\AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData',
-        'shopify_language' => '\AuraHistoria\PartnerConnect\InternalApi\Model\LanguageData',
-        'woocommerce_webhook_secret' => 'string',
-        'woocommerce_currency' => '\AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData',
-        'woocommerce_language' => '\AuraHistoria\PartnerConnect\InternalApi\Model\LanguageData',
+        'shops_product_id' => 'string',
+        'title' => '\AuraHistoria\PartnerConnect\InternalApi\Model\LocalizedTextData',
+        'description' => '\AuraHistoria\PartnerConnect\InternalApi\Model\LocalizedTextData',
+        'price' => '\AuraHistoria\PartnerConnect\InternalApi\Model\PriceData',
+        'price_estimate_min' => '\AuraHistoria\PartnerConnect\InternalApi\Model\PriceData',
+        'price_estimate_max' => '\AuraHistoria\PartnerConnect\InternalApi\Model\PriceData',
+        'state' => '\AuraHistoria\PartnerConnect\InternalApi\Model\ProductStateData',
         'url' => 'string',
-        'image' => 'string',
+        'images' => 'string[]',
+        'auction_start' => '\DateTime',
+        'auction_end' => '\DateTime',
+        'seller_name' => 'string',
         'structured_address' => '\AuraHistoria\PartnerConnect\InternalApi\Model\StructuredAddressData',
-        'phone' => 'string',
-        'email' => 'string'
+        'geo_address' => '\AuraHistoria\PartnerConnect\InternalApi\Model\GeoAddressData'
     ];
 
     /**
@@ -81,19 +82,20 @@ class PatchShopData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @psalm-var array<string, string|null>
      */
     protected static $openAPIFormats = [
-        'shop_type' => null,
-        'domains' => null,
-        'shopify_domain' => null,
-        'shopify_currency' => null,
-        'shopify_language' => null,
-        'woocommerce_webhook_secret' => null,
-        'woocommerce_currency' => null,
-        'woocommerce_language' => null,
+        'shops_product_id' => null,
+        'title' => null,
+        'description' => null,
+        'price' => null,
+        'price_estimate_min' => null,
+        'price_estimate_max' => null,
+        'state' => null,
         'url' => 'uri',
-        'image' => 'uri',
+        'images' => 'uri',
+        'auction_start' => 'date-time',
+        'auction_end' => 'date-time',
+        'seller_name' => null,
         'structured_address' => null,
-        'phone' => null,
-        'email' => 'email'
+        'geo_address' => null
     ];
 
     /**
@@ -102,19 +104,20 @@ class PatchShopData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var boolean[]
      */
     protected static array $openAPINullables = [
-        'shop_type' => true,
-        'domains' => true,
-        'shopify_domain' => true,
-        'shopify_currency' => true,
-        'shopify_language' => true,
-        'woocommerce_webhook_secret' => true,
-        'woocommerce_currency' => true,
-        'woocommerce_language' => true,
+        'shops_product_id' => false,
+        'title' => true,
+        'description' => true,
+        'price' => true,
+        'price_estimate_min' => true,
+        'price_estimate_max' => true,
+        'state' => true,
         'url' => true,
-        'image' => true,
+        'images' => true,
+        'auction_start' => true,
+        'auction_end' => true,
+        'seller_name' => true,
         'structured_address' => true,
-        'phone' => true,
-        'email' => true
+        'geo_address' => true
     ];
 
     /**
@@ -203,19 +206,20 @@ class PatchShopData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $attributeMap = [
-        'shop_type' => 'shopType',
-        'domains' => 'domains',
-        'shopify_domain' => 'shopifyDomain',
-        'shopify_currency' => 'shopifyCurrency',
-        'shopify_language' => 'shopifyLanguage',
-        'woocommerce_webhook_secret' => 'woocommerceWebhookSecret',
-        'woocommerce_currency' => 'woocommerceCurrency',
-        'woocommerce_language' => 'woocommerceLanguage',
+        'shops_product_id' => 'shopsProductId',
+        'title' => 'title',
+        'description' => 'description',
+        'price' => 'price',
+        'price_estimate_min' => 'priceEstimateMin',
+        'price_estimate_max' => 'priceEstimateMax',
+        'state' => 'state',
         'url' => 'url',
-        'image' => 'image',
+        'images' => 'images',
+        'auction_start' => 'auctionStart',
+        'auction_end' => 'auctionEnd',
+        'seller_name' => 'sellerName',
         'structured_address' => 'structuredAddress',
-        'phone' => 'phone',
-        'email' => 'email'
+        'geo_address' => 'geoAddress'
     ];
 
     /**
@@ -224,19 +228,20 @@ class PatchShopData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $setters = [
-        'shop_type' => 'setShopType',
-        'domains' => 'setDomains',
-        'shopify_domain' => 'setShopifyDomain',
-        'shopify_currency' => 'setShopifyCurrency',
-        'shopify_language' => 'setShopifyLanguage',
-        'woocommerce_webhook_secret' => 'setWoocommerceWebhookSecret',
-        'woocommerce_currency' => 'setWoocommerceCurrency',
-        'woocommerce_language' => 'setWoocommerceLanguage',
+        'shops_product_id' => 'setShopsProductId',
+        'title' => 'setTitle',
+        'description' => 'setDescription',
+        'price' => 'setPrice',
+        'price_estimate_min' => 'setPriceEstimateMin',
+        'price_estimate_max' => 'setPriceEstimateMax',
+        'state' => 'setState',
         'url' => 'setUrl',
-        'image' => 'setImage',
+        'images' => 'setImages',
+        'auction_start' => 'setAuctionStart',
+        'auction_end' => 'setAuctionEnd',
+        'seller_name' => 'setSellerName',
         'structured_address' => 'setStructuredAddress',
-        'phone' => 'setPhone',
-        'email' => 'setEmail'
+        'geo_address' => 'setGeoAddress'
     ];
 
     /**
@@ -245,19 +250,20 @@ class PatchShopData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $getters = [
-        'shop_type' => 'getShopType',
-        'domains' => 'getDomains',
-        'shopify_domain' => 'getShopifyDomain',
-        'shopify_currency' => 'getShopifyCurrency',
-        'shopify_language' => 'getShopifyLanguage',
-        'woocommerce_webhook_secret' => 'getWoocommerceWebhookSecret',
-        'woocommerce_currency' => 'getWoocommerceCurrency',
-        'woocommerce_language' => 'getWoocommerceLanguage',
+        'shops_product_id' => 'getShopsProductId',
+        'title' => 'getTitle',
+        'description' => 'getDescription',
+        'price' => 'getPrice',
+        'price_estimate_min' => 'getPriceEstimateMin',
+        'price_estimate_max' => 'getPriceEstimateMax',
+        'state' => 'getState',
         'url' => 'getUrl',
-        'image' => 'getImage',
+        'images' => 'getImages',
+        'auction_start' => 'getAuctionStart',
+        'auction_end' => 'getAuctionEnd',
+        'seller_name' => 'getSellerName',
         'structured_address' => 'getStructuredAddress',
-        'phone' => 'getPhone',
-        'email' => 'getEmail'
+        'geo_address' => 'getGeoAddress'
     ];
 
     /**
@@ -317,19 +323,20 @@ class PatchShopData implements ModelInterface, ArrayAccess, \JsonSerializable
      */
     public function __construct(?array $data = null)
     {
-        $this->setIfExists('shop_type', $data ?? [], null);
-        $this->setIfExists('domains', $data ?? [], null);
-        $this->setIfExists('shopify_domain', $data ?? [], null);
-        $this->setIfExists('shopify_currency', $data ?? [], null);
-        $this->setIfExists('shopify_language', $data ?? [], null);
-        $this->setIfExists('woocommerce_webhook_secret', $data ?? [], null);
-        $this->setIfExists('woocommerce_currency', $data ?? [], null);
-        $this->setIfExists('woocommerce_language', $data ?? [], null);
+        $this->setIfExists('shops_product_id', $data ?? [], null);
+        $this->setIfExists('title', $data ?? [], null);
+        $this->setIfExists('description', $data ?? [], null);
+        $this->setIfExists('price', $data ?? [], null);
+        $this->setIfExists('price_estimate_min', $data ?? [], null);
+        $this->setIfExists('price_estimate_max', $data ?? [], null);
+        $this->setIfExists('state', $data ?? [], null);
         $this->setIfExists('url', $data ?? [], null);
-        $this->setIfExists('image', $data ?? [], null);
+        $this->setIfExists('images', $data ?? [], null);
+        $this->setIfExists('auction_start', $data ?? [], null);
+        $this->setIfExists('auction_end', $data ?? [], null);
+        $this->setIfExists('seller_name', $data ?? [], null);
         $this->setIfExists('structured_address', $data ?? [], null);
-        $this->setIfExists('phone', $data ?? [], null);
-        $this->setIfExists('email', $data ?? [], null);
+        $this->setIfExists('geo_address', $data ?? [], null);
     }
 
     /**
@@ -359,6 +366,9 @@ class PatchShopData implements ModelInterface, ArrayAccess, \JsonSerializable
     {
         $invalidProperties = [];
 
+        if ($this->container['shops_product_id'] === null) {
+            $invalidProperties[] = "'shops_product_id' can't be null";
+        }
         return $invalidProperties;
     }
 
@@ -375,273 +385,232 @@ class PatchShopData implements ModelInterface, ArrayAccess, \JsonSerializable
 
 
     /**
-     * Gets shop_type
+     * Gets shops_product_id
      *
-     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\ShopTypeData|null
+     * @return string
      */
-    public function getShopType()
+    public function getShopsProductId()
     {
-        return $this->container['shop_type'];
+        return $this->container['shops_product_id'];
     }
 
     /**
-     * Sets shop_type
+     * Sets shops_product_id
      *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\ShopTypeData|null $shop_type Optional updated shop type classification.
+     * @param string $shops_product_id The shop's own identifier for the product. Must be unique within the shop.
      *
      * @return self
      */
-    public function setShopType($shop_type)
+    public function setShopsProductId($shops_product_id)
     {
-        if (is_null($shop_type)) {
-            array_push($this->openAPINullablesSetToNull, 'shop_type');
-        } else {
-            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
-            $index = array_search('shop_type', $nullablesSetToNull);
-            if ($index !== FALSE) {
-                unset($nullablesSetToNull[$index]);
-                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
-            }
+        if (is_null($shops_product_id)) {
+            throw new \InvalidArgumentException('non-nullable shops_product_id cannot be null');
         }
-        $this->container['shop_type'] = $shop_type;
+        $this->container['shops_product_id'] = $shops_product_id;
 
         return $this;
     }
 
     /**
-     * Gets domains
+     * Gets title
      *
-     * @return string[]|null
+     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\LocalizedTextData|null
      */
-    public function getDomains()
+    public function getTitle()
     {
-        return $this->container['domains'];
+        return $this->container['title'];
     }
 
     /**
-     * Sets domains
+     * Sets title
      *
-     * @param string[]|null $domains Optional updated set of domains for the shop. When provided, this replaces the existing domains entirely. Domains are normalized (lowercase, no scheme, no www prefix, no path/query/fragment).
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\LocalizedTextData|null $title Optional localized title for the product. Used only when creating a new product.
      *
      * @return self
      */
-    public function setDomains($domains)
+    public function setTitle($title)
     {
-        if (is_null($domains)) {
-            array_push($this->openAPINullablesSetToNull, 'domains');
+        if (is_null($title)) {
+            array_push($this->openAPINullablesSetToNull, 'title');
         } else {
             $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
-            $index = array_search('domains', $nullablesSetToNull);
+            $index = array_search('title', $nullablesSetToNull);
             if ($index !== FALSE) {
                 unset($nullablesSetToNull[$index]);
                 $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
             }
         }
-        $this->container['domains'] = $domains;
+        $this->container['title'] = $title;
 
         return $this;
     }
 
     /**
-     * Gets shopify_domain
+     * Gets description
      *
-     * @return string|null
+     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\LocalizedTextData|null
      */
-    public function getShopifyDomain()
+    public function getDescription()
     {
-        return $this->container['shopify_domain'];
+        return $this->container['description'];
     }
 
     /**
-     * Sets shopify_domain
+     * Sets description
      *
-     * @param string|null $shopify_domain Optional updated Shopify storefront domain used for Shopify partner-shop event matching. Normalized with the same rules as `domains`. When omitted or set to `null`, the current Shopify domain remains unchanged.
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\LocalizedTextData|null $description Optional localized description of the product. Used only when creating a new product.
      *
      * @return self
      */
-    public function setShopifyDomain($shopify_domain)
+    public function setDescription($description)
     {
-        if (is_null($shopify_domain)) {
-            array_push($this->openAPINullablesSetToNull, 'shopify_domain');
+        if (is_null($description)) {
+            array_push($this->openAPINullablesSetToNull, 'description');
         } else {
             $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
-            $index = array_search('shopify_domain', $nullablesSetToNull);
+            $index = array_search('description', $nullablesSetToNull);
             if ($index !== FALSE) {
                 unset($nullablesSetToNull[$index]);
                 $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
             }
         }
-        $this->container['shopify_domain'] = $shopify_domain;
+        $this->container['description'] = $description;
 
         return $this;
     }
 
     /**
-     * Gets shopify_currency
+     * Gets price
      *
-     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData|null
+     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\PriceData|null
      */
-    public function getShopifyCurrency()
+    public function getPrice()
     {
-        return $this->container['shopify_currency'];
+        return $this->container['price'];
     }
 
     /**
-     * Sets shopify_currency
+     * Sets price
      *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData|null $shopify_currency Optional updated Shopify currency for the shop, serialized as an ISO 4217 code. When omitted or set to `null`, the current Shopify currency remains unchanged.
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\PriceData|null $price Optional asking price for the product. Applied on both create and update paths.
      *
      * @return self
      */
-    public function setShopifyCurrency($shopify_currency)
+    public function setPrice($price)
     {
-        if (is_null($shopify_currency)) {
-            array_push($this->openAPINullablesSetToNull, 'shopify_currency');
+        if (is_null($price)) {
+            array_push($this->openAPINullablesSetToNull, 'price');
         } else {
             $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
-            $index = array_search('shopify_currency', $nullablesSetToNull);
+            $index = array_search('price', $nullablesSetToNull);
             if ($index !== FALSE) {
                 unset($nullablesSetToNull[$index]);
                 $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
             }
         }
-        $this->container['shopify_currency'] = $shopify_currency;
+        $this->container['price'] = $price;
 
         return $this;
     }
 
     /**
-     * Gets shopify_language
+     * Gets price_estimate_min
      *
-     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\LanguageData|null
+     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\PriceData|null
      */
-    public function getShopifyLanguage()
+    public function getPriceEstimateMin()
     {
-        return $this->container['shopify_language'];
+        return $this->container['price_estimate_min'];
     }
 
     /**
-     * Sets shopify_language
+     * Sets price_estimate_min
      *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\LanguageData|null $shopify_language Optional updated Shopify default language for the shop. When configured, Shopify product lifecycle events for this shop are ingested using this language. When absent on the stored shop record, Shopify product lifecycle events currently fail instead of inferring or defaulting a language. When omitted or set to `null`, the current Shopify language remains unchanged.
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\PriceData|null $price_estimate_min Optional lower bound of the estimated price range. Used only when creating a new product.
      *
      * @return self
      */
-    public function setShopifyLanguage($shopify_language)
+    public function setPriceEstimateMin($price_estimate_min)
     {
-        if (is_null($shopify_language)) {
-            array_push($this->openAPINullablesSetToNull, 'shopify_language');
+        if (is_null($price_estimate_min)) {
+            array_push($this->openAPINullablesSetToNull, 'price_estimate_min');
         } else {
             $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
-            $index = array_search('shopify_language', $nullablesSetToNull);
+            $index = array_search('price_estimate_min', $nullablesSetToNull);
             if ($index !== FALSE) {
                 unset($nullablesSetToNull[$index]);
                 $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
             }
         }
-        $this->container['shopify_language'] = $shopify_language;
+        $this->container['price_estimate_min'] = $price_estimate_min;
 
         return $this;
     }
 
     /**
-     * Gets woocommerce_webhook_secret
+     * Gets price_estimate_max
      *
-     * @return string|null
+     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\PriceData|null
      */
-    public function getWoocommerceWebhookSecret()
+    public function getPriceEstimateMax()
     {
-        return $this->container['woocommerce_webhook_secret'];
+        return $this->container['price_estimate_max'];
     }
 
     /**
-     * Sets woocommerce_webhook_secret
+     * Sets price_estimate_max
      *
-     * @param string|null $woocommerce_webhook_secret Optional replacement WooCommerce webhook secret used to validate HMAC signatures on `POST /api/v1/webhooks/woocommerce/{shopId}`. When omitted or set to `null`, the current webhook secret remains unchanged. This field is write-only and is never returned by read responses.
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\PriceData|null $price_estimate_max Optional upper bound of the estimated price range. Used only when creating a new product.
      *
      * @return self
      */
-    public function setWoocommerceWebhookSecret($woocommerce_webhook_secret)
+    public function setPriceEstimateMax($price_estimate_max)
     {
-        if (is_null($woocommerce_webhook_secret)) {
-            array_push($this->openAPINullablesSetToNull, 'woocommerce_webhook_secret');
+        if (is_null($price_estimate_max)) {
+            array_push($this->openAPINullablesSetToNull, 'price_estimate_max');
         } else {
             $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
-            $index = array_search('woocommerce_webhook_secret', $nullablesSetToNull);
+            $index = array_search('price_estimate_max', $nullablesSetToNull);
             if ($index !== FALSE) {
                 unset($nullablesSetToNull[$index]);
                 $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
             }
         }
-        $this->container['woocommerce_webhook_secret'] = $woocommerce_webhook_secret;
+        $this->container['price_estimate_max'] = $price_estimate_max;
 
         return $this;
     }
 
     /**
-     * Gets woocommerce_currency
+     * Gets state
      *
-     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData|null
+     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\ProductStateData|null
      */
-    public function getWoocommerceCurrency()
+    public function getState()
     {
-        return $this->container['woocommerce_currency'];
+        return $this->container['state'];
     }
 
     /**
-     * Sets woocommerce_currency
+     * Sets state
      *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData|null $woocommerce_currency Optional updated WooCommerce currency for the shop, serialized as an ISO 4217 code. When omitted or set to `null`, the current WooCommerce currency remains unchanged. This currency is used when WooCommerce webhook payloads provide a non-empty `price`.
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\ProductStateData|null $state Optional product state. Applied on both create and update paths.
      *
      * @return self
      */
-    public function setWoocommerceCurrency($woocommerce_currency)
+    public function setState($state)
     {
-        if (is_null($woocommerce_currency)) {
-            array_push($this->openAPINullablesSetToNull, 'woocommerce_currency');
+        if (is_null($state)) {
+            array_push($this->openAPINullablesSetToNull, 'state');
         } else {
             $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
-            $index = array_search('woocommerce_currency', $nullablesSetToNull);
+            $index = array_search('state', $nullablesSetToNull);
             if ($index !== FALSE) {
                 unset($nullablesSetToNull[$index]);
                 $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
             }
         }
-        $this->container['woocommerce_currency'] = $woocommerce_currency;
-
-        return $this;
-    }
-
-    /**
-     * Gets woocommerce_language
-     *
-     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\LanguageData|null
-     */
-    public function getWoocommerceLanguage()
-    {
-        return $this->container['woocommerce_language'];
-    }
-
-    /**
-     * Sets woocommerce_language
-     *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\LanguageData|null $woocommerce_language Optional updated WooCommerce default language for the shop. When configured, WooCommerce webhook-ingested products for this shop are ingested using this language. When absent on the stored shop record, WooCommerce webhook requests currently fail instead of inferring or defaulting a language. When omitted or set to `null`, the current WooCommerce language remains unchanged.
-     *
-     * @return self
-     */
-    public function setWoocommerceLanguage($woocommerce_language)
-    {
-        if (is_null($woocommerce_language)) {
-            array_push($this->openAPINullablesSetToNull, 'woocommerce_language');
-        } else {
-            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
-            $index = array_search('woocommerce_language', $nullablesSetToNull);
-            if ($index !== FALSE) {
-                unset($nullablesSetToNull[$index]);
-                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
-            }
-        }
-        $this->container['woocommerce_language'] = $woocommerce_language;
+        $this->container['state'] = $state;
 
         return $this;
     }
@@ -659,7 +628,7 @@ class PatchShopData implements ModelInterface, ArrayAccess, \JsonSerializable
     /**
      * Sets url
      *
-     * @param string|null $url Optional updated primary URL of the shop website. When omitted or set to `null`, the current URL remains unchanged.
+     * @param string|null $url URL to the product on the shop's website. Used only when creating a new product.
      *
      * @return self
      */
@@ -681,35 +650,137 @@ class PatchShopData implements ModelInterface, ArrayAccess, \JsonSerializable
     }
 
     /**
-     * Gets image
+     * Gets images
      *
-     * @return string|null
+     * @return string[]|null
      */
-    public function getImage()
+    public function getImages()
     {
-        return $this->container['image'];
+        return $this->container['images'];
     }
 
     /**
-     * Sets image
+     * Sets images
      *
-     * @param string|null $image Optional updated URL to the shop's logo or image. When omitted or set to `null`, the current image is left unchanged.
+     * @param string[]|null $images List of image URLs for the product. Used only when creating a new product.
      *
      * @return self
      */
-    public function setImage($image)
+    public function setImages($images)
     {
-        if (is_null($image)) {
-            array_push($this->openAPINullablesSetToNull, 'image');
+        if (is_null($images)) {
+            array_push($this->openAPINullablesSetToNull, 'images');
         } else {
             $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
-            $index = array_search('image', $nullablesSetToNull);
+            $index = array_search('images', $nullablesSetToNull);
             if ($index !== FALSE) {
                 unset($nullablesSetToNull[$index]);
                 $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
             }
         }
-        $this->container['image'] = $image;
+        $this->container['images'] = $images;
+
+        return $this;
+    }
+
+    /**
+     * Gets auction_start
+     *
+     * @return \DateTime|null
+     */
+    public function getAuctionStart()
+    {
+        return $this->container['auction_start'];
+    }
+
+    /**
+     * Sets auction_start
+     *
+     * @param \DateTime|null $auction_start RFC3339 timestamp of when the auction for this product starts. Only relevant for auction-house shop types. Used only when creating a new product.
+     *
+     * @return self
+     */
+    public function setAuctionStart($auction_start)
+    {
+        if (is_null($auction_start)) {
+            array_push($this->openAPINullablesSetToNull, 'auction_start');
+        } else {
+            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
+            $index = array_search('auction_start', $nullablesSetToNull);
+            if ($index !== FALSE) {
+                unset($nullablesSetToNull[$index]);
+                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
+            }
+        }
+        $this->container['auction_start'] = $auction_start;
+
+        return $this;
+    }
+
+    /**
+     * Gets auction_end
+     *
+     * @return \DateTime|null
+     */
+    public function getAuctionEnd()
+    {
+        return $this->container['auction_end'];
+    }
+
+    /**
+     * Sets auction_end
+     *
+     * @param \DateTime|null $auction_end RFC3339 timestamp of when the auction for this product ends. Only relevant for auction-house shop types. Used only when creating a new product.
+     *
+     * @return self
+     */
+    public function setAuctionEnd($auction_end)
+    {
+        if (is_null($auction_end)) {
+            array_push($this->openAPINullablesSetToNull, 'auction_end');
+        } else {
+            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
+            $index = array_search('auction_end', $nullablesSetToNull);
+            if ($index !== FALSE) {
+                unset($nullablesSetToNull[$index]);
+                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
+            }
+        }
+        $this->container['auction_end'] = $auction_end;
+
+        return $this;
+    }
+
+    /**
+     * Gets seller_name
+     *
+     * @return string|null
+     */
+    public function getSellerName()
+    {
+        return $this->container['seller_name'];
+    }
+
+    /**
+     * Sets seller_name
+     *
+     * @param string|null $seller_name Optional raw name of the secondary seller for this product. Only applicable for `AUCTION_PLATFORM` and `MARKETPLACE` shop types. When provided, the backend resolves the seller shop by this name and associates the product with that seller. When omitted, or when the shop type is neither `AUCTION_PLATFORM` nor `MARKETPLACE`, the partner shop itself is used as the seller. Used only when creating a new product.
+     *
+     * @return self
+     */
+    public function setSellerName($seller_name)
+    {
+        if (is_null($seller_name)) {
+            array_push($this->openAPINullablesSetToNull, 'seller_name');
+        } else {
+            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
+            $index = array_search('seller_name', $nullablesSetToNull);
+            if ($index !== FALSE) {
+                unset($nullablesSetToNull[$index]);
+                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
+            }
+        }
+        $this->container['seller_name'] = $seller_name;
 
         return $this;
     }
@@ -727,7 +798,7 @@ class PatchShopData implements ModelInterface, ArrayAccess, \JsonSerializable
     /**
      * Sets structured_address
      *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\StructuredAddressData|null $structured_address Optional updated structured postal address. When provided with at least one non-empty component, the backend geocodes it and refreshes `geoAddress`. When omitted or set to `null`, the current address remains unchanged.
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\StructuredAddressData|null $structured_address Optional structured address to attach to the product for geo-aware indexing and search. Used only when creating a new product.
      *
      * @return self
      */
@@ -749,69 +820,35 @@ class PatchShopData implements ModelInterface, ArrayAccess, \JsonSerializable
     }
 
     /**
-     * Gets phone
+     * Gets geo_address
      *
-     * @return string|null
+     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\GeoAddressData|null
      */
-    public function getPhone()
+    public function getGeoAddress()
     {
-        return $this->container['phone'];
+        return $this->container['geo_address'];
     }
 
     /**
-     * Sets phone
+     * Sets geo_address
      *
-     * @param string|null $phone Optional updated public contact phone number. When omitted or set to `null`, the current phone number remains unchanged.
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\GeoAddressData|null $geo_address Optional coordinates to attach to the product for geo-aware indexing and search. Used only when creating a new product.
      *
      * @return self
      */
-    public function setPhone($phone)
+    public function setGeoAddress($geo_address)
     {
-        if (is_null($phone)) {
-            array_push($this->openAPINullablesSetToNull, 'phone');
+        if (is_null($geo_address)) {
+            array_push($this->openAPINullablesSetToNull, 'geo_address');
         } else {
             $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
-            $index = array_search('phone', $nullablesSetToNull);
+            $index = array_search('geo_address', $nullablesSetToNull);
             if ($index !== FALSE) {
                 unset($nullablesSetToNull[$index]);
                 $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
             }
         }
-        $this->container['phone'] = $phone;
-
-        return $this;
-    }
-
-    /**
-     * Gets email
-     *
-     * @return string|null
-     */
-    public function getEmail()
-    {
-        return $this->container['email'];
-    }
-
-    /**
-     * Sets email
-     *
-     * @param string|null $email Optional updated public contact email address. When omitted or set to `null`, the current email address remains unchanged.
-     *
-     * @return self
-     */
-    public function setEmail($email)
-    {
-        if (is_null($email)) {
-            array_push($this->openAPINullablesSetToNull, 'email');
-        } else {
-            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
-            $index = array_search('email', $nullablesSetToNull);
-            if ($index !== FALSE) {
-                unset($nullablesSetToNull[$index]);
-                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
-            }
-        }
-        $this->container['email'] = $email;
+        $this->container['geo_address'] = $geo_address;
 
         return $this;
     }
