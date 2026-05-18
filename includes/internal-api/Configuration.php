@@ -142,7 +142,7 @@ class Configuration
      */
     public function __construct()
     {
-        $this->tempFolderPath = sys_get_temp_dir();
+        $this->tempFolderPath = self::resolveManagedTempFolderPath();
     }
 
     /**
@@ -377,7 +377,7 @@ class Configuration
      */
     public function setDebugFile($debugFile)
     {
-        $this->debugFile = $debugFile;
+        $this->debugFile = self::normalizeDebugFilePath($debugFile);
         return $this;
     }
 
@@ -400,7 +400,9 @@ class Configuration
      */
     public function setTempFolderPath($tempFolderPath)
     {
-        $this->tempFolderPath = $tempFolderPath;
+        $this->tempFolderPath = self::resolveManagedTempFolderPath(
+            $tempFolderPath,
+        );
         return $this;
     }
 
@@ -454,6 +456,183 @@ class Configuration
     public function getKeyFile()
     {
         return $this->keyFile;
+    }
+
+    /**
+     * Resolves the managed uploads subdirectory used for generated client files.
+     *
+     * @param string $subdirectory Optional relative subdirectory name.
+     *
+     * @return string
+     */
+    private static function resolveManagedTempFolderPath($subdirectory = "")
+    {
+        $base_directory = self::getManagedStorageBasePath();
+        $subdirectory = self::sanitizeRelativePath($subdirectory);
+
+        if ("" === $base_directory || "" === $subdirectory) {
+            return $base_directory;
+        }
+
+        $directory = $base_directory . DIRECTORY_SEPARATOR . $subdirectory;
+        self::ensureDirectoryExists($directory);
+
+        return $directory;
+    }
+
+    /**
+     * Resolves the managed storage base path under the WordPress uploads directory.
+     *
+     * @return string
+     */
+    private static function getManagedStorageBasePath()
+    {
+        $base_directory = "";
+
+        if (function_exists("\\wp_upload_dir")) {
+            $uploads = call_user_func("\\wp_upload_dir");
+
+            if (
+                is_array($uploads) &&
+                empty($uploads["error"]) &&
+                !empty($uploads["basedir"])
+            ) {
+                $base_directory = (string) $uploads["basedir"];
+            }
+        }
+
+        if ("" === $base_directory && defined("WP_CONTENT_DIR") && "" !== WP_CONTENT_DIR) {
+            $base_directory =
+                rtrim(WP_CONTENT_DIR, "/\\") .
+                DIRECTORY_SEPARATOR .
+                "uploads";
+        }
+
+        if ("" === $base_directory) {
+            return "";
+        }
+
+        $managed_directory =
+            rtrim($base_directory, "/\\") .
+            DIRECTORY_SEPARATOR .
+            "aura-historia-partner-connect" .
+            DIRECTORY_SEPARATOR .
+            "internal-api";
+
+        self::ensureDirectoryExists($managed_directory);
+
+        return $managed_directory;
+    }
+
+    /**
+     * Restricts debug output to PHP streams or the managed uploads directory.
+     *
+     * @param string $debugFile Requested debug file path.
+     *
+     * @return string
+     */
+    private static function normalizeDebugFilePath($debugFile)
+    {
+        $debugFile = trim((string) $debugFile);
+
+        if ("" === $debugFile) {
+            return "php://output";
+        }
+
+        if (
+            in_array(
+                $debugFile,
+                ["php://output", "php://stdout", "php://stderr"],
+                true,
+            )
+        ) {
+            return $debugFile;
+        }
+
+        $filename = basename(str_replace("\\", "/", $debugFile));
+        $filename = self::sanitizePathSegment($filename);
+
+        if ("" === $filename) {
+            $filename = "debug.log";
+        }
+
+        $managed_directory = self::getManagedStorageBasePath();
+
+        if ("" === $managed_directory) {
+            return "php://output";
+        }
+
+        return $managed_directory . DIRECTORY_SEPARATOR . $filename;
+    }
+
+    /**
+     * Sanitizes a relative path so it remains inside the managed uploads directory.
+     *
+     * @param string $path Requested relative path.
+     *
+     * @return string
+     */
+    private static function sanitizeRelativePath($path)
+    {
+        $path = str_replace("\\", "/", trim((string) $path));
+
+        if ("" === $path) {
+            return "";
+        }
+
+        $segments = [];
+
+        foreach (explode("/", $path) as $segment) {
+            $segment = self::sanitizePathSegment($segment);
+
+            if ("" !== $segment && "." !== $segment && ".." !== $segment) {
+                $segments[] = $segment;
+            }
+        }
+
+        return implode(DIRECTORY_SEPARATOR, $segments);
+    }
+
+    /**
+     * Sanitizes a single path segment for use in the managed uploads directory.
+     *
+     * @param string $segment Requested path segment.
+     *
+     * @return string
+     */
+    private static function sanitizePathSegment($segment)
+    {
+        $segment = trim((string) $segment);
+
+        if ("" === $segment) {
+            return "";
+        }
+
+        if (function_exists("\\sanitize_file_name")) {
+            return (string) call_user_func("\\sanitize_file_name", $segment);
+        }
+
+        return (string) preg_replace("/[^A-Za-z0-9._-]/", "-", $segment);
+    }
+
+    /**
+     * Creates the managed uploads directory when needed.
+     *
+     * @param string $directory Directory path.
+     *
+     * @return void
+     */
+    private static function ensureDirectoryExists($directory)
+    {
+        if (
+            "" === $directory ||
+            is_dir($directory) ||
+            !function_exists("\\wp_mkdir_p")
+        ) {
+            return;
+        }
+
+        call_user_func("\\wp_mkdir_p", $directory);
     }
 
     /**

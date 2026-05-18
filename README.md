@@ -241,6 +241,7 @@ The release build:
 - creates a clean plugin tree in `build-release/`
 - installs production Composer dependencies into that tree
 - removes development-only files from the artifact
+- excludes the WordPress.org directory assets kept in `assets/`
 - writes `aura-historia-partner-connect.zip` to the project root
 
 For WordPress.org submission, use the clean release tree or equivalent release contents rather than the raw development repository checkout.
