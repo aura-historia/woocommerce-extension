@@ -17,7 +17,7 @@
     "test": "npm run composer:install && npm run phpunit"
   },
   "devDependencies": {
-    "@wordpress/env": "^11.5.0",
+    "@wordpress/env": "^11.6.0",
     "yaml": "^2.9.0"
   }
 }
