@@ -341,6 +341,359 @@ function cleanupTemporaryOutput(config) {
     removePath(config, config.temporaryPath);
 }
 
+function replaceOrThrow(content, search, replacement, description) {
+    if (!content.includes(search)) {
+        throw new Error(`Could not apply ${description} patch to generated client.`);
+    }
+
+    return content.replace(search, replacement);
+}
+
+function replaceRegexOrThrow(content, pattern, replacement, description) {
+    if (!pattern.test(content)) {
+        throw new Error(`Could not apply ${description} patch to generated client.`);
+    }
+
+    return content.replace(pattern, replacement);
+}
+
+function applyWordPressGeneratedClientPatches(config) {
+    const outputPath = path.join(projectRoot, config.outputPath);
+
+    const configurationPath = path.join(outputPath, 'Configuration.php');
+    let configuration = readFileSync(configurationPath, 'utf8');
+
+    configuration = replaceOrThrow(
+        configuration,
+        String.raw`    public function __construct()
+    {
+        $this->tempFolderPath = sys_get_temp_dir();
+    }
+`,
+        String.raw`    public function __construct()
+    {
+        $this->tempFolderPath = self::resolveManagedTempFolderPath();
+    }
+`,
+        'Configuration constructor',
+    );
+
+    configuration = replaceOrThrow(
+        configuration,
+        String.raw`    public function setDebugFile($debugFile)
+    {
+        $this->debugFile = $debugFile;
+        return $this;
+    }
+`,
+        String.raw`    public function setDebugFile($debugFile)
+    {
+        $this->debugFile = self::normalizeDebugFilePath($debugFile);
+        return $this;
+    }
+`,
+        'Configuration debug file normalization',
+    );
+
+    configuration = replaceOrThrow(
+        configuration,
+        String.raw`    public function setTempFolderPath($tempFolderPath)
+    {
+        $this->tempFolderPath = $tempFolderPath;
+        return $this;
+    }
+`,
+        String.raw`    public function setTempFolderPath($tempFolderPath)
+    {
+        $this->tempFolderPath = self::resolveManagedTempFolderPath(
+            $tempFolderPath,
+        );
+        return $this;
+    }
+`,
+        'Configuration temp folder normalization',
+    );
+
+    configuration = replaceOrThrow(
+        configuration,
+        String.raw`    /**
+     * Gets the default configuration instance
+     *
+     * @return Configuration
+     */
+    public static function getDefaultConfiguration()
+`,
+        String.raw`    /**
+     * Resolves the managed uploads subdirectory used for generated client files.
+     *
+     * @param string $subdirectory Optional relative subdirectory name.
+     *
+     * @return string
+     */
+    private static function resolveManagedTempFolderPath($subdirectory = "")
+    {
+        $base_directory = self::getManagedStorageBasePath();
+        $subdirectory = self::sanitizeRelativePath($subdirectory);
+
+        if ("" === $base_directory || "" === $subdirectory) {
+            return $base_directory;
+        }
+
+        $directory = $base_directory . DIRECTORY_SEPARATOR . $subdirectory;
+        self::ensureDirectoryExists($directory);
+
+        return $directory;
+    }
+
+    /**
+     * Resolves the managed storage base path under the WordPress uploads directory.
+     *
+     * @return string
+     */
+    private static function getManagedStorageBasePath()
+    {
+        $base_directory = "";
+
+        if (function_exists("\\wp_upload_dir")) {
+            $uploads = call_user_func("\\wp_upload_dir");
+
+            if (
+                is_array($uploads) &&
+                empty($uploads["error"]) &&
+                !empty($uploads["basedir"])
+            ) {
+                $base_directory = (string) $uploads["basedir"];
+            }
+        }
+
+        if ("" === $base_directory && defined("WP_CONTENT_DIR") && "" !== WP_CONTENT_DIR) {
+            $base_directory =
+                rtrim(WP_CONTENT_DIR, "/\\") .
+                DIRECTORY_SEPARATOR .
+                "uploads";
+        }
+
+        if ("" === $base_directory) {
+            return "";
+        }
+
+        $managed_directory =
+            rtrim($base_directory, "/\\") .
+            DIRECTORY_SEPARATOR .
+            "aura-historia-partner-connect" .
+            DIRECTORY_SEPARATOR .
+            "internal-api";
+
+        self::ensureDirectoryExists($managed_directory);
+
+        return $managed_directory;
+    }
+
+    /**
+     * Restricts debug output to PHP streams or the managed uploads directory.
+     *
+     * @param string $debugFile Requested debug file path.
+     *
+     * @return string
+     */
+    private static function normalizeDebugFilePath($debugFile)
+    {
+        $debugFile = trim((string) $debugFile);
+
+        if ("" === $debugFile) {
+            return "php://output";
+        }
+
+        if (
+            in_array(
+                $debugFile,
+                ["php://output", "php://stdout", "php://stderr"],
+                true,
+            )
+        ) {
+            return $debugFile;
+        }
+
+        $filename = basename(str_replace("\\", "/", $debugFile));
+        $filename = self::sanitizePathSegment($filename);
+
+        if ("" === $filename) {
+            $filename = "debug.log";
+        }
+
+        $managed_directory = self::getManagedStorageBasePath();
+
+        if ("" === $managed_directory) {
+            return "php://output";
+        }
+
+        return $managed_directory . DIRECTORY_SEPARATOR . $filename;
+    }
+
+    /**
+     * Sanitizes a relative path so it remains inside the managed uploads directory.
+     *
+     * @param string $path Requested relative path.
+     *
+     * @return string
+     */
+    private static function sanitizeRelativePath($path)
+    {
+        $path = str_replace("\\", "/", trim((string) $path));
+
+        if ("" === $path) {
+            return "";
+        }
+
+        $segments = [];
+
+        foreach (explode("/", $path) as $segment) {
+            $segment = self::sanitizePathSegment($segment);
+
+            if ("" !== $segment && "." !== $segment && ".." !== $segment) {
+                $segments[] = $segment;
+            }
+        }
+
+        return implode(DIRECTORY_SEPARATOR, $segments);
+    }
+
+    /**
+     * Sanitizes a single path segment for use in the managed uploads directory.
+     *
+     * @param string $segment Requested path segment.
+     *
+     * @return string
+     */
+    private static function sanitizePathSegment($segment)
+    {
+        $segment = trim((string) $segment);
+
+        if ("" === $segment) {
+            return "";
+        }
+
+        if (function_exists("\\sanitize_file_name")) {
+            return (string) call_user_func("\\sanitize_file_name", $segment);
+        }
+
+        return (string) preg_replace("/[^A-Za-z0-9._-]/", "-", $segment);
+    }
+
+    /**
+     * Creates the managed uploads directory when needed.
+     *
+     * @param string $directory Directory path.
+     *
+     * @return void
+     */
+    private static function ensureDirectoryExists($directory)
+    {
+        if (
+            "" === $directory ||
+            is_dir($directory) ||
+            !function_exists("\\wp_mkdir_p")
+        ) {
+            return;
+        }
+
+        call_user_func("\\wp_mkdir_p", $directory);
+    }
+
+    /**
+     * Gets the default configuration instance
+     *
+     * @return Configuration
+     */
+    public static function getDefaultConfiguration()
+`,
+        'Configuration uploads directory helpers',
+    );
+
+    writeFileSync(configurationPath, configuration, 'utf8');
+
+    const objectSerializerPath = path.join(outputPath, 'ObjectSerializer.php');
+    let objectSerializer = readFileSync(objectSerializerPath, 'utf8');
+
+    objectSerializer = replaceRegexOrThrow(
+        objectSerializer,
+        /[ \t]*\/\/ determine file name[\s\S]*?return new \\SplFileObject\(\$filename, ['"]r['"]\);\n/m,
+        String.raw`            $temp_folder_path = Configuration::getDefaultConfiguration()->getTempFolderPath();
+
+            if ("" === $temp_folder_path) {
+                throw new \RuntimeException(
+                    "Failed to resolve a writable uploads directory for temporary API response files.",
+                );
+            }
+
+            // determine file name
+            if (
+                is_array($httpHeaders) &&
+                array_key_exists("Content-Disposition", $httpHeaders) &&
+                preg_match(
+                    '/inline; filename=[\'"]?([^\'"\s]+)[\'"]?$/i',
+                    $httpHeaders["Content-Disposition"],
+                    $match,
+                )
+            ) {
+                $sanitized_filename = self::sanitizeFilename($match[1]);
+
+                if (function_exists("\\sanitize_file_name")) {
+                    $sanitized_filename = (string) call_user_func(
+                        "\\sanitize_file_name",
+                        $sanitized_filename,
+                    );
+                }
+
+                $filename =
+                    "" === $sanitized_filename
+                        ? ""
+                        : rtrim($temp_folder_path, "/\\") .
+                            DIRECTORY_SEPARATOR .
+                            $sanitized_filename;
+            } else {
+                $filename = "";
+            }
+
+            if ("" === $filename) {
+                if (function_exists("\\wp_tempnam")) {
+                    $filename = call_user_func(
+                        "\\wp_tempnam",
+                        "ahpc-response.tmp",
+                        $temp_folder_path,
+                    );
+                } else {
+                    $filename =
+                        rtrim($temp_folder_path, "/\\") .
+                        DIRECTORY_SEPARATOR .
+                        uniqid("ahpc-", true) .
+                        ".tmp";
+                }
+            }
+
+            if (!is_string($filename) || "" === $filename) {
+                throw new \RuntimeException(
+                    "Failed to create a temporary file for the API response body.",
+                );
+            }
+
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Response bodies are stored only in the managed uploads temp directory.
+            $file = fopen($filename, "wb");
+            while ($chunk = $data->read(200)) {
+                // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Response bodies are stored only in the managed uploads temp directory.
+                fwrite($file, $chunk);
+            }
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Response bodies are stored only in the managed uploads temp directory.
+            fclose($file);
+
+            return new \SplFileObject($filename, "rb");
+`,
+        'ObjectSerializer temp file handling',
+    );
+
+    writeFileSync(objectSerializerPath, objectSerializer, 'utf8');
+}
+
 async function main() {
     const config = readConfig();
     const specUrl = buildRawSpecUrl(config);
@@ -356,6 +709,7 @@ async function main() {
 
     runGenerator(config);
     copyGeneratedClient(config);
+    applyWordPressGeneratedClientPatches(config);
     cleanupTemporaryOutput(config);
 
     console.log(`Updated generated OpenAPI client in ${config.outputPath}`);

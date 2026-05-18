@@ -532,6 +532,14 @@ class ObjectSerializer
 
             /** @var \Psr\Http\Message\StreamInterface $data */
 
+            $temp_folder_path = Configuration::getDefaultConfiguration()->getTempFolderPath();
+
+            if ("" === $temp_folder_path) {
+                throw new \RuntimeException(
+                    "Failed to resolve a writable uploads directory for temporary API response files.",
+                );
+            }
+
             // determine file name
             if (
                 is_array($httpHeaders) &&
@@ -542,28 +550,57 @@ class ObjectSerializer
                     $match,
                 )
             ) {
+                $sanitized_filename = self::sanitizeFilename($match[1]);
+
+                if (function_exists("\\sanitize_file_name")) {
+                    $sanitized_filename = (string) call_user_func(
+                        "\\sanitize_file_name",
+                        $sanitized_filename,
+                    );
+                }
+
                 $filename =
-                    Configuration::getDefaultConfiguration()->getTempFolderPath() .
-                    DIRECTORY_SEPARATOR .
-                    self::sanitizeFilename($match[1]);
+                    "" === $sanitized_filename
+                        ? ""
+                        : rtrim($temp_folder_path, "/\\") .
+                            DIRECTORY_SEPARATOR .
+                            $sanitized_filename;
             } else {
-                // phpcs:ignore WordPress.WP.AlternativeFunctions -- Generated client needs a filesystem-backed temporary file for \SplFileObject responses.
-                $filename = tempnam(
-                    Configuration::getDefaultConfiguration()->getTempFolderPath(),
-                    "",
+                $filename = "";
+            }
+
+            if ("" === $filename) {
+                if (function_exists("\\wp_tempnam")) {
+                    $filename = call_user_func(
+                        "\\wp_tempnam",
+                        "ahpc-response.tmp",
+                        $temp_folder_path,
+                    );
+                } else {
+                    $filename =
+                        rtrim($temp_folder_path, "/\\") .
+                        DIRECTORY_SEPARATOR .
+                        uniqid("ahpc-", true) .
+                        ".tmp";
+                }
+            }
+
+            if (!is_string($filename) || "" === $filename) {
+                throw new \RuntimeException(
+                    "Failed to create a temporary file for the API response body.",
                 );
             }
 
-            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Generated client streams response bodies to a temporary file.
-            $file = fopen($filename, "w");
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Response bodies are stored only in the managed uploads temp directory.
+            $file = fopen($filename, "wb");
             while ($chunk = $data->read(200)) {
-                // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Generated client streams response bodies to a temporary file.
+                // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Response bodies are stored only in the managed uploads temp directory.
                 fwrite($file, $chunk);
             }
-            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Generated client streams response bodies to a temporary file.
+            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Response bodies are stored only in the managed uploads temp directory.
             fclose($file);
 
-            return new \SplFileObject($filename, "r");
+            return new \SplFileObject($filename, "rb");
         }
 
         /** @psalm-suppress ParadoxicalCondition */

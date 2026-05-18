@@ -15,6 +15,7 @@ rsync -a "$PROJECT_ROOT/" "$RELEASE_DIR/" \
   --exclude .git \
   --exclude .github \
   --exclude .tmp-openapi-inspect \
+  --exclude assets \
   --exclude build-release \
   --exclude "$PLUGIN_SLUG.zip" \
   --exclude node_modules \
