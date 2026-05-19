@@ -13,6 +13,41 @@ use AuraHistoria\PartnerConnect\InternalApi\Configuration;
 class Test_AHPC_Internal_Api_Configuration extends WP_UnitTestCase
 {
     /**
+     * Optional upload directory override injected through the `upload_dir` filter.
+     *
+     * @var array<string,string>|null
+     */
+    protected $upload_dir_override = null;
+
+    /**
+     * Test teardown.
+     *
+     * @return void
+     */
+    public function tearDown(): void
+    {
+        remove_filter("upload_dir", [$this, "filter_upload_dir"]);
+        $this->upload_dir_override = null;
+
+        parent::tearDown();
+    }
+
+    /**
+     * Applies an upload directory override when a test requests one.
+     *
+     * @param array<string,string> $uploads Current uploads data.
+     * @return array<string,string>
+     */
+    public function filter_upload_dir($uploads)
+    {
+        if (!is_array($this->upload_dir_override)) {
+            return $uploads;
+        }
+
+        return array_merge($uploads, $this->upload_dir_override);
+    }
+
+    /**
      * Verifies the generated client uses a plugin-managed uploads directory by default.
      *
      * @return void
@@ -78,5 +113,29 @@ class Test_AHPC_Internal_Api_Configuration extends WP_UnitTestCase
         $this->assertEmpty($uploads["error"]);
         $this->assertStringStartsWith($expected_prefix, $actual);
         $this->assertStringEndsWith("/custom.log", $actual);
+    }
+
+    /**
+     * Verifies no hardcoded uploads path is derived when WordPress reports an error.
+     *
+     * @return void
+     */
+    public function test_temp_folder_is_empty_when_upload_directory_is_unavailable()
+    {
+        $this->upload_dir_override = [
+            "path" => "",
+            "basedir" => "",
+            "url" => "",
+            "baseurl" => "",
+            "subdir" => "",
+            "error" => "Uploads unavailable",
+        ];
+        add_filter("upload_dir", [$this, "filter_upload_dir"]);
+
+        $configuration = new Configuration();
+        $configuration->setDebugFile("../../custom.log");
+
+        $this->assertSame("", $configuration->getTempFolderPath());
+        $this->assertSame("php://output", $configuration->getDebugFile());
     }
 }

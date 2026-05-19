@@ -466,13 +466,6 @@ function applyWordPressGeneratedClientPatches(config) {
             }
         }
 
-        if ("" === $base_directory && defined("WP_CONTENT_DIR") && "" !== WP_CONTENT_DIR) {
-            $base_directory =
-                rtrim(WP_CONTENT_DIR, "/\\") .
-                DIRECTORY_SEPARATOR .
-                "uploads";
-        }
-
         if ("" === $base_directory) {
             return "";
         }
