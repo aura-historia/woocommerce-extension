@@ -193,6 +193,7 @@ If you need a different port, create a local `.wp-env.override.json` file.
 - `npm run env:destroy` — remove the environment entirely
 - `npm run wp -- plugin list` — run WP-CLI commands inside the environment
 - `npm test` — run the WordPress integration test suite
+- `npm run plugin:check` — build the release artifact and run WordPress Plugin Check (PCP) against the shipped plugin contents
 - `npm run release:zip` — build the distributable plugin ZIP
 - `npm run openapi:generate` — regenerate the typed internal API client
 
@@ -214,6 +215,14 @@ Run the suite with:
 
 ```sh
 npm test
+```
+
+### Plugin Check (PCP)
+
+After the local environment is running, run WordPress Plugin Check against the generated release tree so the results reflect the distributable plugin rather than repository-only development files:
+
+```sh
+npm run plugin:check
 ```
 
 ## Architecture
