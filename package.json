@@ -13,6 +13,7 @@
     "composer:install": "node scripts/run-composer.js install --no-interaction --prefer-dist",
     "openapi:generate": "node scripts/generate-openapi-client.mjs",
     "release:zip": "sh ./build-release.sh",
+    "plugin:check": "npm run release:zip && node scripts/run-plugin-check.js build-release/aura-historia-partner-connect",
     "phpunit": "node scripts/run-phpunit.js",
     "test": "npm run composer:install && npm run phpunit"
   },
