@@ -210,7 +210,7 @@ class Backend_Api_Client
         $failed_product_ids = array_values(
             array_filter(
                 array_map([$this, "sanitize_error_fragment"], $response),
-                static fn($product_id) => "" !== $product_id,
+                static fn($product_id) => '' !== $product_id,
             ),
         );
 

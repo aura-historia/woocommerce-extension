@@ -174,6 +174,25 @@ function cloneReferencedComponents(spec, componentRefs) {
     return clonedComponents;
 }
 
+function normalizeServer(server) {
+    if (!server || typeof server !== 'object') {
+        return server;
+    }
+
+    if (server.url === 'https://api.dev.aura-historia.com') {
+        return {
+            ...server,
+            url: 'https://api.aura-historia.com',
+            description:
+                server.description === 'Full Development-Server'
+                    ? 'Full Production-Server'
+                    : server.description,
+        };
+    }
+
+    return server;
+}
+
 function filterSpec(spec, operationIds) {
     const selectedOperations = [];
     const usedTags = new Set();
@@ -229,7 +248,9 @@ function filterSpec(spec, operationIds) {
     return {
         openapi: spec.openapi,
         info: spec.info,
-        servers: spec.servers || [],
+        servers: Array.isArray(spec.servers)
+            ? spec.servers.map(normalizeServer)
+            : [],
         paths: filteredPaths,
         components: filteredComponents,
         tags: Array.isArray(spec.tags)

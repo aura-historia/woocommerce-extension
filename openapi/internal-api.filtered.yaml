@@ -21,8 +21,8 @@ info:
     name: License
     url: https://github.com/aura-historia/backend/blob/develop/LICENSE
 servers:
-  - url: https://api.dev.aura-historia.com
-    description: Full Development-Server
+  - url: https://api.aura-historia.com
+    description: Full Production-Server
 paths:
   /api/v1/shops/{shopId}/products:
     put:
