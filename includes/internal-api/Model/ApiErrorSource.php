@@ -26,10 +26,12 @@
  * Do not edit the class manually.
  */
 
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
+
 namespace AuraHistoria\PartnerConnect\InternalApi\Model;
 
 use \ArrayAccess;
-use AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
+use \AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
 
 /**
  * ApiErrorSource Class Doc Comment
@@ -50,7 +52,7 @@ class ApiErrorSource implements ModelInterface, ArrayAccess, \JsonSerializable
      *
      * @var string
      */
-    protected static $openAPIModelName = "ApiErrorSource";
+    protected static $openAPIModelName = 'ApiErrorSource';
 
     /**
      * Array of property to type mappings. Used for (de)serialization
@@ -58,8 +60,8 @@ class ApiErrorSource implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $openAPITypes = [
-        "field" => "string",
-        "source_type" => "string",
+        'field' => 'string',
+        'source_type' => 'string'
     ];
 
     /**
@@ -70,8 +72,8 @@ class ApiErrorSource implements ModelInterface, ArrayAccess, \JsonSerializable
      * @psalm-var array<string, string|null>
      */
     protected static $openAPIFormats = [
-        "field" => null,
-        "source_type" => null,
+        'field' => null,
+        'source_type' => null
     ];
 
     /**
@@ -80,8 +82,8 @@ class ApiErrorSource implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var boolean[]
      */
     protected static array $openAPINullables = [
-        "field" => false,
-        "source_type" => false,
+        'field' => false,
+        'source_type' => false
     ];
 
     /**
@@ -136,9 +138,8 @@ class ApiErrorSource implements ModelInterface, ArrayAccess, \JsonSerializable
      *
      * @param boolean[] $openAPINullablesSetToNull
      */
-    private function setOpenAPINullablesSetToNull(
-        array $openAPINullablesSetToNull,
-    ): void {
+    private function setOpenAPINullablesSetToNull(array $openAPINullablesSetToNull): void
+    {
         $this->openAPINullablesSetToNull = $openAPINullablesSetToNull;
     }
 
@@ -171,8 +172,8 @@ class ApiErrorSource implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $attributeMap = [
-        "field" => "field",
-        "source_type" => "sourceType",
+        'field' => 'field',
+        'source_type' => 'sourceType'
     ];
 
     /**
@@ -181,8 +182,8 @@ class ApiErrorSource implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $setters = [
-        "field" => "setField",
-        "source_type" => "setSourceType",
+        'field' => 'setField',
+        'source_type' => 'setSourceType'
     ];
 
     /**
@@ -191,8 +192,8 @@ class ApiErrorSource implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $getters = [
-        "field" => "getField",
-        "source_type" => "getSourceType",
+        'field' => 'getField',
+        'source_type' => 'getSourceType'
     ];
 
     /**
@@ -236,10 +237,10 @@ class ApiErrorSource implements ModelInterface, ArrayAccess, \JsonSerializable
         return self::$openAPIModelName;
     }
 
-    public const SOURCE_TYPE_QUERY = "query";
-    public const SOURCE_TYPE_PATH = "path";
-    public const SOURCE_TYPE_HEADER = "header";
-    public const SOURCE_TYPE_BODY = "body";
+    public const SOURCE_TYPE_QUERY = 'query';
+    public const SOURCE_TYPE_PATH = 'path';
+    public const SOURCE_TYPE_HEADER = 'header';
+    public const SOURCE_TYPE_BODY = 'body';
 
     /**
      * Gets allowable values of the enum
@@ -271,8 +272,8 @@ class ApiErrorSource implements ModelInterface, ArrayAccess, \JsonSerializable
      */
     public function __construct(?array $data = null)
     {
-        $this->setIfExists("field", $data ?? [], null);
-        $this->setIfExists("source_type", $data ?? [], null);
+        $this->setIfExists('field', $data ?? [], null);
+        $this->setIfExists('source_type', $data ?? [], null);
     }
 
     /**
@@ -284,21 +285,13 @@ class ApiErrorSource implements ModelInterface, ArrayAccess, \JsonSerializable
      * @param array  $fields
      * @param mixed  $defaultValue
      */
-    private function setIfExists(
-        string $variableName,
-        array $fields,
-        $defaultValue,
-    ): void {
-        if (
-            self::isNullable($variableName) &&
-            array_key_exists($variableName, $fields) &&
-            is_null($fields[$variableName])
-        ) {
+    private function setIfExists(string $variableName, array $fields, $defaultValue): void
+    {
+        if (self::isNullable($variableName) && array_key_exists($variableName, $fields) && is_null($fields[$variableName])) {
             $this->openAPINullablesSetToNull[] = $variableName;
         }
 
-        $this->container[$variableName] =
-            $fields[$variableName] ?? $defaultValue;
+        $this->container[$variableName] = $fields[$variableName] ?? $defaultValue;
     }
 
     /**
@@ -310,21 +303,18 @@ class ApiErrorSource implements ModelInterface, ArrayAccess, \JsonSerializable
     {
         $invalidProperties = [];
 
-        if ($this->container["field"] === null) {
+        if ($this->container['field'] === null) {
             $invalidProperties[] = "'field' can't be null";
         }
-        if ($this->container["source_type"] === null) {
+        if ($this->container['source_type'] === null) {
             $invalidProperties[] = "'source_type' can't be null";
         }
         $allowedValues = $this->getSourceTypeAllowableValues();
-        if (
-            !is_null($this->container["source_type"]) &&
-            !in_array($this->container["source_type"], $allowedValues, true)
-        ) {
+        if (!is_null($this->container['source_type']) && !in_array($this->container['source_type'], $allowedValues, true)) {
             $invalidProperties[] = sprintf(
                 "invalid value '%s' for 'source_type', must be one of '%s'",
-                $this->container["source_type"],
-                implode("', '", $allowedValues),
+                $this->container['source_type'],
+                implode("', '", $allowedValues)
             );
         }
 
@@ -342,6 +332,7 @@ class ApiErrorSource implements ModelInterface, ArrayAccess, \JsonSerializable
         return count($this->listInvalidProperties()) === 0;
     }
 
+
     /**
      * Gets field
      *
@@ -349,7 +340,7 @@ class ApiErrorSource implements ModelInterface, ArrayAccess, \JsonSerializable
      */
     public function getField()
     {
-        return $this->container["field"];
+        return $this->container['field'];
     }
 
     /**
@@ -362,11 +353,9 @@ class ApiErrorSource implements ModelInterface, ArrayAccess, \JsonSerializable
     public function setField($field)
     {
         if (is_null($field)) {
-            throw new \InvalidArgumentException(
-                "non-nullable field cannot be null",
-            );
+            throw new \InvalidArgumentException('non-nullable field cannot be null');
         }
-        $this->container["field"] = $field;
+        $this->container['field'] = $field;
 
         return $this;
     }
@@ -378,7 +367,7 @@ class ApiErrorSource implements ModelInterface, ArrayAccess, \JsonSerializable
      */
     public function getSourceType()
     {
-        return $this->container["source_type"];
+        return $this->container['source_type'];
     }
 
     /**
@@ -391,23 +380,19 @@ class ApiErrorSource implements ModelInterface, ArrayAccess, \JsonSerializable
     public function setSourceType($source_type)
     {
         if (is_null($source_type)) {
-            throw new \InvalidArgumentException(
-                "non-nullable source_type cannot be null",
-            );
+            throw new \InvalidArgumentException('non-nullable source_type cannot be null');
         }
         $allowedValues = $this->getSourceTypeAllowableValues();
         if (!in_array($source_type, $allowedValues, true)) {
-            // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Generated model validation exception includes the invalid runtime enum value.
             throw new \InvalidArgumentException(
                 sprintf(
                     "Invalid value '%s' for 'source_type', must be one of '%s'",
                     $source_type,
-                    implode("', '", $allowedValues),
-                ),
+                    implode("', '", $allowedValues)
+                )
             );
-            // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
         }
-        $this->container["source_type"] = $source_type;
+        $this->container['source_type'] = $source_type;
 
         return $this;
     }
@@ -475,7 +460,7 @@ class ApiErrorSource implements ModelInterface, ArrayAccess, \JsonSerializable
     #[\ReturnTypeWillChange]
     public function jsonSerialize()
     {
-        return ObjectSerializer::sanitizeForSerialization($this);
+       return ObjectSerializer::sanitizeForSerialization($this);
     }
 
     /**
@@ -487,7 +472,7 @@ class ApiErrorSource implements ModelInterface, ArrayAccess, \JsonSerializable
     {
         return json_encode(
             ObjectSerializer::sanitizeForSerialization($this),
-            JSON_PRETTY_PRINT,
+            JSON_PRETTY_PRINT
         );
     }
 
@@ -501,3 +486,4 @@ class ApiErrorSource implements ModelInterface, ArrayAccess, \JsonSerializable
         return json_encode(ObjectSerializer::sanitizeForSerialization($this));
     }
 }
+

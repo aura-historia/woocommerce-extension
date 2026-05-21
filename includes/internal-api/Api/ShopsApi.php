@@ -25,6 +25,8 @@
  * Do not edit the class manually.
  */
 
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped, WordPress.WP.AlternativeFunctions.file_system_operations_fopen
+
 namespace AuraHistoria\PartnerConnect\InternalApi\Api;
 
 use GuzzleHttp\Client;
@@ -74,7 +76,9 @@ class ShopsApi
 
     /** @var string[] $contentTypes **/
     public const contentTypes = [
-        "patchShopById" => ["application/json"],
+        'patchShopById' => [
+            'application/json',
+        ],
     ];
 
     /**
@@ -87,7 +91,7 @@ class ShopsApi
         ?ClientInterface $client = null,
         ?Configuration $config = null,
         ?HeaderSelector $selector = null,
-        int $hostIndex = 0,
+        int $hostIndex = 0
     ) {
         $this->client = $client ?: new Client();
         $this->config = $config ?: Configuration::getDefaultConfiguration();
@@ -136,16 +140,9 @@ class ShopsApi
      * @throws \InvalidArgumentException
      * @return \AuraHistoria\PartnerConnect\InternalApi\Model\GetShopData|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError
      */
-    public function patchShopById(
-        $shop_id,
-        $patch_shop_data,
-        string $contentType = self::contentTypes["patchShopById"][0],
-    ) {
-        [$response] = $this->patchShopByIdWithHttpInfo(
-            $shop_id,
-            $patch_shop_data,
-            $contentType,
-        );
+    public function patchShopById($shop_id, $patch_shop_data, string $contentType = self::contentTypes['patchShopById'][0])
+    {
+        list($response) = $this->patchShopByIdWithHttpInfo($shop_id, $patch_shop_data, $contentType);
         return $response;
     }
 
@@ -162,101 +159,89 @@ class ShopsApi
      * @throws \InvalidArgumentException
      * @return array of \AuraHistoria\PartnerConnect\InternalApi\Model\GetShopData|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError, HTTP status code, HTTP response headers (array of strings)
      */
-    public function patchShopByIdWithHttpInfo(
-        $shop_id,
-        $patch_shop_data,
-        string $contentType = self::contentTypes["patchShopById"][0],
-    ) {
-        $request = $this->patchShopByIdRequest(
-            $shop_id,
-            $patch_shop_data,
-            $contentType,
-        );
+    public function patchShopByIdWithHttpInfo($shop_id, $patch_shop_data, string $contentType = self::contentTypes['patchShopById'][0])
+    {
+        $request = $this->patchShopByIdRequest($shop_id, $patch_shop_data, $contentType);
 
         try {
             $options = $this->createHttpClientOption();
             try {
                 $response = $this->client->send($request, $options);
             } catch (RequestException $e) {
-                // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Generated client exception message includes runtime request diagnostics.
                 throw new ApiException(
                     "[{$e->getCode()}] {$e->getMessage()}",
                     (int) $e->getCode(),
                     $e->getResponse() ? $e->getResponse()->getHeaders() : null,
-                    $e->getResponse()
-                        ? (string) $e->getResponse()->getBody()
-                        : null,
+                    $e->getResponse() ? (string) $e->getResponse()->getBody() : null
                 );
-                // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
             } catch (ConnectException $e) {
-                // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Generated client exception message includes runtime connection diagnostics.
                 throw new ApiException(
                     "[{$e->getCode()}] {$e->getMessage()}",
                     (int) $e->getCode(),
                     null,
-                    null,
+                    null
                 );
-                // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
             }
 
             $statusCode = $response->getStatusCode();
 
-            switch ($statusCode) {
+
+            switch($statusCode) {
                 case 200:
                     return $this->handleResponseWithDataType(
-                        "\AuraHistoria\PartnerConnect\InternalApi\Model\GetShopData",
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\GetShopData',
                         $request,
                         $response,
                     );
                 case 400:
                     return $this->handleResponseWithDataType(
-                        "\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError",
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
                         $request,
                         $response,
                     );
                 case 401:
                     return $this->handleResponseWithDataType(
-                        "\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError",
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
                         $request,
                         $response,
                     );
                 case 403:
                     return $this->handleResponseWithDataType(
-                        "\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError",
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
                         $request,
                         $response,
                     );
                 case 404:
                     return $this->handleResponseWithDataType(
-                        "\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError",
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
                         $request,
                         $response,
                     );
                 case 500:
                     return $this->handleResponseWithDataType(
-                        "\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError",
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
                         $request,
                         $response,
                     );
             }
 
+            
+
             if ($statusCode < 200 || $statusCode > 299) {
-                // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Generated client exception message includes the request URI for diagnostics.
                 throw new ApiException(
                     sprintf(
-                        "[%d] Error connecting to the API (%s)",
+                        '[%d] Error connecting to the API (%s)',
                         $statusCode,
-                        (string) $request->getUri(),
+                        (string) $request->getUri()
                     ),
                     $statusCode,
                     $response->getHeaders(),
-                    (string) $response->getBody(),
+                    (string) $response->getBody()
                 );
-                // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
             }
 
             return $this->handleResponseWithDataType(
-                "\AuraHistoria\PartnerConnect\InternalApi\Model\GetShopData",
+                '\AuraHistoria\PartnerConnect\InternalApi\Model\GetShopData',
                 $request,
                 $response,
             );
@@ -265,52 +250,53 @@ class ShopsApi
                 case 200:
                     $data = ObjectSerializer::deserialize(
                         $e->getResponseBody(),
-                        "\AuraHistoria\PartnerConnect\InternalApi\Model\GetShopData",
-                        $e->getResponseHeaders(),
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\GetShopData',
+                        $e->getResponseHeaders()
                     );
                     $e->setResponseObject($data);
                     throw $e;
                 case 400:
                     $data = ObjectSerializer::deserialize(
                         $e->getResponseBody(),
-                        "\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError",
-                        $e->getResponseHeaders(),
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
+                        $e->getResponseHeaders()
                     );
                     $e->setResponseObject($data);
                     throw $e;
                 case 401:
                     $data = ObjectSerializer::deserialize(
                         $e->getResponseBody(),
-                        "\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError",
-                        $e->getResponseHeaders(),
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
+                        $e->getResponseHeaders()
                     );
                     $e->setResponseObject($data);
                     throw $e;
                 case 403:
                     $data = ObjectSerializer::deserialize(
                         $e->getResponseBody(),
-                        "\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError",
-                        $e->getResponseHeaders(),
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
+                        $e->getResponseHeaders()
                     );
                     $e->setResponseObject($data);
                     throw $e;
                 case 404:
                     $data = ObjectSerializer::deserialize(
                         $e->getResponseBody(),
-                        "\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError",
-                        $e->getResponseHeaders(),
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
+                        $e->getResponseHeaders()
                     );
                     $e->setResponseObject($data);
                     throw $e;
                 case 500:
                     $data = ObjectSerializer::deserialize(
                         $e->getResponseBody(),
-                        "\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError",
-                        $e->getResponseHeaders(),
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
+                        $e->getResponseHeaders()
                     );
                     $e->setResponseObject($data);
                     throw $e;
             }
+        
 
             throw $e;
         }
@@ -328,18 +314,14 @@ class ShopsApi
      * @throws \InvalidArgumentException
      * @return \GuzzleHttp\Promise\PromiseInterface
      */
-    public function patchShopByIdAsync(
-        $shop_id,
-        $patch_shop_data,
-        string $contentType = self::contentTypes["patchShopById"][0],
-    ) {
-        return $this->patchShopByIdAsyncWithHttpInfo(
-            $shop_id,
-            $patch_shop_data,
-            $contentType,
-        )->then(function ($response) {
-            return $response[0];
-        });
+    public function patchShopByIdAsync($shop_id, $patch_shop_data, string $contentType = self::contentTypes['patchShopById'][0])
+    {
+        return $this->patchShopByIdAsyncWithHttpInfo($shop_id, $patch_shop_data, $contentType)
+            ->then(
+                function ($response) {
+                    return $response[0];
+                }
+            );
     }
 
     /**
@@ -354,58 +336,44 @@ class ShopsApi
      * @throws \InvalidArgumentException
      * @return \GuzzleHttp\Promise\PromiseInterface
      */
-    public function patchShopByIdAsyncWithHttpInfo(
-        $shop_id,
-        $patch_shop_data,
-        string $contentType = self::contentTypes["patchShopById"][0],
-    ) {
-        $returnType =
-            "\AuraHistoria\PartnerConnect\InternalApi\Model\GetShopData";
-        $request = $this->patchShopByIdRequest(
-            $shop_id,
-            $patch_shop_data,
-            $contentType,
-        );
+    public function patchShopByIdAsyncWithHttpInfo($shop_id, $patch_shop_data, string $contentType = self::contentTypes['patchShopById'][0])
+    {
+        $returnType = '\AuraHistoria\PartnerConnect\InternalApi\Model\GetShopData';
+        $request = $this->patchShopByIdRequest($shop_id, $patch_shop_data, $contentType);
 
         return $this->client
             ->sendAsync($request, $this->createHttpClientOption())
             ->then(
                 function ($response) use ($returnType) {
-                    if ($returnType === "\SplFileObject") {
+                    if ($returnType === '\SplFileObject') {
                         $content = $response->getBody(); //stream goes to serializer
                     } else {
                         $content = (string) $response->getBody();
-                        if ($returnType !== "string") {
+                        if ($returnType !== 'string') {
                             $content = json_decode($content);
                         }
                     }
 
                     return [
-                        ObjectSerializer::deserialize(
-                            $content,
-                            $returnType,
-                            [],
-                        ),
+                        ObjectSerializer::deserialize($content, $returnType, []),
                         $response->getStatusCode(),
-                        $response->getHeaders(),
+                        $response->getHeaders()
                     ];
                 },
                 function ($exception) {
                     $response = $exception->getResponse();
                     $statusCode = $response->getStatusCode();
-                    // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Generated client exception message includes the request URI for diagnostics.
                     throw new ApiException(
                         sprintf(
-                            "[%d] Error connecting to the API (%s)",
+                            '[%d] Error connecting to the API (%s)',
                             $statusCode,
-                            $exception->getRequest()->getUri(),
+                            $exception->getRequest()->getUri()
                         ),
                         $statusCode,
                         $response->getHeaders(),
-                        (string) $response->getBody(),
+                        (string) $response->getBody()
                     );
-                    // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
-                },
+                }
             );
     }
 
@@ -419,64 +387,54 @@ class ShopsApi
      * @throws \InvalidArgumentException
      * @return \GuzzleHttp\Psr7\Request
      */
-    public function patchShopByIdRequest(
-        $shop_id,
-        $patch_shop_data,
-        string $contentType = self::contentTypes["patchShopById"][0],
-    ) {
+    public function patchShopByIdRequest($shop_id, $patch_shop_data, string $contentType = self::contentTypes['patchShopById'][0])
+    {
+
         // verify the required parameter 'shop_id' is set
-        if (
-            $shop_id === null ||
-            (is_array($shop_id) && count($shop_id) === 0)
-        ) {
+        if ($shop_id === null || (is_array($shop_id) && count($shop_id) === 0)) {
             throw new \InvalidArgumentException(
-                'Missing the required parameter $shop_id when calling patchShopById',
+                'Missing the required parameter $shop_id when calling patchShopById'
             );
         }
 
         // verify the required parameter 'patch_shop_data' is set
-        if (
-            $patch_shop_data === null ||
-            (is_array($patch_shop_data) && count($patch_shop_data) === 0)
-        ) {
+        if ($patch_shop_data === null || (is_array($patch_shop_data) && count($patch_shop_data) === 0)) {
             throw new \InvalidArgumentException(
-                'Missing the required parameter $patch_shop_data when calling patchShopById',
+                'Missing the required parameter $patch_shop_data when calling patchShopById'
             );
         }
 
-        $resourcePath = "/api/v1/shops/{shopId}";
+
+        $resourcePath = '/api/v1/shops/{shopId}';
         $formParams = [];
         $queryParams = [];
         $headerParams = [];
-        $httpBody = "";
+        $httpBody = '';
         $multipart = false;
+
+
 
         // path params
         if ($shop_id !== null) {
             $resourcePath = str_replace(
-                "{shopId}",
+                '{shopId}',
                 ObjectSerializer::toPathValue($shop_id),
-                $resourcePath,
+                $resourcePath
             );
         }
 
+
         $headers = $this->headerSelector->selectHeaders(
-            ["application/json", "application/problem+json"],
+            ['application/json', 'application/problem+json', ],
             $contentType,
-            $multipart,
+            $multipart
         );
 
         // for model (json/xml)
         if (isset($patch_shop_data)) {
-            if (
-                stripos($headers["Content-Type"], "application/json") !== false
-            ) {
+            if (stripos($headers['Content-Type'], 'application/json') !== false) {
                 # if Content-Type contains "application/json", json_encode the body
-                $httpBody = \GuzzleHttp\Utils::jsonEncode(
-                    ObjectSerializer::sanitizeForSerialization(
-                        $patch_shop_data,
-                    ),
-                );
+                $httpBody = \GuzzleHttp\Utils::jsonEncode(ObjectSerializer::sanitizeForSerialization($patch_shop_data));
             } else {
                 $httpBody = $patch_shop_data;
             }
@@ -484,21 +442,18 @@ class ShopsApi
             if ($multipart) {
                 $multipartContents = [];
                 foreach ($formParams as $formParamName => $formParamValue) {
-                    $formParamValueItems = is_array($formParamValue)
-                        ? $formParamValue
-                        : [$formParamValue];
+                    $formParamValueItems = is_array($formParamValue) ? $formParamValue : [$formParamValue];
                     foreach ($formParamValueItems as $formParamValueItem) {
                         $multipartContents[] = [
-                            "name" => $formParamName,
-                            "contents" => $formParamValueItem,
+                            'name' => $formParamName,
+                            'contents' => $formParamValueItem
                         ];
                     }
                 }
                 // for HTTP post (form)
                 $httpBody = new MultipartStream($multipartContents);
-            } elseif (
-                stripos($headers["Content-Type"], "application/json") !== false
-            ) {
+
+            } elseif (stripos($headers['Content-Type'], 'application/json') !== false) {
                 # if Content-Type contains "application/json", json_encode the form parameters
                 $httpBody = \GuzzleHttp\Utils::jsonEncode($formParams);
             } else {
@@ -508,30 +463,33 @@ class ShopsApi
         }
 
         // this endpoint requires API key authentication
-        $apiKey = $this->config->getApiKeyWithPrefix("x-api-key");
+        $apiKey = $this->config->getApiKeyWithPrefix('x-api-key');
         if ($apiKey !== null) {
-            $headers["x-api-key"] = $apiKey;
+            $headers['x-api-key'] = $apiKey;
         }
         // this endpoint requires Bearer (JWT) authentication (access token)
         if (!empty($this->config->getAccessToken())) {
-            $headers["Authorization"] =
-                "Bearer " . $this->config->getAccessToken();
+            $headers['Authorization'] = 'Bearer ' . $this->config->getAccessToken();
         }
 
         $defaultHeaders = [];
         if ($this->config->getUserAgent()) {
-            $defaultHeaders["User-Agent"] = $this->config->getUserAgent();
+            $defaultHeaders['User-Agent'] = $this->config->getUserAgent();
         }
 
-        $headers = array_merge($defaultHeaders, $headerParams, $headers);
+        $headers = array_merge(
+            $defaultHeaders,
+            $headerParams,
+            $headers
+        );
 
         $operationHost = $this->config->getHost();
         $query = ObjectSerializer::buildQuery($queryParams);
         return new Request(
-            "PATCH",
-            $operationHost . $resourcePath . ($query ? "?{$query}" : ""),
+            'PATCH',
+            $operationHost . $resourcePath . ($query ? "?{$query}" : ''),
             $headers,
-            $httpBody,
+            $httpBody
         );
     }
 
@@ -545,18 +503,9 @@ class ShopsApi
     {
         $options = [];
         if ($this->config->getDebug()) {
-            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Guzzle debug mode requires a native stream resource.
-            $options[RequestOptions::DEBUG] = fopen(
-                $this->config->getDebugFile(),
-                "a",
-            );
+            $options[RequestOptions::DEBUG] = fopen($this->config->getDebugFile(), 'a');
             if (!$options[RequestOptions::DEBUG]) {
-                // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Generated client exception message includes the configured debug file path.
-                throw new \RuntimeException(
-                    "Failed to open the debug file: " .
-                        $this->config->getDebugFile(),
-                );
-                // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
+                throw new \RuntimeException('Failed to open the debug file: ' . $this->config->getDebugFile());
             }
         }
 
@@ -574,32 +523,25 @@ class ShopsApi
     private function handleResponseWithDataType(
         string $dataType,
         RequestInterface $request,
-        ResponseInterface $response,
+        ResponseInterface $response
     ): array {
-        if ($dataType === "\SplFileObject") {
+        if ($dataType === '\SplFileObject') {
             $content = $response->getBody(); //stream goes to serializer
         } else {
             $content = (string) $response->getBody();
-            if ($dataType !== "string") {
+            if ($dataType !== 'string') {
                 try {
-                    $content = json_decode(
-                        $content,
-                        false,
-                        512,
-                        JSON_THROW_ON_ERROR,
-                    );
+                    $content = json_decode($content, false, 512, JSON_THROW_ON_ERROR);
                 } catch (\JsonException $exception) {
-                    // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Generated client exception message includes the request URI for diagnostics.
                     throw new ApiException(
                         sprintf(
-                            "Error JSON decoding server response (%s)",
-                            $request->getUri(),
+                            'Error JSON decoding server response (%s)',
+                            $request->getUri()
                         ),
                         $response->getStatusCode(),
                         $response->getHeaders(),
-                        $content,
+                        $content
                     );
-                    // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
                 }
             }
         }
@@ -607,16 +549,16 @@ class ShopsApi
         return [
             ObjectSerializer::deserialize($content, $dataType, []),
             $response->getStatusCode(),
-            $response->getHeaders(),
+            $response->getHeaders()
         ];
     }
 
     private function responseWithinRangeCode(
         string $rangeCode,
-        int $statusCode,
+        int $statusCode
     ): bool {
-        $left = (int) ($rangeCode[0] . "00");
-        $right = (int) ($rangeCode[0] . "99");
+        $left = (int) ($rangeCode[0].'00');
+        $right = (int) ($rangeCode[0].'99');
 
         return $statusCode >= $left && $statusCode <= $right;
     }

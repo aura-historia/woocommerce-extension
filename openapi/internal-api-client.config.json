@@ -1,7 +1,7 @@
 {
   "source": {
     "repositoryUrl": "https://github.com/aura-historia/internal-api",
-    "commit": "39c2a0c98eb1e6a834d9f48a4d7c492708b66921",
+    "commit": "ef1190ff9b9fcf087bd3c8d9a33ab93b1d1e1b6d",
     "specPath": "swagger.yaml"
   },
   "generator": {

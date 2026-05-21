@@ -25,6 +25,8 @@
  * Do not edit the class manually.
  */
 
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
+
 namespace AuraHistoria\PartnerConnect\InternalApi;
 
 /**
@@ -38,8 +40,8 @@ namespace AuraHistoria\PartnerConnect\InternalApi;
  */
 class Configuration
 {
-    public const BOOLEAN_FORMAT_INT = "int";
-    public const BOOLEAN_FORMAT_STRING = "string";
+    public const BOOLEAN_FORMAT_INT = 'int';
+    public const BOOLEAN_FORMAT_STRING = 'string';
 
     /**
      * @var Configuration
@@ -65,7 +67,7 @@ class Configuration
      *
      * @var string
      */
-    protected $accessToken = "";
+    protected $accessToken = '';
 
     /**
      * Boolean format for query string
@@ -79,28 +81,28 @@ class Configuration
      *
      * @var string
      */
-    protected $username = "";
+    protected $username = '';
 
     /**
      * Password for HTTP basic authentication
      *
      * @var string
      */
-    protected $password = "";
+    protected $password = '';
 
     /**
      * The host
      *
      * @var string
      */
-    protected $host = "https://api.aura-historia.com";
+    protected $host = 'https://api.aura-historia.com';
 
     /**
      * User agent of the HTTP request, set to "OpenAPI-Generator/{version}/PHP" by default
      *
      * @var string
      */
-    protected $userAgent = "OpenAPI-Generator/1.0.0/PHP";
+    protected $userAgent = 'OpenAPI-Generator/1.0.0/PHP';
 
     /**
      * Debug switch (default set to false)
@@ -114,7 +116,7 @@ class Configuration
      *
      * @var string
      */
-    protected $debugFile = "php://output";
+    protected $debugFile = 'php://output';
 
     /**
      * Debug file location (log to STDOUT by default)
@@ -168,9 +170,7 @@ class Configuration
      */
     public function getApiKey($apiKeyIdentifier)
     {
-        return isset($this->apiKeys[$apiKeyIdentifier])
-            ? $this->apiKeys[$apiKeyIdentifier]
-            : null;
+        return isset($this->apiKeys[$apiKeyIdentifier]) ? $this->apiKeys[$apiKeyIdentifier] : null;
     }
 
     /**
@@ -196,9 +196,7 @@ class Configuration
      */
     public function getApiKeyPrefix($apiKeyIdentifier)
     {
-        return isset($this->apiKeyPrefixes[$apiKeyIdentifier])
-            ? $this->apiKeyPrefixes[$apiKeyIdentifier]
-            : null;
+        return isset($this->apiKeyPrefixes[$apiKeyIdentifier]) ? $this->apiKeyPrefixes[$apiKeyIdentifier] : null;
     }
 
     /**
@@ -328,7 +326,7 @@ class Configuration
     public function setUserAgent($userAgent)
     {
         if (!is_string($userAgent)) {
-            throw new \InvalidArgumentException("User-agent must be a string.");
+            throw new \InvalidArgumentException('User-agent must be a string.');
         }
 
         $this->userAgent = $userAgent;
@@ -421,11 +419,11 @@ class Configuration
      *
      * @return $this
      */
-    public function setCertFile($certFile)
-    {
+     public function setCertFile($certFile)
+     {
         $this->certFile = $certFile;
         return $this;
-    }
+     }
 
     /**
      * Gets the certificate file path, for mTLS
@@ -442,11 +440,11 @@ class Configuration
      *
      * @return $this
      */
-    public function setKeyFile($keyFile)
-    {
+     public function setKeyFile($keyFile)
+     {
         $this->keyFile = $keyFile;
         return $this;
-    }
+     }
 
     /**
      * Gets the certificate key path, for mTLS
@@ -457,6 +455,7 @@ class Configuration
     {
         return $this->keyFile;
     }
+    
 
     /**
      * Resolves the managed uploads subdirectory used for generated client files.
@@ -661,16 +660,11 @@ class Configuration
      */
     public static function toDebugReport()
     {
-        $report =
-            "PHP SDK (AuraHistoria\PartnerConnect\InternalApi) Debug Report:" .
-            PHP_EOL;
-        $report .= "    OS: " . php_uname() . PHP_EOL;
-        $report .= "    PHP Version: " . PHP_VERSION . PHP_EOL;
-        $report .= "    The version of the OpenAPI document: 1.0.0" . PHP_EOL;
-        $report .=
-            "    Temp Folder Path: " .
-            self::getDefaultConfiguration()->getTempFolderPath() .
-            PHP_EOL;
+        $report  = 'PHP SDK (AuraHistoria\PartnerConnect\InternalApi) Debug Report:' . PHP_EOL;
+        $report .= '    OS: ' . php_uname() . PHP_EOL;
+        $report .= '    PHP Version: ' . PHP_VERSION . PHP_EOL;
+        $report .= '    The version of the OpenAPI document: 1.0.0' . PHP_EOL;
+        $report .= '    Temp Folder Path: ' . self::getDefaultConfiguration()->getTempFolderPath() . PHP_EOL;
 
         return $report;
     }
@@ -694,7 +688,7 @@ class Configuration
         if ($prefix === null) {
             $keyWithPrefix = $apiKey;
         } else {
-            $keyWithPrefix = $prefix . " " . $apiKey;
+            $keyWithPrefix = $prefix . ' ' . $apiKey;
         }
 
         return $keyWithPrefix;
@@ -710,36 +704,28 @@ class Configuration
         return [
             [
                 "url" => "https://api.aura-historia.com",
-                "description" => "Aura Historia Production API",
-            ],
+                "description" => "Full Production-Server",
+            ]
         ];
     }
 
     /**
-     * Returns URL based on host settings, index and variables
-     *
-     * @param array      $hostSettings array of host settings, generated from getHostSettings() or equivalent from the API clients
-     * @param int        $hostIndex    index of the host settings
-     * @param array|null $variables    hash of variable and the corresponding value (optional)
-     * @return string URL based on host settings
-     */
-    public static function getHostString(
-        array $hostSettings,
-        $hostIndex,
-        ?array $variables = null,
-    ) {
+    * Returns URL based on host settings, index and variables
+    *
+    * @param array      $hostSettings array of host settings, generated from getHostSettings() or equivalent from the API clients
+    * @param int        $hostIndex    index of the host settings
+    * @param array|null $variables    hash of variable and the corresponding value (optional)
+    * @return string URL based on host settings
+    */
+    public static function getHostString(array $hostSettings, $hostIndex, ?array $variables = null)
+    {
         if (null === $variables) {
             $variables = [];
         }
 
         // check array index out of bound
         if ($hostIndex < 0 || $hostIndex >= count($hostSettings)) {
-            // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Generated configuration exception message includes runtime host selection data.
-            throw new \InvalidArgumentException(
-                "Invalid index $hostIndex when selecting the host. Must be less than " .
-                    count($hostSettings),
-            );
-            // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
+            throw new \InvalidArgumentException("Invalid index $hostIndex when selecting the host. Must be less than ".count($hostSettings));
         }
 
         $host = $hostSettings[$hostIndex];
@@ -747,36 +733,15 @@ class Configuration
 
         // go through variable and assign a value
         foreach ($host["variables"] ?? [] as $name => $variable) {
-            if (array_key_exists($name, $variables)) {
-                // check to see if it's in the variables provided by the user
-                if (
-                    !isset($variable["enum_values"]) ||
-                    in_array($variables[$name], $variable["enum_values"], true)
-                ) {
-                    // check to see if the value is in the enum
-                    $url = str_replace(
-                        "{" . $name . "}",
-                        $variables[$name],
-                        $url,
-                    );
+            if (array_key_exists($name, $variables)) { // check to see if it's in the variables provided by the user
+                if (!isset($variable['enum_values']) || in_array($variables[$name], $variable["enum_values"], true)) { // check to see if the value is in the enum
+                    $url = str_replace("{".$name."}", $variables[$name], $url);
                 } else {
-                    // phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Generated configuration exception message includes runtime host variable diagnostics.
-                    throw new \InvalidArgumentException(
-                        "The variable `$name` in the host URL has invalid value " .
-                            $variables[$name] .
-                            ". Must be " .
-                            join(",", $variable["enum_values"]) .
-                            ".",
-                    );
-                    // phpcs:enable WordPress.Security.EscapeOutput.ExceptionNotEscaped
+                    throw new \InvalidArgumentException("The variable `$name` in the host URL has invalid value ".$variables[$name].". Must be ".join(',', $variable["enum_values"]).".");
                 }
             } else {
                 // use default value
-                $url = str_replace(
-                    "{" . $name . "}",
-                    $variable["default_value"],
-                    $url,
-                );
+                $url = str_replace("{".$name."}", $variable["default_value"], $url);
             }
         }
 
@@ -792,10 +757,6 @@ class Configuration
      */
     public function getHostFromSettings($index, $variables = null)
     {
-        return self::getHostString(
-            $this->getHostSettings(),
-            $index,
-            $variables,
-        );
+        return self::getHostString($this->getHostSettings(), $index, $variables);
     }
 }

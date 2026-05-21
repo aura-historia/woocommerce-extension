@@ -35,7 +35,7 @@ use \AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
  * PutProductData Class Doc Comment
  *
  * @category Class
- * @description Data for upserting a single product via the partner batch-upsert endpoint. Only &#x60;shopsProductId&#x60; is required. All other fields are optional.  - If the product **does not yet exist**, it is created using all provided fields.   Omitting &#x60;title&#x60;, &#x60;url&#x60;, or &#x60;state&#x60; will result in placeholder defaults being applied   internally (empty title, a placeholder URL, and &#x60;LISTED&#x60; state respectively). - If the product **already exists**, only &#x60;state&#x60; and &#x60;price&#x60; are updated; all other   fields are ignored for the update path.  to &#x60;UNKNOWN&#x60; when omitted.
+ * @description Data for upserting a single product via the partner batch-upsert endpoint. Only &#x60;shopsProductId&#x60; is required. All other fields are optional.  During later asynchronous ingestion: - If the product **does not yet exist**, it is created using all provided fields.   Omitting &#x60;title&#x60;, &#x60;url&#x60;, or &#x60;state&#x60; will result in placeholder defaults being applied   internally (empty title, a placeholder URL, and &#x60;LISTED&#x60; state respectively). - If the product **already exists**, only &#x60;state&#x60; and &#x60;price&#x60; are updated; all other   fields are ignored for the update path.  to &#x60;UNKNOWN&#x60; when omitted.
  * @package  AuraHistoria\PartnerConnect\InternalApi
  * @author   OpenAPI Generator team
  * @link     https://openapi-generator.tech

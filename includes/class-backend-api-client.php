@@ -143,8 +143,8 @@ class Backend_Api_Client
      * client, upserting a batch of products for backfill.
      *
      * Using PUT (rather than POST) means re-running the backfill is safe: the
-     * backend detects whether each product is new, changed, or unchanged and
-     * applies the appropriate action.
+     * backend decides during asynchronous ingestion whether each product should
+     * be created, updated, or left unchanged.
      *
      * @param string  $shop_id  Shop UUID.
      * @param string  $api_key  Backend API key.
@@ -179,7 +179,7 @@ class Backend_Api_Client
         }
 
         try {
-            $this->create_products_api($api_key)->putPartnerProducts(
+            $response = $this->create_products_api($api_key)->putPartnerProducts(
                 $shop_id,
                 $products,
             );
@@ -194,6 +194,48 @@ class Backend_Api_Client
             return new WP_Error(
                 "ahpc_backend_request_failed",
                 $this->sanitize_error_fragment($throwable->getMessage()),
+            );
+        }
+
+        if (!is_array($response)) {
+            return new WP_Error(
+                "ahpc_backend_invalid_response",
+                __(
+                    "The backend returned an unexpected response shape.",
+                    "aura-historia-partner-connect",
+                ),
+            );
+        }
+
+        $failed_product_ids = array_values(
+            array_filter(
+                array_map([$this, "sanitize_error_fragment"], $response),
+                static fn($product_id) => '' !== $product_id,
+            ),
+        );
+
+        if (!empty($failed_product_ids)) {
+            $preview = implode(", ", array_slice($failed_product_ids, 0, 5));
+
+            if (count($failed_product_ids) > 5) {
+                $preview .= sprintf(
+                    /* translators: %d: number of omitted product IDs. */
+                    __(" and %d more", "aura-historia-partner-connect"),
+                    count($failed_product_ids) - 5,
+                );
+            }
+
+            return new WP_Error(
+                "ahpc_backend_partial_enqueue_failure",
+                sprintf(
+                    /* translators: %s: comma-separated preview of product IDs that failed to enqueue. */
+                    __(
+                        "The backend accepted the batch, but failed to enqueue some products for asynchronous ingestion: %s",
+                        "aura-historia-partner-connect",
+                    ),
+                    $preview,
+                ),
+                ["failed_product_ids" => $failed_product_ids],
             );
         }
 
