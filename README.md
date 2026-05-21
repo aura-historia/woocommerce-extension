@@ -4,15 +4,54 @@
   <strong>Lean WooCommerce plugin that keeps Aura Historia product webhooks configured, synced, and repairable.</strong>
 </p>
 
+<!-- Primary badges row -->
 <p align="center">
-  <a href="https://aura-historia.com"><img src="https://img.shields.io/badge/Aura%20Historia-Website-8B4513?style=flat" alt="Aura Historia website" /></a>
-  <a href="https://github.com/aura-historia/woocommerce-extension/actions/workflows/integrate.yml"><img src="https://github.com/aura-historia/woocommerce-extension/actions/workflows/integrate.yml/badge.svg" alt="CI" /></a>
-  <img src="https://img.shields.io/badge/WordPress-6.5%2B-21759B?style=flat&logo=wordpress&logoColor=white" alt="WordPress 6.5+" />
-  <img src="https://img.shields.io/badge/WooCommerce-required-96588A?style=flat&logo=woocommerce&logoColor=white" alt="WooCommerce required" />
-  <img src="https://img.shields.io/badge/PHP-8.1%2B-777BB4?style=flat&logo=php&logoColor=white" alt="PHP 8.1+" />
+  <a href="https://aura-historia.com">
+    <img src="https://img.shields.io/badge/Aura%20Historia-Website-8B4513?style=flat" alt="Aura Historia website" />
+  </a>
+
+  <a href="https://github.com/aura-historia/woocommerce-extension/actions/workflows/integrate.yml">
+    <img src="https://github.com/aura-historia/woocommerce-extension/actions/workflows/integrate.yml/badge.svg" alt="CI" />
+  </a>
+
   <img src="https://img.shields.io/badge/License-GPLv2%20or%20later-blue?style=flat" alt="GPLv2 or later" />
 </p>
 
+<!-- Tech requirements row -->
+<p align="center">
+  <img src="https://img.shields.io/badge/WordPress-6.5%2B-21759B?style=flat&logo=wordpress&logoColor=white" alt="WordPress 6.5+" />
+  <img src="https://img.shields.io/badge/WooCommerce-required-96588A?style=flat&logo=woocommerce&logoColor=white" alt="WooCommerce required" />
+  <img src="https://img.shields.io/badge/PHP-8.1%2B-777BB4?style=flat&logo=php&logoColor=white" alt="PHP 8.1+" />
+</p>
+
+<!-- WordPress plugin live stats row -->
+<p align="center">
+  <a href="https://wordpress.org/plugins/aura-historia-partner-connect/">
+    <img src="https://img.shields.io/wordpress/plugin/dd/aura-historia-partner-connect" alt="Downloads" />
+  </a>
+
+  <a href="https://wordpress.org/plugins/aura-historia-partner-connect/">
+    <img src="https://img.shields.io/wordpress/plugin/v/aura-historia-partner-connect" alt="Version" />
+  </a>
+
+  <a href="https://wordpress.org/plugins/aura-historia-partner-connect/">
+    <img src="https://img.shields.io/wordpress/plugin/installs/aura-historia-partner-connect" alt="Active Installs" />
+  </a>
+
+  <a href="https://wordpress.org/plugins/aura-historia-partner-connect/">
+    <img src="https://img.shields.io/wordpress/plugin/rating/aura-historia-partner-connect" alt="Rating" />
+  </a>
+
+  <a href="https://wordpress.org/plugins/aura-historia-partner-connect/">
+    <img src="https://img.shields.io/wordpress/plugin/last-updated/aura-historia-partner-connect" alt="Last Updated" />
+  </a>
+
+  <a href="https://wordpress.org/plugins/aura-historia-partner-connect/">
+    <img src="https://img.shields.io/wordpress/plugin/wp-version/aura-historia-partner-connect" alt="WP Version" />
+  </a>
+</p>
+
+<!-- Logo -->
 <p align="center">
   <img src="https://aura-historia.com/logo-banner.png" alt="Aura Historia" />
 </p>
