@@ -69,15 +69,15 @@ Service endpoints:
 
 Service provider and policies:
 
-* Website: https://aura-historia.com
-* Privacy policy: https://aura-historia.com/privacy
-* Terms and conditions: https://aura-historia.com/terms-and-conditions
-* Imprint / contact: https://aura-historia.com/imprint
+* [Website](https://aura-historia.com)
+* [Privacy Policy](https://aura-historia.com/privacy)
+* [Terms and conditions](https://aura-historia.com/terms-and-conditions)
+* [Imprint](https://aura-historia.com/imprint)
 
 == Installation ==
 
 1. Install and activate WooCommerce.
-2. Install Aura Historia Partner Connect from a release ZIP or upload it to `/wp-content/plugins/`.
+2. Install Aura Historia Partner Connect via the WordPress Plugin Directory.
 3. Activate the plugin.
 4. Go to `WooCommerce > Aura Historia`.
 5. Enter the Shop ID from Aura Historia for this store.
