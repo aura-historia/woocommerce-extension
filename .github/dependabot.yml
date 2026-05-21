@@ -25,3 +25,10 @@ updates:
       timezone: Europe/Berlin
     cooldown:
       default-days: 1
+    groups:
+      guzzlehttp:
+        patterns:
+          - "guzzlehttp/*"
+      ext:
+        patterns:
+          - "ext-*"
