@@ -27,7 +27,7 @@
 <!-- WordPress plugin live stats row -->
 <p align="center">
   <a href="https://wordpress.org/plugins/aura-historia-partner-connect/">
-    <img src="https://img.shields.io/wordpress/plugin/dd/aura-historia-partner-connect" alt="Downloads" />
+    <img src="https://img.shields.io/wordpress/plugin/dt/aura-historia-partner-connect" alt="Downloads" />
   </a>
 
   <a href="https://wordpress.org/plugins/aura-historia-partner-connect/">
