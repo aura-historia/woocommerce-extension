@@ -69,6 +69,7 @@ class GetShopData implements ModelInterface, ArrayAccess, \JsonSerializable
         'woocommerce_currency' => '\AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData',
         'woocommerce_language' => '\AuraHistoria\PartnerConnect\InternalApi\Model\LanguageData',
         'url' => 'string',
+        'view_url' => 'string',
         'image' => 'string',
         'structured_address' => '\AuraHistoria\PartnerConnect\InternalApi\Model\StructuredAddressData',
         'geo_address' => '\AuraHistoria\PartnerConnect\InternalApi\Model\GeoAddressData',
@@ -98,6 +99,7 @@ class GetShopData implements ModelInterface, ArrayAccess, \JsonSerializable
         'woocommerce_currency' => null,
         'woocommerce_language' => null,
         'url' => 'uri',
+        'view_url' => 'uri',
         'image' => 'uri',
         'structured_address' => null,
         'geo_address' => null,
@@ -125,6 +127,7 @@ class GetShopData implements ModelInterface, ArrayAccess, \JsonSerializable
         'woocommerce_currency' => true,
         'woocommerce_language' => true,
         'url' => true,
+        'view_url' => true,
         'image' => true,
         'structured_address' => false,
         'geo_address' => false,
@@ -232,6 +235,7 @@ class GetShopData implements ModelInterface, ArrayAccess, \JsonSerializable
         'woocommerce_currency' => 'woocommerceCurrency',
         'woocommerce_language' => 'woocommerceLanguage',
         'url' => 'url',
+        'view_url' => 'viewUrl',
         'image' => 'image',
         'structured_address' => 'structuredAddress',
         'geo_address' => 'geoAddress',
@@ -259,6 +263,7 @@ class GetShopData implements ModelInterface, ArrayAccess, \JsonSerializable
         'woocommerce_currency' => 'setWoocommerceCurrency',
         'woocommerce_language' => 'setWoocommerceLanguage',
         'url' => 'setUrl',
+        'view_url' => 'setViewUrl',
         'image' => 'setImage',
         'structured_address' => 'setStructuredAddress',
         'geo_address' => 'setGeoAddress',
@@ -286,6 +291,7 @@ class GetShopData implements ModelInterface, ArrayAccess, \JsonSerializable
         'woocommerce_currency' => 'getWoocommerceCurrency',
         'woocommerce_language' => 'getWoocommerceLanguage',
         'url' => 'getUrl',
+        'view_url' => 'getViewUrl',
         'image' => 'getImage',
         'structured_address' => 'getStructuredAddress',
         'geo_address' => 'getGeoAddress',
@@ -364,6 +370,7 @@ class GetShopData implements ModelInterface, ArrayAccess, \JsonSerializable
         $this->setIfExists('woocommerce_currency', $data ?? [], null);
         $this->setIfExists('woocommerce_language', $data ?? [], null);
         $this->setIfExists('url', $data ?? [], null);
+        $this->setIfExists('view_url', $data ?? [], null);
         $this->setIfExists('image', $data ?? [], null);
         $this->setIfExists('structured_address', $data ?? [], null);
         $this->setIfExists('geo_address', $data ?? [], null);
@@ -790,7 +797,7 @@ class GetShopData implements ModelInterface, ArrayAccess, \JsonSerializable
     /**
      * Sets url
      *
-     * @param string|null $url Optional primary URL of the shop website. Read responses may include backend-managed UTM tracking parameters.
+     * @param string|null $url Optional primary URL of the shop website.
      *
      * @return self
      */
@@ -807,6 +814,40 @@ class GetShopData implements ModelInterface, ArrayAccess, \JsonSerializable
             }
         }
         $this->container['url'] = $url;
+
+        return $this;
+    }
+
+    /**
+     * Gets view_url
+     *
+     * @return string|null
+     */
+    public function getViewUrl()
+    {
+        return $this->container['view_url'];
+    }
+
+    /**
+     * Sets view_url
+     *
+     * @param string|null $view_url Optional tracked or affiliate URL derived from `url` for user-facing navigation. When the shop has a primary `url`, the backend may populate this field with either Aura Historia tracking parameters or an affiliate-link target.
+     *
+     * @return self
+     */
+    public function setViewUrl($view_url)
+    {
+        if (is_null($view_url)) {
+            array_push($this->openAPINullablesSetToNull, 'view_url');
+        } else {
+            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
+            $index = array_search('view_url', $nullablesSetToNull);
+            if ($index !== FALSE) {
+                unset($nullablesSetToNull[$index]);
+                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
+            }
+        }
+        $this->container['view_url'] = $view_url;
 
         return $this;
     }
