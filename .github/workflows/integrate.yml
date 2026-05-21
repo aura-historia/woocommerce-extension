@@ -131,6 +131,10 @@ jobs:
             wordpress: "WordPress/WordPress#6.9.4"
             woocommerce: "https://downloads.wordpress.org/plugin/woocommerce.latest-stable.zip"
             label: "PHP 8.5 / WP 6.9 / WC latest"
+          - php: "8.5"
+            wordpress: "WordPress/WordPress#7.0"
+            woocommerce: "https://downloads.wordpress.org/plugin/woocommerce.latest-stable.zip"
+            label: "PHP 8.5 / WP 7 / WC latest"
     env:
       WP_ENV_PHP_VERSION: ${{ matrix.php }}
 
