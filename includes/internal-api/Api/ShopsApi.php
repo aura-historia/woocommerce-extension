@@ -25,6 +25,8 @@
  * Do not edit the class manually.
  */
 
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped, WordPress.WP.AlternativeFunctions.file_system_operations_fopen
+
 namespace AuraHistoria\PartnerConnect\InternalApi\Api;
 
 use GuzzleHttp\Client;

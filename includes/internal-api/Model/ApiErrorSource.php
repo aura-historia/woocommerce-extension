@@ -26,6 +26,8 @@
  * Do not edit the class manually.
  */
 
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
+
 namespace AuraHistoria\PartnerConnect\InternalApi\Model;
 
 use \ArrayAccess;
@@ -484,5 +486,4 @@ class ApiErrorSource implements ModelInterface, ArrayAccess, \JsonSerializable
         return json_encode(ObjectSerializer::sanitizeForSerialization($this));
     }
 }
-
 

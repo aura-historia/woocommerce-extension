@@ -26,6 +26,8 @@
  * Do not edit the class manually.
  */
 
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
+
 namespace AuraHistoria\PartnerConnect\InternalApi;
 
 use GuzzleHttp\Psr7\Utils;

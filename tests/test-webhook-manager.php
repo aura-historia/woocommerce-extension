@@ -971,6 +971,10 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $product->set_status("publish");
         $product->save();
 
+        $this->set_backend_mock_responses([
+            new Response(202, ["Content-Type" => "application/json"], "[]"),
+        ]);
+
         $backfill = new Product_Backfill();
         $backfill->process_batch($shop_id, 1);
 

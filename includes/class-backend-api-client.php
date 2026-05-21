@@ -228,6 +228,7 @@ class Backend_Api_Client
             return new WP_Error(
                 "ahpc_backend_partial_enqueue_failure",
                 sprintf(
+                    /* translators: %s: comma-separated preview of product IDs that failed to enqueue. */
                     __(
                         "The backend accepted the batch, but failed to enqueue some products for asynchronous ingestion: %s",
                         "aura-historia-partner-connect",
