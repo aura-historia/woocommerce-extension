@@ -20,6 +20,18 @@ module.exports = {
 	wpEnvBinary,
 };
 
+/**
+ * Runs a `wp-env run tests-cli ...` command and retries only when wp-env
+ * reports the transient "Environment not initialized" startup race.
+ *
+ * @param {string[]} commandArgs Arguments passed after `wp-env run tests-cli`.
+ * @param {Object} [options] Spawn options for the underlying command.
+ * @param {BufferEncoding} [options.encoding='utf8'] String encoding for output.
+ * @param {number} [options.maxBuffer] Max stdout/stderr buffer size.
+ * @return {import('node:child_process').SpawnSyncReturns<string>} The final
+ * spawnSync result, whether from a success, a non-retryable failure, or the
+ * last retry attempt.
+ */
 function runWpEnvTestsCli(commandArgs, options = {}) {
 	const {
 		encoding = 'utf8',
@@ -68,6 +80,12 @@ function shouldRetry( result ) {
 	);
 }
 
+/**
+ * Sleeps synchronously between retry attempts so spawnSync-based callers can
+ * keep their current control flow without a busy wait or Atomics.wait.
+ *
+ * @param {number} milliseconds Delay length.
+ */
 function sleep( milliseconds ) {
 	// These callers use spawnSync and need a synchronous pause between retries
 	// without a CPU-heavy busy wait or SharedArrayBuffer-dependent Atomics.wait.
