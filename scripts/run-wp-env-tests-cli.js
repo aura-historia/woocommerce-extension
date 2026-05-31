@@ -69,5 +69,9 @@ function shouldRetry( result ) {
 }
 
 function sleep( milliseconds ) {
-	Atomics.wait( new Int32Array( new SharedArrayBuffer( 4 ) ), 0, 0, milliseconds );
+	const endTime = Date.now() + milliseconds;
+
+	while ( Date.now() < endTime ) {
+		// Keep waiting.
+	}
 }

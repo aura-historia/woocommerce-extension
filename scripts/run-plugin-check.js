@@ -173,7 +173,6 @@ function ensurePluginCheckInstalled() {
 
 function runWpEnvCommand(commandArgs, { allowFailure = false } = {}) {
 	const result = runWpEnvTestsCli(commandArgs, {
-		allowFailure,
 		encoding: 'utf8',
 		maxBuffer: 20 * 1024 * 1024,
 	});
