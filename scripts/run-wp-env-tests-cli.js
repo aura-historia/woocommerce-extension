@@ -69,9 +69,8 @@ function shouldRetry( result ) {
 }
 
 function sleep( milliseconds ) {
-	const endTime = Date.now() + milliseconds;
-
-	while ( Date.now() < endTime ) {
-		// Keep waiting.
-	}
+	spawnSync( process.execPath, [
+		'-e',
+		`setTimeout( () => {}, ${ milliseconds } )`,
+	] );
 }
