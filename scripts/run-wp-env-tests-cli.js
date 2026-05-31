@@ -69,6 +69,8 @@ function shouldRetry( result ) {
 }
 
 function sleep( milliseconds ) {
+	// These callers use spawnSync and need a synchronous pause between retries
+	// without a CPU-heavy busy wait or SharedArrayBuffer-dependent Atomics.wait.
 	spawnSync( process.execPath, [
 		'-e',
 		`setTimeout( () => {}, ${ milliseconds } )`,
