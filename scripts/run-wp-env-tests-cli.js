@@ -13,6 +13,8 @@ const envCwd = `wp-content/plugins/${projectDir}`;
 const ENVIRONMENT_NOT_INITIALIZED = 'Environment not initialized';
 const RETRY_COUNT = 12;
 const RETRY_DELAY_MS = 5000;
+const wpEnvConfig = process.env.AHPC_WP_ENV_CONFIG;
+const wpEnvContainer = process.env.AHPC_WP_ENV_CONTAINER || 'tests-cli';
 
 module.exports = {
 	envCwd,
@@ -46,9 +48,17 @@ function runWpEnvTestsCli(commandArgs, options = {}) {
 	let result;
 
 	for ( let attempt = 1; attempt <= RETRY_COUNT; attempt++ ) {
+		const wpEnvArgs = [ 'run', wpEnvContainer ];
+
+		if ( wpEnvConfig ) {
+			wpEnvArgs.push( `--config=${ wpEnvConfig }` );
+		}
+
+		wpEnvArgs.push( `--env-cwd=${ envCwd }`, ...commandArgs );
+
 		result = spawnSync(
 			wpEnvBinary,
-			[ 'run', 'tests-cli', `--env-cwd=${ envCwd }`, ...commandArgs ],
+			wpEnvArgs,
 			spawnOptions
 		);
 
@@ -64,7 +74,7 @@ function runWpEnvTestsCli(commandArgs, options = {}) {
 		}
 
 		process.stderr.write(
-			`wp-env test environment is still initializing (attempt ${ attempt }/${ RETRY_COUNT }). Retrying in ${ RETRY_DELAY_MS / 1000 }s...\n`
+			`wp-env environment is still initializing (attempt ${ attempt }/${ RETRY_COUNT }). Retrying in ${ RETRY_DELAY_MS / 1000 }s...\n`
 		);
 		sleep( RETRY_DELAY_MS );
 	}

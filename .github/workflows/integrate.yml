@@ -47,6 +47,8 @@ jobs:
     needs: php-lint
     timeout-minutes: 25
     env:
+      AHPC_WP_ENV_CONFIG: ".wp-env.test.json"
+      AHPC_WP_ENV_CONTAINER: "cli"
       WP_ENV_PHP_VERSION: "8.4"
 
     steps:
@@ -70,7 +72,7 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      - name: Configure environment versions
+      - name: Configure test environment versions
         env:
           WP_CORE: "WordPress/WordPress#6.9.4"
           WC_ZIP: "https://downloads.wordpress.org/plugin/woocommerce.latest-stable.zip"
@@ -81,14 +83,14 @@ jobs:
               'core': os.environ['WP_CORE'],
               'plugins': [os.environ['WC_ZIP'], '.'],
           }
-          with open('.wp-env.override.json', 'w') as f:
+          with open('.wp-env.test.override.json', 'w') as f:
               json.dump(config, f, indent=2)
-          print('Wrote .wp-env.override.json:')
+          print('Wrote .wp-env.test.override.json:')
           print(json.dumps(config, indent=2))
           "
 
-      - name: Start WordPress environment
-        run: npm run env:start
+      - name: Start wp-env test environment
+        run: npx --no-install wp-env start --config=.wp-env.test.json
 
       - name: Run Plugin Check (PCP)
         run: npm run plugin:check
@@ -96,11 +98,11 @@ jobs:
       - name: Print wp-env logs on failure
         if: failure()
         timeout-minutes: 2
-        run: npm run env:logs -- --no-follow || true
+        run: npx --no-install wp-env logs --config=.wp-env.test.json --no-follow || true
 
       - name: Destroy wp-env environment
         if: always()
-        run: npm run env:destroy || true
+        run: npx --no-install wp-env destroy --config=.wp-env.test.json || true
 
   integration-tests:
     name: Integration tests (${{ matrix.label }})
@@ -136,6 +138,8 @@ jobs:
             woocommerce: "https://downloads.wordpress.org/plugin/woocommerce.latest-stable.zip"
             label: "PHP 8.5 / WP 7 / WC latest"
     env:
+      AHPC_WP_ENV_CONFIG: ".wp-env.test.json"
+      AHPC_WP_ENV_CONTAINER: "cli"
       WP_ENV_PHP_VERSION: ${{ matrix.php }}
 
     steps:
@@ -151,7 +155,7 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      - name: Configure environment versions
+      - name: Configure test environment versions
         env:
           WP_CORE: ${{ matrix.wordpress }}
           WC_ZIP: ${{ matrix.woocommerce }}
@@ -162,14 +166,14 @@ jobs:
               'core': os.environ['WP_CORE'],
               'plugins': [os.environ['WC_ZIP'], '.'],
           }
-          with open('.wp-env.override.json', 'w') as f:
+          with open('.wp-env.test.override.json', 'w') as f:
               json.dump(config, f, indent=2)
-          print('Wrote .wp-env.override.json:')
+          print('Wrote .wp-env.test.override.json:')
           print(json.dumps(config, indent=2))
           "
 
-      - name: Start WordPress environment
-        run: npm run env:start
+      - name: Start wp-env test environment
+        run: npx --no-install wp-env start --config=.wp-env.test.json
 
       - name: Run plugin integration tests
         run: npm test
@@ -177,8 +181,8 @@ jobs:
       - name: Print wp-env logs on failure
         if: failure()
         timeout-minutes: 2
-        run: npm run env:logs -- --no-follow || true
+        run: npx --no-install wp-env logs --config=.wp-env.test.json --no-follow || true
 
       - name: Destroy wp-env environment
         if: always()
-        run: npm run env:destroy || true
+        run: npx --no-install wp-env destroy --config=.wp-env.test.json || true
