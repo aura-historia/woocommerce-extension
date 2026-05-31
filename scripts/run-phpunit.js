@@ -1,24 +1,8 @@
-const { spawnSync } = require('node:child_process');
-const path = require('node:path');
+const { runWpEnvTestsCli } = require('./run-wp-env-tests-cli');
 
-const pluginDir = path.basename(process.cwd());
-const wpEnvBinary = path.join(
-	process.cwd(),
-	'node_modules',
-	'.bin',
-	process.platform === 'win32' ? 'wp-env.cmd' : 'wp-env'
-);
-
-const result = spawnSync(
-	wpEnvBinary,
-	[
-		'run',
-		'tests-cli',
-		`--env-cwd=wp-content/plugins/${pluginDir}`,
-		'vendor/bin/phpunit',
-	],
-	{ encoding: 'utf8' }
-);
+const result = runWpEnvTestsCli( [ 'vendor/bin/phpunit' ], {
+	encoding: 'utf8',
+} );
 
 if ( result.stdout ) {
 	process.stdout.write(result.stdout);

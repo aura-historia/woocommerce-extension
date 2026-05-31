@@ -1,18 +1,15 @@
-const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const {
+	envCwd,
+	runWpEnvTestsCli,
+	wpEnvBinary,
+} = require('./run-wp-env-tests-cli');
 
 const projectRoot = process.cwd();
 const projectDir = path.basename(projectRoot);
 const targetPath = process.argv[2];
 const pluginCheckPackage = process.env.AHPC_PLUGIN_CHECK_PACKAGE || 'plugin-check';
-const wpEnvBinary = path.join(
-	projectRoot,
-	'node_modules',
-	'.bin',
-	process.platform === 'win32' ? 'wp-env.cmd' : 'wp-env'
-);
-const envCwd = `wp-content/plugins/${projectDir}`;
 const pluginCheckRequirePath = '../plugin-check/cli.php';
 const pluginCheckFields = [
 	'file',
@@ -175,14 +172,11 @@ function ensurePluginCheckInstalled() {
 }
 
 function runWpEnvCommand(commandArgs, { allowFailure = false } = {}) {
-	const result = spawnSync(
-		wpEnvBinary,
-		['run', 'tests-cli', `--env-cwd=${envCwd}`, ...commandArgs],
-		{
-			encoding: 'utf8',
-			maxBuffer: 20 * 1024 * 1024,
-		}
-	);
+	const result = runWpEnvTestsCli(commandArgs, {
+		allowFailure,
+		encoding: 'utf8',
+		maxBuffer: 20 * 1024 * 1024,
+	});
 
 	if (result.error) {
 		fail(result.error.message);
