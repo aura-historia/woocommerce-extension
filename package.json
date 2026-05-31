@@ -3,8 +3,8 @@
   "private": true,
   "license": "GPL-2.0-or-later",
   "scripts": {
-    "env:start": "wp-env start",
-    "env:update": "wp-env start --update",
+    "env:start": "node scripts/start-wp-env.js",
+    "env:update": "node scripts/start-wp-env.js --update",
     "env:stop": "wp-env stop",
     "env:reset": "wp-env reset all",
     "env:destroy": "node scripts/destroy-wp-env.js",
