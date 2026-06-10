@@ -62,13 +62,13 @@ class Backend_Api_Client
      * Calls `PATCH /api/v1/shops/{shopId}` using the generated OpenAPI client.
      *
      * @param string        $shop_id      Shop UUID.
-     * @param string        $api_key      Aura Historia access token.
+     * @param string        $access_token Aura Historia access token.
      * @param PatchShopData $request_body Typed request payload.
      * @return GetShopData|WP_Error
      */
     public function patch_shop_by_id(
         $shop_id,
-        $api_key,
+        $access_token,
         PatchShopData $request_body,
     ) {
         $shop_id = Webhook_Manager::normalize_shop_id($shop_id);
@@ -97,7 +97,7 @@ class Backend_Api_Client
         }
 
         try {
-            $response = $this->create_shops_api($api_key)->patchShopById(
+            $response = $this->create_shops_api($access_token)->patchShopById(
                 $shop_id,
                 $request_body,
             );
@@ -132,12 +132,12 @@ class Backend_Api_Client
      * Performs a lightweight connection check with an empty JSON object body.
      *
      * @param string $shop_id Shop UUID.
-     * @param string $api_key Aura Historia access token.
+     * @param string $access_token Aura Historia access token.
      * @return GetShopData|WP_Error
      */
-    public function verify_shop_connection($shop_id, $api_key)
+    public function verify_shop_connection($shop_id, $access_token)
     {
-        return $this->patch_shop_by_id($shop_id, $api_key, new PatchShopData());
+        return $this->patch_shop_by_id($shop_id, $access_token, new PatchShopData());
     }
 
     /**
@@ -149,11 +149,11 @@ class Backend_Api_Client
      * applies the appropriate action.
      *
      * @param string  $shop_id  Shop UUID.
-     * @param string  $api_key  Aura Historia access token.
+     * @param string  $access_token Aura Historia access token.
      * @param array[] $products Array of strict partner product objects matching the backend PutProductData schema.
      * @return true|WP_Error
      */
-    public function put_shop_products($shop_id, $api_key, array $products)
+    public function put_shop_products($shop_id, $access_token, array $products)
     {
         $shop_id = Webhook_Manager::normalize_shop_id($shop_id);
 
@@ -182,7 +182,7 @@ class Backend_Api_Client
 
         try {
             $failed_product_ids = $this->create_products_api(
-                $api_key,
+                $access_token,
             )->putPartnerProducts($shop_id, $products);
         } catch (ApiException $exception) {
             return $this->translate_api_exception($exception);
@@ -298,28 +298,28 @@ class Backend_Api_Client
     /**
      * Creates the generated `ShopsApi` client.
      *
-     * @param string $api_key Aura Historia access token.
+     * @param string $access_token Aura Historia access token.
      * @return ShopsApi
      */
-    private function create_shops_api($api_key)
+    private function create_shops_api($access_token)
     {
         return new ShopsApi(
             $this->create_http_client(),
-            $this->create_configuration($api_key),
+            $this->create_configuration($access_token),
         );
     }
 
     /**
      * Creates the generated `ProductsApi` client.
      *
-     * @param string $api_key Aura Historia access token.
+     * @param string $access_token Aura Historia access token.
      * @return ProductsApi
      */
-    private function create_products_api($api_key)
+    private function create_products_api($access_token)
     {
         return new ProductsApi(
             $this->create_http_client(),
-            $this->create_configuration($api_key),
+            $this->create_configuration($access_token),
         );
     }
 

@@ -129,7 +129,7 @@ class Plugin
         ]);
         add_filter(
             "http_request_args",
-            [$this, "maybe_add_webhook_api_key_header"],
+            [$this, "maybe_add_webhook_access_token_header"],
             10,
             2,
         );
@@ -292,8 +292,10 @@ class Plugin
             "shop_id" => Webhook_Manager::normalize_shop_id(
                 $current["shop_id"],
             ),
-            "api_key" => Webhook_Manager::normalize_api_key(
-                $current["api_key"],
+            "access_token" => Webhook_Manager::normalize_access_token(
+                isset($current["access_token"])
+                    ? $current["access_token"]
+                    : (isset($current["api_key"]) ? $current["api_key"] : ""),
             ),
             "secret" => !empty($current["secret"])
                 ? sanitize_text_field((string) $current["secret"])
@@ -323,19 +325,22 @@ class Plugin
                 }
             }
 
-            if (array_key_exists("api_key", $input)) {
-                $api_key = Webhook_Manager::normalize_api_key(
-                    wp_unslash($input["api_key"]),
+            if (array_key_exists("access_token", $input) || array_key_exists("api_key", $input)) {
+                $raw_access_token = array_key_exists("access_token", $input)
+                    ? $input["access_token"]
+                    : $input["api_key"];
+                $access_token = Webhook_Manager::normalize_access_token(
+                    wp_unslash($raw_access_token),
                 );
 
-                if ("" === $api_key) {
-                    $sanitized["api_key"] = "";
-                } elseif (Webhook_Manager::is_valid_api_key($api_key)) {
-                    $sanitized["api_key"] = $api_key;
+                if ("" === $access_token) {
+                    $sanitized["access_token"] = "";
+                } elseif (Webhook_Manager::is_valid_access_token($access_token)) {
+                    $sanitized["access_token"] = $access_token;
                 } else {
                     add_settings_error(
                         Webhook_Manager::OPTION_SETTINGS,
-                        "ahpc_invalid_api_key",
+                        "ahpc_invalid_access_token",
                         __(
                             "The stored Aura Historia access token doesn't look right. Reconnect this store and try once more.",
                             "aura-historia-partner-connect",
@@ -365,7 +370,7 @@ class Plugin
      * @param string $url  Request URL.
      * @return array
      */
-    public function maybe_add_webhook_api_key_header($args, $url)
+    public function maybe_add_webhook_access_token_header($args, $url)
     {
         if (!$this->manager instanceof Webhook_Manager) {
             return $args;
@@ -375,7 +380,7 @@ class Plugin
 
         if (
             !Webhook_Manager::is_valid_shop_id($settings["shop_id"]) ||
-            !Webhook_Manager::is_valid_api_key($settings["api_key"])
+            !Webhook_Manager::is_valid_access_token($settings["access_token"])
         ) {
             return $args;
         }
@@ -405,7 +410,7 @@ class Plugin
         }
 
         if (!$this->has_request_header($args, "x-api-key")) {
-            $args["headers"]["x-api-key"] = $settings["api_key"];
+            $args["headers"]["x-api-key"] = $settings["access_token"];
         }
 
         return $args;
@@ -754,7 +759,7 @@ class Plugin
             );
         }
 
-        $access_token = Webhook_Manager::normalize_api_key(
+        $access_token = Webhook_Manager::normalize_access_token(
             $token_response->getAccessToken(),
         );
         $token_type = strtoupper(
@@ -772,7 +777,7 @@ class Plugin
             );
         }
 
-        if (!Webhook_Manager::is_valid_api_key($access_token)) {
+        if (!Webhook_Manager::is_valid_access_token($access_token)) {
             return new WP_Error(
                 "ahpc_oauth_invalid_access_token",
                 __(
@@ -794,7 +799,8 @@ class Plugin
 
         $settings = $this->get_current_settings();
         $settings["shop_id"] = $shop_id;
-        $settings["api_key"] = $access_token;
+        $settings["access_token"] = $access_token;
+        unset($settings["api_key"]);
 
         if (empty($settings["secret"])) {
             $settings["secret"] = Webhook_Manager::generate_secret();
@@ -946,7 +952,7 @@ class Plugin
 
         if (
             !Webhook_Manager::is_valid_shop_id($settings["shop_id"]) ||
-            !Webhook_Manager::is_valid_api_key($settings["api_key"])
+            !Webhook_Manager::is_valid_access_token($settings["access_token"])
         ) {
             return new WP_Error(
                 "ahpc_backfill_invalid_settings",
@@ -1109,7 +1115,7 @@ class Plugin
         );
         $is_connected =
             Webhook_Manager::is_valid_shop_id($settings["shop_id"]) &&
-            Webhook_Manager::is_valid_api_key($settings["api_key"]);
+            Webhook_Manager::is_valid_access_token($settings["access_token"]);
         $should_auto_start_oauth =
             $this->is_woocommerce_available() &&
             !$is_connected &&
@@ -1336,7 +1342,7 @@ class Plugin
              ? esc_html__("Stored", "aura-historia-partner-connect")
              : esc_html__("Not stored", "aura-historia-partner-connect"); ?></strong>
 							<p class="description"><?php echo esc_html__(
-            "The token is saved locally for webhook delivery and product backfill requests, but it is hidden from administrators after OAuth completes.",
+            "The access token is saved locally for webhook delivery and product backfill requests, but it is hidden from administrators after OAuth completes.",
             "aura-historia-partner-connect",
         ); ?></p>
 						</td>
@@ -1545,7 +1551,7 @@ class Plugin
 
         if (
             !Webhook_Manager::is_valid_shop_id($settings["shop_id"]) ||
-            !Webhook_Manager::is_valid_api_key($settings["api_key"])
+            !Webhook_Manager::is_valid_access_token($settings["access_token"])
         ) {
             return [
                 "type" => "warning",
@@ -1831,7 +1837,7 @@ class Plugin
 
         if (
             !Webhook_Manager::is_valid_shop_id($settings["shop_id"]) ||
-            !Webhook_Manager::is_valid_api_key($settings["api_key"])
+            !Webhook_Manager::is_valid_access_token($settings["access_token"])
         ) {
             return [
                 "label" => __("Not queued", "aura-historia-partner-connect"),
@@ -1955,17 +1961,27 @@ class Plugin
             $settings,
             Webhook_Manager::default_settings(),
         );
+        $needs_migration = isset($settings["api_key"]);
 
         if (empty($settings["secret"])) {
             $settings["secret"] = Webhook_Manager::generate_secret();
+            $needs_migration = true;
         }
 
         $settings["shop_id"] = Webhook_Manager::normalize_shop_id(
             $settings["shop_id"],
         );
-        $settings["api_key"] = Webhook_Manager::normalize_api_key(
-            $settings["api_key"],
-        );
+        $legacy_access_token = isset($settings["api_key"])
+            ? Webhook_Manager::normalize_access_token($settings["api_key"])
+            : "";
+        $settings["access_token"] = isset($settings["access_token"])
+            ? Webhook_Manager::normalize_access_token($settings["access_token"])
+            : $legacy_access_token;
+
+        if ($needs_migration) {
+            unset($settings["api_key"]);
+            update_option(Webhook_Manager::OPTION_SETTINGS, $settings, false);
+        }
         $settings["secret"] = sanitize_text_field((string) $settings["secret"]);
 
         return $settings;

@@ -56,7 +56,7 @@ Data sent to the service may include:
 
 * Shop ID
 * Aura Historia access token in the bearer `Authorization` header for backend API calls
-* Aura Historia access token in the `x-api-key` header for WooCommerce webhook deliveries
+* Aura Historia access token in the webhook `x-api-key` header for WooCommerce deliveries
 * generated WooCommerce webhook secret
 * store language and currency
 * product webhook payloads for `product.created`, `product.updated`, and `product.deleted`

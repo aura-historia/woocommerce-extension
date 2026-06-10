@@ -37,7 +37,7 @@ Managed webhook topics:
 - starts an OAuth connection flow from the settings page instead of asking merchants to paste credentials
 - exchanges the OAuth broker code for an Aura Historia access token and stores it locally
 - sends the generated secret to Aura Historia before activating delivery
-- injects `x-api-key` late in the WordPress HTTP stack for outgoing webhook deliveries
+- injects the access token into the `x-api-key` webhook header late in the WordPress HTTP stack
 - can backfill the current catalog in the background after a successful connection
 - pauses plugin-owned webhooks on deactivation
 - removes plugin-owned webhooks and plugin options on uninstall
@@ -84,7 +84,7 @@ Depending on the action, the plugin may send:
 
 - Shop ID
 - Aura Historia access token in the bearer `Authorization` header for backend API calls
-- Aura Historia access token in the `x-api-key` header for WooCommerce webhook deliveries
+- Aura Historia access token in the webhook `x-api-key` header for WooCommerce deliveries
 - generated WooCommerce webhook secret
 - store language and currency
 - WooCommerce product webhook payloads
@@ -239,7 +239,7 @@ Coverage focuses on the plugin's main contract, including:
 - managed webhook creation
 - backend secret registration
 - OAuth connection and callback handling
-- bearer `Authorization` and webhook `x-api-key` header handling
+- bearer `Authorization` and webhook access token header handling
 - idempotent updates without duplicates
 - pause/delete cleanup
 - drift recovery
