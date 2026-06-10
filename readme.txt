@@ -65,7 +65,7 @@ Data sent to the service may include:
 Service endpoints:
 
 * `GET https://aura-historia.com/oauth/authorize`
-* `GET https://aura-historia.com/api/oauth/client/redirect-broker`
+* `GET https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce`
 * `GET https://api.aura-historia.com/api/v1/oauth/tokens/by-third-party-code/{thirdPartyCode}`
 * `PATCH https://api.aura-historia.com/api/v1/shops/{shopId}`
 * `POST https://api.aura-historia.com/api/v1/webhooks/woocommerce/{shopId}`

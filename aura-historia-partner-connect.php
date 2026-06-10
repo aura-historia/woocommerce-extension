@@ -69,7 +69,7 @@ if (!defined("AHPC_OAUTH_BROKER_REDIRECT_URI")) {
         $ahpc_env_oauth_broker_redirect_uri !== false &&
         $ahpc_env_oauth_broker_redirect_uri !== ""
             ? $ahpc_env_oauth_broker_redirect_uri
-            : "https://aura-historia.com/api/oauth/client/redirect-broker",
+            : "https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce",
     );
     unset($ahpc_env_oauth_broker_redirect_uri);
 }

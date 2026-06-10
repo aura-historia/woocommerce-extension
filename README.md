@@ -139,7 +139,7 @@ Depending on the action, the plugin may send:
 ### Service endpoints
 
 - `GET https://aura-historia.com/oauth/authorize`
-- `GET https://aura-historia.com/api/oauth/client/redirect-broker`
+- `GET https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce`
 - `GET https://api.aura-historia.com/api/v1/oauth/tokens/by-third-party-code/{thirdPartyCode}`
 - `PATCH https://api.aura-historia.com/api/v1/shops/{shopId}`
 - `POST https://api.aura-historia.com/api/v1/webhooks/woocommerce/{shopId}`
@@ -204,7 +204,7 @@ Tests can also override the URL via the `ahpc_backend_base_url` filter.
 The distributed plugin defaults to the production Aura Historia OAuth client and broker redirect URI:
 
 - client ID: `019eb0ab-c08d-7212-8169-312d465e4210`
-- broker redirect URI: `https://aura-historia.com/api/oauth/client/redirect-broker`
+- broker redirect URI: `https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce`
 
 For staging, local development, or custom test environments, override these before the plugin runs.
 
@@ -212,14 +212,14 @@ Using `wp-config.php`:
 
 ```php
 define( 'AHPC_OAUTH_CLIENT_ID', '01970f22-2bf0-7000-8000-000000000010' );
-define( 'AHPC_OAUTH_BROKER_REDIRECT_URI', 'https://app.dev.example/api/oauth/client/redirect-broker' );
+define( 'AHPC_OAUTH_BROKER_REDIRECT_URI', 'https://app.dev.example/api/oauth/client/redirect-broker/woocommerce' );
 ```
 
 Using server-level environment variables:
 
 ```sh
 AHPC_OAUTH_CLIENT_ID=01970f22-2bf0-7000-8000-000000000010
-AHPC_OAUTH_BROKER_REDIRECT_URI=https://app.dev.example/api/oauth/client/redirect-broker
+AHPC_OAUTH_BROKER_REDIRECT_URI=https://app.dev.example/api/oauth/client/redirect-broker/woocommerce
 ```
 
 Tests can also override these values via the `ahpc_oauth_client_id` and `ahpc_oauth_broker_redirect_uri` filters.

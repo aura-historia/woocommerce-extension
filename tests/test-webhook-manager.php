@@ -75,7 +75,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
      * @var string
      */
     protected $oauth_broker_redirect_uri =
-        "https://auth.example/api/oauth/client/redirect-broker";
+        "https://auth.example/api/oauth/client/redirect-broker/woocommerce";
 
     /**
      * OAuth client ID used by tests.
