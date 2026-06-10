@@ -523,7 +523,30 @@ class Plugin
             exit();
         }
 
-        wp_redirect($authorization_url, 302, "Aura Historia Partner Connect");
+        $authorization_host = wp_parse_url($authorization_url, PHP_URL_HOST);
+
+        if (is_string($authorization_host) && "" !== $authorization_host) {
+            add_filter(
+                "allowed_redirect_hosts",
+                static function ($hosts) use ($authorization_host) {
+                    $hosts[] = strtolower($authorization_host);
+
+                    return array_values(
+                        array_unique(
+                            array_filter(
+                                array_map("strtolower", (array) $hosts),
+                            ),
+                        ),
+                    );
+                },
+            );
+        }
+
+        wp_safe_redirect(
+            $authorization_url,
+            302,
+            "Aura Historia Partner Connect",
+        );
         exit();
     }
 

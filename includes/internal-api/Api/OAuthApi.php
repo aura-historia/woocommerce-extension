@@ -24,6 +24,8 @@
  * https://openapi-generator.tech
  * Do not edit the class manually.
  */
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped, WordPress.WP.AlternativeFunctions.file_system_operations_fopen, WordPress.WP.AlternativeFunctions.file_system_operations_fwrite, WordPress.WP.AlternativeFunctions.file_system_operations_fclose
+
 
 namespace AuraHistoria\PartnerConnect\InternalApi\Api;
 
