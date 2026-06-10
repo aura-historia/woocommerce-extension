@@ -1,13 +1,38 @@
 {
   "name": "aura-historia/aura-historia-partner-connect",
   "type": "wordpress-plugin",
+  "description": "Aura Historia Partner Connect WordPress plugin for WooCommerce product synchronization.",
   "license": "GPL-2.0-or-later",
+  "repositories": [
+    {
+      "type": "package",
+      "package": {
+        "name": "kreuzberg-dev/html-to-markdown",
+        "version": "3.5.7",
+        "type": "library",
+        "dist": {
+          "url": "https://api.github.com/repos/kreuzberg-dev/html-to-markdown/zipball/ac780560126ba74d4851a08b2cbe891523884d1a",
+          "type": "zip",
+          "reference": "ac780560126ba74d4851a08b2cbe891523884d1a"
+        },
+        "autoload": {
+          "psr-4": {
+            "HtmlToMarkdown\\": "packages/php/src/"
+          }
+        },
+        "require": {
+          "php": ">=8.2"
+        }
+      }
+    }
+  ],
   "require": {
-    "php": ">=8.1",
+    "php": ">=8.2",
     "ext-json": "*",
     "ext-mbstring": "*",
     "guzzlehttp/guzzle": "^7.9",
-    "guzzlehttp/psr7": "^2.7"
+    "guzzlehttp/psr7": "^2.7",
+    "kreuzberg-dev/html-to-markdown": "^3.5"
   },
   "require-dev": {
     "phpunit/phpunit": "^9.6",
@@ -15,7 +40,7 @@
   },
   "config": {
     "platform": {
-      "php": "8.1"
+      "php": "8.2"
     }
   }
 }

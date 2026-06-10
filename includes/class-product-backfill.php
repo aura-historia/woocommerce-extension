@@ -476,7 +476,7 @@ class Product_Backfill
             ];
         }
 
-        $description = $this->get_product_description_text($product);
+        $description = $this->get_product_description_markdown($product);
 
         if ("" !== $description) {
             $payload["description"] = [
@@ -501,14 +501,14 @@ class Product_Backfill
     }
 
     /**
-     * Returns a plain-text description suitable for `LocalizedTextData.text`.
+     * Returns a Markdown description suitable for `LocalizedTextData.text`.
      *
      * @param object $product WooCommerce product object.
      * @return string
      */
-    private function get_product_description_text($product)
+    private function get_product_description_markdown($product)
     {
-        $description = $this->normalize_text_value(
+        $description = $this->normalize_markdown_value(
             method_exists($product, "get_description")
                 ? $product->get_description()
                 : "",
@@ -518,7 +518,7 @@ class Product_Backfill
             return $description;
         }
 
-        return $this->normalize_text_value(
+        return $this->normalize_markdown_value(
             method_exists($product, "get_short_description")
                 ? $product->get_short_description()
                 : "",
@@ -672,6 +672,123 @@ class Product_Backfill
         $text = preg_replace("/\s+/u", " ", trim($text));
 
         return is_string($text) ? $text : trim((string) $value);
+    }
+
+    /**
+     * Normalizes HTML-rich product description content to Markdown.
+     *
+     * @param mixed $value Raw text or HTML content.
+     * @return string
+     */
+    private function normalize_markdown_value($value)
+    {
+        $html = trim((string) $value);
+
+        if ("" === $html) {
+            return "";
+        }
+
+        $markdown = $this->convert_html_to_markdown($html);
+        $markdown = html_entity_decode($markdown, ENT_QUOTES, "UTF-8");
+        $markdown = preg_replace("/[ \t]+\n/u", "\n", $markdown);
+        $markdown = preg_replace("/\n{3,}/u", "\n\n", trim($markdown));
+
+        return is_string($markdown) ? $markdown : "";
+    }
+
+    /**
+     * Converts HTML to Markdown using kreuzberg-dev/html-to-markdown when available.
+     *
+     * @param string $html Raw HTML content.
+     * @return string
+     */
+    private function convert_html_to_markdown($html)
+    {
+        if (class_exists("\\HtmlToMarkdown\\HtmlToMarkdown")) {
+            try {
+                $result = \HtmlToMarkdown\HtmlToMarkdown::convert($html);
+                $content = $this->extract_markdown_content($result);
+
+                if ("" !== $content) {
+                    return $content;
+                }
+            } catch (\Throwable $exception) {
+                // Fall back below when the optional native extension is unavailable.
+                unset($exception);
+            }
+        }
+
+        return $this->convert_html_to_markdown_fallback($html);
+    }
+
+    /**
+     * Extracts Markdown content from the package conversion result.
+     *
+     * @param mixed $result Conversion result from HtmlToMarkdown.
+     * @return string
+     */
+    private function extract_markdown_content($result)
+    {
+        if (is_object($result)) {
+            if (isset($result->content) && is_string($result->content)) {
+                return $result->content;
+            }
+
+            if (method_exists($result, "getContent")) {
+                return (string) $result->getContent();
+            }
+        }
+
+        return is_string($result) ? $result : "";
+    }
+
+    /**
+     * Conservative Markdown fallback for environments without the native extension.
+     *
+     * @param string $html Raw HTML content.
+     * @return string
+     */
+    private function convert_html_to_markdown_fallback($html)
+    {
+        $markdown = preg_replace("#<(script|style)[^>]*>.*?</\\1>#is", "", $html);
+        $markdown = is_string($markdown) ? $markdown : $html;
+        $markdown = preg_replace_callback(
+            "#<a[^>]+href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>#is",
+            static function ($matches) {
+                $label = trim(wp_strip_all_tags($matches[2]));
+                $url = esc_url_raw(
+                    html_entity_decode($matches[1], ENT_QUOTES, "UTF-8"),
+                );
+
+                return "" === $label || "" === $url
+                    ? $label
+                    : "[" . $label . "](" . $url . ")";
+            },
+            $markdown,
+        );
+        $markdown = preg_replace(
+            "#<(strong|b)\\b[^>]*>(.*?)</\\1>#is",
+            "**$2**",
+            $markdown,
+        );
+        $markdown = preg_replace(
+            "#<(em|i)\\b[^>]*>(.*?)</\\1>#is",
+            "*$2*",
+            $markdown,
+        );
+        $markdown = preg_replace("#<li\\b[^>]*>#i", "\n- ", $markdown);
+        $markdown = preg_replace("#</li>#i", "\n", $markdown);
+        $markdown = preg_replace("#<br\\s*/?>#i", "\n", $markdown);
+        $markdown = preg_replace(
+            "#</?(p|div|section|article|ul|ol|h[1-6])\\b[^>]*>#i",
+            "\n\n",
+            $markdown,
+        );
+        $markdown = wp_strip_all_tags($markdown);
+        $markdown = preg_replace("/[ \t]+/u", " ", $markdown);
+        $markdown = preg_replace("/\n[ \t]+/u", "\n", $markdown);
+
+        return is_string($markdown) ? $markdown : wp_strip_all_tags($html);
     }
 
     /**

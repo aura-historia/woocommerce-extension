@@ -1,7 +1,7 @@
 === Aura Historia Partner Connect ===
 Requires at least: 6.5
 Tested up to: 7.0
-Requires PHP: 8.1
+Requires PHP: 8.2
 Stable tag: 0.1.0
 Contributors: aurahistoria
 License: GPLv2 or later
@@ -60,7 +60,7 @@ Data sent to the service may include:
 * generated WooCommerce webhook secret
 * store language and currency
 * product webhook payloads for `product.created`, `product.updated`, and `product.deleted`
-* existing product data during an automatic or manual backfill
+* existing product data during an automatic or manual backfill, with product descriptions converted from HTML to Markdown
 
 Service endpoints:
 
@@ -100,7 +100,7 @@ Only `product.created`, `product.updated`, and `product.deleted`.
 
 = What data is sent to Aura Historia? =
 
-After configuration, the plugin sends the generated WooCommerce webhook secret, store language and currency, product webhook payloads, and existing product data during backfill. See the `External services` section above for the full overview.
+After configuration, the plugin sends the generated WooCommerce webhook secret, store language and currency, product webhook payloads, and existing product data during backfill. Backfill product descriptions are converted from HTML to Markdown. See the `External services` section above for the full overview.
 
 = Can I change the delivery URL or webhook secret in wp-admin? =
 
