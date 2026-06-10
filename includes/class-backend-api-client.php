@@ -7,12 +7,14 @@
 
 namespace AuraHistoria\PartnerConnect;
 
+use AuraHistoria\PartnerConnect\InternalApi\Api\OAuthApi;
 use AuraHistoria\PartnerConnect\InternalApi\Api\ProductsApi;
 use AuraHistoria\PartnerConnect\InternalApi\Api\ShopsApi;
 use AuraHistoria\PartnerConnect\InternalApi\ApiException;
 use AuraHistoria\PartnerConnect\InternalApi\Configuration;
 use AuraHistoria\PartnerConnect\InternalApi\Model\ApiError;
 use AuraHistoria\PartnerConnect\InternalApi\Model\GetShopData;
+use AuraHistoria\PartnerConnect\InternalApi\Model\OAuthTokenResponseData;
 use AuraHistoria\PartnerConnect\InternalApi\Model\PatchShopData;
 use GuzzleHttp\Client as GuzzleClient;
 use GuzzleHttp\ClientInterface;
@@ -60,13 +62,13 @@ class Backend_Api_Client
      * Calls `PATCH /api/v1/shops/{shopId}` using the generated OpenAPI client.
      *
      * @param string        $shop_id      Shop UUID.
-     * @param string        $api_key      Backend API key.
+     * @param string        $access_token Aura Historia access token.
      * @param PatchShopData $request_body Typed request payload.
      * @return GetShopData|WP_Error
      */
     public function patch_shop_by_id(
         $shop_id,
-        $api_key,
+        $access_token,
         PatchShopData $request_body,
     ) {
         $shop_id = Webhook_Manager::normalize_shop_id($shop_id);
@@ -95,7 +97,7 @@ class Backend_Api_Client
         }
 
         try {
-            $response = $this->create_shops_api($api_key)->patchShopById(
+            $response = $this->create_shops_api($access_token)->patchShopById(
                 $shop_id,
                 $request_body,
             );
@@ -130,12 +132,12 @@ class Backend_Api_Client
      * Performs a lightweight connection check with an empty JSON object body.
      *
      * @param string $shop_id Shop UUID.
-     * @param string $api_key Backend API key.
+     * @param string $access_token Aura Historia access token.
      * @return GetShopData|WP_Error
      */
-    public function verify_shop_connection($shop_id, $api_key)
+    public function verify_shop_connection($shop_id, $access_token)
     {
-        return $this->patch_shop_by_id($shop_id, $api_key, new PatchShopData());
+        return $this->patch_shop_by_id($shop_id, $access_token, new PatchShopData());
     }
 
     /**
@@ -147,11 +149,11 @@ class Backend_Api_Client
      * be created, updated, or left unchanged.
      *
      * @param string  $shop_id  Shop UUID.
-     * @param string  $api_key  Backend API key.
+     * @param string  $access_token Aura Historia access token.
      * @param array[] $products Array of strict partner product objects matching the backend PutProductData schema.
      * @return true|WP_Error
      */
-    public function put_shop_products($shop_id, $api_key, array $products)
+    public function put_shop_products($shop_id, $access_token, array $products)
     {
         $shop_id = Webhook_Manager::normalize_shop_id($shop_id);
 
@@ -179,10 +181,9 @@ class Backend_Api_Client
         }
 
         try {
-            $response = $this->create_products_api($api_key)->putPartnerProducts(
-                $shop_id,
-                $products,
-            );
+            $response = $this->create_products_api(
+                $access_token,
+            )->putPartnerProducts($shop_id, $products);
         } catch (ApiException $exception) {
             return $this->translate_api_exception($exception);
         } catch (\InvalidArgumentException $exception) {
@@ -210,7 +211,7 @@ class Backend_Api_Client
         $failed_product_ids = array_values(
             array_filter(
                 array_map([$this, "sanitize_error_fragment"], $response),
-                static fn($product_id) => '' !== $product_id,
+                static fn($product_id) => "" !== $product_id,
             ),
         );
 
@@ -243,6 +244,73 @@ class Backend_Api_Client
     }
 
     /**
+     * Exchanges a short-lived OAuth third-party exchange code for an Aura Historia
+     * access token using the generated OpenAPI client.
+     *
+     * @param string $third_party_exchange_code One-time exchange code.
+     * @return OAuthTokenResponseData|WP_Error
+     */
+    public function oauth_token_by_third_party_code($third_party_exchange_code)
+    {
+        $third_party_exchange_code = Webhook_Manager::normalize_shop_id(
+            $third_party_exchange_code,
+        );
+
+        if (
+            "" === $this->base_url ||
+            !Webhook_Manager::is_valid_shop_id($third_party_exchange_code)
+        ) {
+            return new WP_Error(
+                "ahpc_backend_invalid_oauth_exchange_code",
+                __(
+                    "The OAuth exchange code returned by Aura Historia is invalid or expired.",
+                    "aura-historia-partner-connect",
+                ),
+            );
+        }
+
+        if (!$this->is_runtime_available()) {
+            return new WP_Error(
+                "ahpc_backend_client_unavailable",
+                __(
+                    "The plugin's generated backend API client dependencies are not available.",
+                    "aura-historia-partner-connect",
+                ),
+            );
+        }
+
+        try {
+            $response = $this->create_oauth_api()->oauthTokenByThirdPartyCode(
+                $third_party_exchange_code,
+            );
+        } catch (ApiException $exception) {
+            return $this->translate_api_exception($exception);
+        } catch (\InvalidArgumentException $exception) {
+            return new WP_Error(
+                "ahpc_backend_invalid_request",
+                $this->sanitize_error_fragment($exception->getMessage()),
+            );
+        } catch (\Throwable $throwable) {
+            return new WP_Error(
+                "ahpc_backend_request_failed",
+                $this->sanitize_error_fragment($throwable->getMessage()),
+            );
+        }
+
+        if (!$response instanceof OAuthTokenResponseData) {
+            return new WP_Error(
+                "ahpc_backend_invalid_response",
+                __(
+                    "Aura Historia returned an unexpected OAuth token response.",
+                    "aura-historia-partner-connect",
+                ),
+            );
+        }
+
+        return $response;
+    }
+
+    /**
      * Returns whether the generated client runtime dependencies are available.
      *
      * @return bool
@@ -250,37 +318,68 @@ class Backend_Api_Client
     private function is_runtime_available()
     {
         return class_exists(ShopsApi::class) &&
+            class_exists(ProductsApi::class) &&
+            class_exists(OAuthApi::class) &&
             class_exists(GuzzleClient::class);
     }
 
     /**
      * Creates the generated `ShopsApi` client.
      *
-     * @param string $api_key Backend API key.
+     * @param string $access_token Aura Historia access token.
      * @return ShopsApi
      */
-    private function create_shops_api($api_key)
+    private function create_shops_api($access_token)
     {
-        $configuration = new Configuration();
-        $configuration->setHost($this->base_url);
-        $configuration->setApiKey("x-api-key", $api_key);
-
-        return new ShopsApi($this->create_http_client(), $configuration);
+        return new ShopsApi(
+            $this->create_http_client(),
+            $this->create_configuration($access_token),
+        );
     }
 
     /**
      * Creates the generated `ProductsApi` client.
      *
-     * @param string $api_key Backend API key.
+     * @param string $access_token Aura Historia access token.
      * @return ProductsApi
      */
-    private function create_products_api($api_key)
+    private function create_products_api($access_token)
+    {
+        return new ProductsApi(
+            $this->create_http_client(),
+            $this->create_configuration($access_token),
+        );
+    }
+
+    /**
+     * Creates the generated `OAuthApi` client.
+     *
+     * @return OAuthApi
+     */
+    private function create_oauth_api()
+    {
+        return new OAuthApi(
+            $this->create_http_client(),
+            $this->create_configuration(),
+        );
+    }
+
+    /**
+     * Creates a generated client configuration.
+     *
+     * @param string $access_token Optional Aura Historia access token.
+     * @return Configuration
+     */
+    private function create_configuration($access_token = "")
     {
         $configuration = new Configuration();
         $configuration->setHost($this->base_url);
-        $configuration->setApiKey("x-api-key", $api_key);
 
-        return new ProductsApi($this->create_http_client(), $configuration);
+        if ("" !== $access_token) {
+            $configuration->setAccessToken($access_token);
+        }
+
+        return $configuration;
     }
 
     /**

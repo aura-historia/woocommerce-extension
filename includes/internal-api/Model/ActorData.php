@@ -1,6 +1,6 @@
 <?php
 /**
- * StructuredAddressData
+ * ActorData
  *
  * PHP version 8.1
  *
@@ -34,16 +34,16 @@ use \ArrayAccess;
 use \AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
 
 /**
- * StructuredAddressData Class Doc Comment
+ * ActorData Class Doc Comment
  *
  * @category Class
- * @description Structured postal address used for shop metadata and geocoding. When supplied in shop create/update payloads, at least one component among &#x60;addressline&#x60;, &#x60;addresslineExtra&#x60;, &#x60;locality&#x60;, &#x60;region&#x60;, &#x60;postalCode&#x60;, or &#x60;country&#x60; must contain a non-empty value; &#x60;continent&#x60; alone does not make the address valid, and otherwise the backend rejects the request with &#x60;400 BAD_BODY_VALUE&#x60;.
+ * @description Audit actor encoded as a plain string. Values are either the literal &#x60;SYSTEM&#x60; or the UUID of the acting user.
  * @package  AuraHistoria\PartnerConnect\InternalApi
  * @author   OpenAPI Generator team
  * @link     https://openapi-generator.tech
  * @implements \ArrayAccess<string, mixed>
  */
-class StructuredAddressData implements ModelInterface, ArrayAccess, \JsonSerializable
+class ActorData implements ModelInterface, ArrayAccess, \JsonSerializable
 {
     public const DISCRIMINATOR = null;
 
@@ -52,7 +52,7 @@ class StructuredAddressData implements ModelInterface, ArrayAccess, \JsonSeriali
      *
      * @var string
      */
-    protected static $openAPIModelName = 'StructuredAddressData';
+    protected static $openAPIModelName = 'ActorData';
 
     /**
      * Array of property to type mappings. Used for (de)serialization
@@ -60,13 +60,7 @@ class StructuredAddressData implements ModelInterface, ArrayAccess, \JsonSeriali
      * @var string[]
      */
     protected static $openAPITypes = [
-        'addressline' => 'string',
-        'addressline_extra' => 'string',
-        'locality' => 'string',
-        'region' => 'string',
-        'postal_code' => 'string',
-        'country' => '\AuraHistoria\PartnerConnect\InternalApi\Model\CountryCodeData',
-        'continent' => '\AuraHistoria\PartnerConnect\InternalApi\Model\ContinentData'
+
     ];
 
     /**
@@ -77,13 +71,7 @@ class StructuredAddressData implements ModelInterface, ArrayAccess, \JsonSeriali
      * @psalm-var array<string, string|null>
      */
     protected static $openAPIFormats = [
-        'addressline' => null,
-        'addressline_extra' => null,
-        'locality' => null,
-        'region' => null,
-        'postal_code' => null,
-        'country' => null,
-        'continent' => null
+
     ];
 
     /**
@@ -92,13 +80,7 @@ class StructuredAddressData implements ModelInterface, ArrayAccess, \JsonSeriali
      * @var boolean[]
      */
     protected static array $openAPINullables = [
-        'addressline' => false,
-        'addressline_extra' => false,
-        'locality' => false,
-        'region' => false,
-        'postal_code' => false,
-        'country' => false,
-        'continent' => false
+
     ];
 
     /**
@@ -187,13 +169,7 @@ class StructuredAddressData implements ModelInterface, ArrayAccess, \JsonSeriali
      * @var string[]
      */
     protected static $attributeMap = [
-        'addressline' => 'addressline',
-        'addressline_extra' => 'addresslineExtra',
-        'locality' => 'locality',
-        'region' => 'region',
-        'postal_code' => 'postalCode',
-        'country' => 'country',
-        'continent' => 'continent'
+
     ];
 
     /**
@@ -202,13 +178,7 @@ class StructuredAddressData implements ModelInterface, ArrayAccess, \JsonSeriali
      * @var string[]
      */
     protected static $setters = [
-        'addressline' => 'setAddressline',
-        'addressline_extra' => 'setAddresslineExtra',
-        'locality' => 'setLocality',
-        'region' => 'setRegion',
-        'postal_code' => 'setPostalCode',
-        'country' => 'setCountry',
-        'continent' => 'setContinent'
+
     ];
 
     /**
@@ -217,13 +187,7 @@ class StructuredAddressData implements ModelInterface, ArrayAccess, \JsonSeriali
      * @var string[]
      */
     protected static $getters = [
-        'addressline' => 'getAddressline',
-        'addressline_extra' => 'getAddresslineExtra',
-        'locality' => 'getLocality',
-        'region' => 'getRegion',
-        'postal_code' => 'getPostalCode',
-        'country' => 'getCountry',
-        'continent' => 'getContinent'
+
     ];
 
     /**
@@ -283,13 +247,6 @@ class StructuredAddressData implements ModelInterface, ArrayAccess, \JsonSeriali
      */
     public function __construct(?array $data = null)
     {
-        $this->setIfExists('addressline', $data ?? [], null);
-        $this->setIfExists('addressline_extra', $data ?? [], null);
-        $this->setIfExists('locality', $data ?? [], null);
-        $this->setIfExists('region', $data ?? [], null);
-        $this->setIfExists('postal_code', $data ?? [], null);
-        $this->setIfExists('country', $data ?? [], null);
-        $this->setIfExists('continent', $data ?? [], null);
     }
 
     /**
@@ -333,195 +290,6 @@ class StructuredAddressData implements ModelInterface, ArrayAccess, \JsonSeriali
         return count($this->listInvalidProperties()) === 0;
     }
 
-
-    /**
-     * Gets addressline
-     *
-     * @return string|null
-     */
-    public function getAddressline()
-    {
-        return $this->container['addressline'];
-    }
-
-    /**
-     * Sets addressline
-     *
-     * @param string|null $addressline Primary free-form address line such as street and house number.
-     *
-     * @return self
-     */
-    public function setAddressline($addressline)
-    {
-        if (is_null($addressline)) {
-            throw new \InvalidArgumentException('non-nullable addressline cannot be null');
-        }
-        $this->container['addressline'] = $addressline;
-
-        return $this;
-    }
-
-    /**
-     * Gets addressline_extra
-     *
-     * @return string|null
-     */
-    public function getAddresslineExtra()
-    {
-        return $this->container['addressline_extra'];
-    }
-
-    /**
-     * Sets addressline_extra
-     *
-     * @param string|null $addressline_extra Optional secondary address line such as floor, suite, building, or c/o information.
-     *
-     * @return self
-     */
-    public function setAddresslineExtra($addressline_extra)
-    {
-        if (is_null($addressline_extra)) {
-            throw new \InvalidArgumentException('non-nullable addressline_extra cannot be null');
-        }
-        $this->container['addressline_extra'] = $addressline_extra;
-
-        return $this;
-    }
-
-    /**
-     * Gets locality
-     *
-     * @return string|null
-     */
-    public function getLocality()
-    {
-        return $this->container['locality'];
-    }
-
-    /**
-     * Sets locality
-     *
-     * @param string|null $locality City, town, or locality.
-     *
-     * @return self
-     */
-    public function setLocality($locality)
-    {
-        if (is_null($locality)) {
-            throw new \InvalidArgumentException('non-nullable locality cannot be null');
-        }
-        $this->container['locality'] = $locality;
-
-        return $this;
-    }
-
-    /**
-     * Gets region
-     *
-     * @return string|null
-     */
-    public function getRegion()
-    {
-        return $this->container['region'];
-    }
-
-    /**
-     * Sets region
-     *
-     * @param string|null $region Region, state, province, or administrative area.
-     *
-     * @return self
-     */
-    public function setRegion($region)
-    {
-        if (is_null($region)) {
-            throw new \InvalidArgumentException('non-nullable region cannot be null');
-        }
-        $this->container['region'] = $region;
-
-        return $this;
-    }
-
-    /**
-     * Gets postal_code
-     *
-     * @return string|null
-     */
-    public function getPostalCode()
-    {
-        return $this->container['postal_code'];
-    }
-
-    /**
-     * Sets postal_code
-     *
-     * @param string|null $postal_code Postal or ZIP code.
-     *
-     * @return self
-     */
-    public function setPostalCode($postal_code)
-    {
-        if (is_null($postal_code)) {
-            throw new \InvalidArgumentException('non-nullable postal_code cannot be null');
-        }
-        $this->container['postal_code'] = $postal_code;
-
-        return $this;
-    }
-
-    /**
-     * Gets country
-     *
-     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\CountryCodeData|null
-     */
-    public function getCountry()
-    {
-        return $this->container['country'];
-    }
-
-    /**
-     * Sets country
-     *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\CountryCodeData|null $country ISO 3166-1 alpha-2 country code serialized by the backend. When `continent` is omitted but `country` is present, the backend derives the continent from this code.
-     *
-     * @return self
-     */
-    public function setCountry($country)
-    {
-        if (is_null($country)) {
-            throw new \InvalidArgumentException('non-nullable country cannot be null');
-        }
-        $this->container['country'] = $country;
-
-        return $this;
-    }
-
-    /**
-     * Gets continent
-     *
-     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\ContinentData|null
-     */
-    public function getContinent()
-    {
-        return $this->container['continent'];
-    }
-
-    /**
-     * Sets continent
-     *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\ContinentData|null $continent Optional continent value exposed alongside `country` in structured-address data. If omitted while `country` is present, the backend derives it automatically.
-     *
-     * @return self
-     */
-    public function setContinent($continent)
-    {
-        if (is_null($continent)) {
-            throw new \InvalidArgumentException('non-nullable continent cannot be null');
-        }
-        $this->container['continent'] = $continent;
-
-        return $this;
-    }
     /**
      * Returns true if offset exists. False otherwise.
      *

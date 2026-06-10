@@ -323,8 +323,8 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             Webhook_Manager::OPTION_SETTINGS,
             [
                 "shop_id" => "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-                "api_key" =>
-                    "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
+                "access_token" =>
+                    "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
                 "secret" => "test-secret",
             ],
             false,
@@ -344,11 +344,11 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
     }
 
     /**
-     * It aborts silently when the stored API key is empty.
+     * It aborts silently when the stored access token is empty.
      *
      * @return void
      */
-    public function test_process_batch_aborts_when_api_key_missing()
+    public function test_process_batch_aborts_when_access_token_missing()
     {
         $shop_id = "123e4567-e89b-12d3-a456-426614174000";
 
@@ -356,7 +356,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             Webhook_Manager::OPTION_SETTINGS,
             [
                 "shop_id" => $shop_id,
-                "api_key" => "",
+                "access_token" => "",
                 "secret" => "test-secret",
             ],
             false,
@@ -405,13 +405,13 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
     public function test_process_batch_puts_products_to_backend()
     {
         $shop_id = "123e4567-e89b-12d3-a456-426614174000";
-        $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+        $access_token = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
 
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
                 "shop_id" => $shop_id,
-                "api_key" => $api_key,
+                "access_token" => $access_token,
                 "secret" => "test-secret",
             ],
             false,
@@ -443,8 +443,8 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             strtoupper($requests[0]["request"]->getMethod()),
         );
         $this->assertSame(
-            $api_key,
-            $requests[0]["request"]->getHeaderLine("x-api-key"),
+            "Bearer " . $access_token,
+            $requests[0]["request"]->getHeaderLine("Authorization"),
         );
 
         $body = json_decode((string) $requests[0]["request"]->getBody(), true);
@@ -483,13 +483,13 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
     public function test_process_batch_puts_products_to_backend_without_logged_in_user()
     {
         $shop_id = "123e4567-e89b-12d3-a456-426614174000";
-        $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+        $access_token = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
 
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
                 "shop_id" => $shop_id,
-                "api_key" => $api_key,
+                "access_token" => $access_token,
                 "secret" => "test-secret",
             ],
             false,
@@ -559,8 +559,8 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             Webhook_Manager::OPTION_SETTINGS,
             [
                 "shop_id" => $shop_id,
-                "api_key" =>
-                    "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
+                "access_token" =>
+                    "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
                 "secret" => "test-secret",
             ],
             false,
@@ -606,8 +606,8 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             Webhook_Manager::OPTION_SETTINGS,
             [
                 "shop_id" => $shop_id,
-                "api_key" =>
-                    "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
+                "access_token" =>
+                    "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
                 "secret" => "test-secret",
             ],
             false,
@@ -643,8 +643,8 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             Webhook_Manager::OPTION_SETTINGS,
             [
                 "shop_id" => $shop_id,
-                "api_key" =>
-                    "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
+                "access_token" =>
+                    "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
                 "secret" => "test-secret",
             ],
             false,
@@ -676,8 +676,8 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             Webhook_Manager::OPTION_SETTINGS,
             [
                 "shop_id" => $shop_id,
-                "api_key" =>
-                    "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
+                "access_token" =>
+                    "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
                 "secret" => "test-secret",
             ],
             false,
@@ -687,8 +687,8 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         $error_body = [
             "status" => 401,
             "title" => "Unauthorized",
-            "error" => "PARTNER_SHOP_API_KEY_MISMATCH",
-            "detail" => "Missing or invalid x-api-key.",
+            "error" => "UNAUTHORIZED",
+            "detail" => "Missing or invalid Authorization header.",
         ];
         $this->set_backend_mock_responses([
             new Response(
@@ -730,8 +730,8 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             Webhook_Manager::OPTION_SETTINGS,
             [
                 "shop_id" => $shop_id,
-                "api_key" =>
-                    "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
+                "access_token" =>
+                    "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
                 "secret" => "test-secret",
             ],
             false,
@@ -778,7 +778,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         }
 
         $shop_id = "123e4567-e89b-12d3-a456-426614174000";
-        $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+        $access_token = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
 
         // Provide enough mock responses: 1 for registration + 10 spare.
         $this->set_backend_mock_responses(
@@ -795,6 +795,8 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
                         "shopType" => "COMMERCIAL_DEALER",
                         "domains" => ["example.com"],
                         "partnerStatus" => "PARTNERED",
+                        "createdBy" => "SYSTEM",
+                        "updatedBy" => "SYSTEM",
                         "created" => "2024-01-01T10:00:00Z",
                         "updated" => "2024-01-01T12:00:00Z",
                     ]),
@@ -806,7 +808,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             Webhook_Manager::OPTION_SETTINGS,
             [
                 "shop_id" => $shop_id,
-                "api_key" => $api_key,
+                "access_token" => $access_token,
                 "secret" => "test-secret",
             ],
             false,
@@ -843,7 +845,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             Webhook_Manager::OPTION_SETTINGS,
             [
                 "shop_id" => "",
-                "api_key" => "",
+                "access_token" => "",
                 "secret" => "test-secret",
             ],
             false,
@@ -867,7 +869,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         }
 
         $shop_id = "123e4567-e89b-12d3-a456-426614174000";
-        $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+        $access_token = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
 
         // First sync: active.
         $this->set_backend_mock_responses(
@@ -884,6 +886,8 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
                         "shopType" => "COMMERCIAL_DEALER",
                         "domains" => ["example.com"],
                         "partnerStatus" => "PARTNERED",
+                        "createdBy" => "SYSTEM",
+                        "updatedBy" => "SYSTEM",
                         "created" => "2024-01-01T10:00:00Z",
                         "updated" => "2024-01-01T12:00:00Z",
                     ]),
@@ -895,7 +899,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             Webhook_Manager::OPTION_SETTINGS,
             [
                 "shop_id" => $shop_id,
-                "api_key" => $api_key,
+                "access_token" => $access_token,
                 "secret" => "test-secret",
             ],
             false,
@@ -912,7 +916,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             Webhook_Manager::OPTION_SETTINGS,
             [
                 "shop_id" => "",
-                "api_key" => "",
+                "access_token" => "",
                 "secret" => "test-secret",
             ],
             false,
@@ -1008,11 +1012,11 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
                         ? (string) $settings["shop_id"]
                         : "",
                 );
-                $api_key = isset($settings["api_key"])
-                    ? (string) $settings["api_key"]
+                $access_token = isset($settings["access_token"])
+                    ? (string) $settings["access_token"]
                     : "";
 
-                if ($stored_shop_id !== $shop_id || "" === $api_key) {
+                if ($stored_shop_id !== $shop_id || "" === $access_token) {
                     return;
                 }
 

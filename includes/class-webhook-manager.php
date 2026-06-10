@@ -28,6 +28,7 @@ class Webhook_Manager
     const OPTION_PLUGIN_VERSION = "ahpc_plugin_version";
     const OPTION_LAST_SYNC_ERROR = "ahpc_last_sync_error";
     const OPTION_LAST_SYNC_AT = "ahpc_last_sync_at";
+    const OPTION_LAST_OAUTH_ERROR = "ahpc_last_oauth_error";
     const SETTINGS_GROUP = "ahpc_settings_group";
     const TEXT_DOMAIN = "aura-historia-partner-connect";
     const API_VERSION = 3;
@@ -48,7 +49,7 @@ class Webhook_Manager
     {
         return [
             "shop_id" => "",
-            "api_key" => "",
+            "access_token" => "",
             "secret" => "",
         ];
     }
@@ -90,28 +91,28 @@ class Webhook_Manager
     }
 
     /**
-     * Normalizes an API key.
+     * Normalizes an Aura Historia access token.
      *
-     * @param string $api_key API key.
+     * @param string $access_token Aura Historia access token.
      * @return string
      */
-    public static function normalize_api_key($api_key)
+    public static function normalize_access_token($access_token)
     {
-        return trim(sanitize_text_field((string) $api_key));
+        return trim(sanitize_text_field((string) $access_token));
     }
 
     /**
-     * Returns whether the given API key matches the expected lightweight format.
+     * Returns whether the given Aura Historia access token matches the expected lightweight format.
      *
-     * @param string $api_key API key.
+     * @param string $access_token Aura Historia access token.
      * @return bool
      */
-    public static function is_valid_api_key($api_key)
+    public static function is_valid_access_token($access_token)
     {
         return 1 ===
             preg_match(
-                "/\Aaurahistoria_[A-Za-z0-9]{6,}_[A-Za-z0-9]{12,}\z/",
-                self::normalize_api_key($api_key),
+                "/\Aaurahistoria_accesstoken_[A-Za-z0-9]{6,}_[A-Za-z0-9]{12,}\z/",
+                self::normalize_access_token($access_token),
             );
     }
 
@@ -224,19 +225,31 @@ class Webhook_Manager
         }
 
         $settings = wp_parse_args($settings, self::default_settings());
+        $needs_migration = isset($settings["api_key"]);
 
         $settings["shop_id"] = isset($settings["shop_id"])
             ? self::normalize_shop_id($settings["shop_id"])
             : "";
-        $settings["api_key"] = isset($settings["api_key"])
-            ? self::normalize_api_key($settings["api_key"])
+        $legacy_access_token = isset($settings["api_key"])
+            ? self::normalize_access_token($settings["api_key"])
             : "";
+        $settings["access_token"] = isset($settings["access_token"])
+            ? self::normalize_access_token($settings["access_token"])
+            : $legacy_access_token;
+
+        if ($needs_migration) {
+            unset($settings["api_key"]);
+        }
         $settings["secret"] = isset($settings["secret"])
             ? sanitize_text_field((string) $settings["secret"])
             : "";
 
         if ("" === $settings["secret"]) {
             $settings["secret"] = self::generate_secret();
+            $needs_migration = true;
+        }
+
+        if ($needs_migration) {
             update_option(self::OPTION_SETTINGS, $settings, false);
         }
 
@@ -341,13 +354,13 @@ class Webhook_Manager
         try {
             $settings = $this->get_settings();
             $shop_id = $settings["shop_id"];
-            $api_key = $settings["api_key"];
+            $access_token = $settings["access_token"];
             $endpoint_url = self::get_webhook_endpoint_url($shop_id);
             $user_id = $this->resolve_webhook_user_id();
             $webhook_ids = $this->get_webhook_ids();
             $setup_error = null;
             $has_shop_id = "" !== $shop_id;
-            $has_api_key = "" !== $api_key;
+            $has_access_token = "" !== $access_token;
 
             if (!$user_id) {
                 return $this->record_sync_error(
@@ -361,7 +374,7 @@ class Webhook_Manager
                 );
             }
 
-            if ($has_shop_id || $has_api_key) {
+            if ($has_shop_id || $has_access_token) {
                 if (!self::get_backend_base_url()) {
                     $setup_error = new WP_Error(
                         "ahpc_missing_backend_base_url",
@@ -374,19 +387,19 @@ class Webhook_Manager
                     $setup_error = new WP_Error(
                         "ahpc_invalid_shop_id",
                         __(
-                            "The Shop ID does not match the value shown in Aura Historia. Copy it again and save once more.",
+                            "The OAuth connection returned an invalid Aura Historia Shop ID. Reconnect this store and try once more.",
                             "aura-historia-partner-connect",
                         ),
                     );
-                } elseif ($has_api_key && !self::is_valid_api_key($api_key)) {
+                } elseif ($has_access_token && !self::is_valid_access_token($access_token)) {
                     $setup_error = new WP_Error(
-                        "ahpc_invalid_api_key",
+                        "ahpc_invalid_access_token",
                         __(
-                            "The API key does not match the value shown in Aura Historia. Copy it again and save once more.",
+                            "The OAuth connection returned an invalid Aura Historia access token. Reconnect this store and try once more.",
                             "aura-historia-partner-connect",
                         ),
                     );
-                } elseif (!$has_shop_id || !$has_api_key) {
+                } elseif (!$has_shop_id || !$has_access_token) {
                     $setup_error = null;
                 } elseif ("" === $endpoint_url) {
                     $setup_error = new WP_Error(
@@ -399,7 +412,7 @@ class Webhook_Manager
                 } else {
                     $registration_result = $this->register_webhook_secret(
                         $shop_id,
-                        $api_key,
+                        $access_token,
                         $settings["secret"],
                     );
 
@@ -493,11 +506,11 @@ class Webhook_Manager
      * separate configuration step.
      *
      * @param string $shop_id Shop UUID.
-     * @param string $api_key Backend API key.
+     * @param string $access_token Aura Historia access token.
      * @param string $secret  Generated webhook secret.
      * @return true|WP_Error
      */
-    private function register_webhook_secret($shop_id, $api_key, $secret)
+    private function register_webhook_secret($shop_id, $access_token, $secret)
     {
         $request_body = new PatchShopData();
         $request_body->setWoocommerceWebhookSecret($secret);
@@ -511,7 +524,7 @@ class Webhook_Manager
         $client = new Backend_Api_Client(self::get_backend_base_url());
         $response = $client->patch_shop_by_id(
             $shop_id,
-            $api_key,
+            $access_token,
             $request_body,
         );
 
@@ -724,6 +737,7 @@ class Webhook_Manager
         delete_option(self::OPTION_PLUGIN_VERSION);
         delete_option(self::OPTION_LAST_SYNC_ERROR);
         delete_option(self::OPTION_LAST_SYNC_AT);
+        delete_option(self::OPTION_LAST_OAUTH_ERROR);
 
         if (class_exists(Product_Backfill::class)) {
             (new Product_Backfill())->cancel_backfill();
@@ -799,7 +813,7 @@ class Webhook_Manager
         $setup_error = null,
     ) {
         return !empty($settings["shop_id"]) &&
-            !empty($settings["api_key"]) &&
+            !empty($settings["access_token"]) &&
             !$setup_error &&
             !empty($endpoint_url)
             ? "active"

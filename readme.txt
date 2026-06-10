@@ -14,7 +14,7 @@ Connects WooCommerce to Aura Historia by creating and maintaining the product we
 
 Aura Historia Partner Connect connects a WooCommerce store to Aura Historia.
 
-After you save the Shop ID and API key from Aura Historia, the plugin automatically:
+After you connect the store through Aura Historia OAuth, the plugin automatically:
 
 * creates and maintains exactly three WooCommerce product webhooks:
   * `product.created`
@@ -28,23 +28,23 @@ After you save the Shop ID and API key from Aura Historia, the plugin automatica
 * removes plugin-owned webhooks and plugin options on uninstall
 * can re-send the current catalog in the background after a successful connection
 
-The plugin keeps the settings surface intentionally small. Merchants only enter:
+The plugin keeps the settings surface intentionally small. Merchants do not manually enter Aura Historia credentials in wp-admin. The OAuth flow sets and stores:
 
 * Shop ID
-* API key
+* Aura Historia access token
 
 Merchants do not enter:
 
 * a webhook delivery URL
 * a webhook secret
 
-This plugin is intended for merchants who already use Aura Historia. Once valid settings are saved, the plugin sends product data to Aura Historia so the connected catalog can stay in sync.
+This plugin is intended for merchants who already use Aura Historia. Once OAuth completes, the plugin sends product data to Aura Historia so the connected catalog can stay in sync.
 
 == External services ==
 
 This plugin connects to Aura Historia, a hosted service required for the plugin to work.
 
-It sends data only after a merchant saves a valid Shop ID and API key, and later when WooCommerce sends managed webhook events or the plugin runs a product backfill.
+It sends data after a merchant connects the store through Aura Historia OAuth, and later when WooCommerce sends managed webhook events or the plugin runs a product backfill.
 
 The service is used to:
 
@@ -55,7 +55,8 @@ The service is used to:
 Data sent to the service may include:
 
 * Shop ID
-* Aura Historia API key in the `x-api-key` header
+* Aura Historia access token in the bearer `Authorization` header for backend API calls
+* Aura Historia access token in the webhook `x-api-key` header for WooCommerce deliveries
 * generated WooCommerce webhook secret
 * store language and currency
 * product webhook payloads for `product.created`, `product.updated`, and `product.deleted`
@@ -63,6 +64,9 @@ Data sent to the service may include:
 
 Service endpoints:
 
+* `GET https://aura-historia.com/oauth/authorize`
+* `GET https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce`
+* `GET https://api.aura-historia.com/api/v1/oauth/tokens/by-third-party-code/{thirdPartyCode}`
 * `PATCH https://api.aura-historia.com/api/v1/shops/{shopId}`
 * `POST https://api.aura-historia.com/api/v1/webhooks/woocommerce/{shopId}`
 * `PUT https://api.aura-historia.com/api/v1/shops/{shopId}/products`
@@ -80,17 +84,15 @@ Service provider and policies:
 2. Install Aura Historia Partner Connect via the WordPress Plugin Directory.
 3. Activate the plugin.
 4. Go to `WooCommerce > Aura Historia`.
-5. Enter the Shop ID from Aura Historia for this store.
-6. Enter the API key from Aura Historia for this store.
-7. Save the settings.
+5. Approve the Aura Historia OAuth connection when prompted.
 
-After a successful save, the plugin syncs the managed webhooks automatically and starts sending product updates to Aura Historia.
+After OAuth completes, the plugin syncs the managed webhooks automatically and starts sending product updates to Aura Historia.
 
 == Frequently Asked Questions ==
 
 = Do I need an Aura Historia account? =
 
-Yes. This plugin is intended for merchants who already use Aura Historia and have a Shop ID and API key for their store.
+Yes. This plugin is intended for merchants who already use Aura Historia and have a partner shop they can authorize during OAuth.
 
 = Which WooCommerce events are sent? =
 

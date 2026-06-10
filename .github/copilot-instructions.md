@@ -40,7 +40,7 @@ When changing functionality, preserve these invariants:
 9. Keep the settings surface minimal.
 10. The delivery endpoint URL should stay hardcoded in the plugin, not user-configurable in wp-admin, unless explicitly requested.
 11. The WooCommerce webhook secret should be auto-generated and hidden from the merchant.
-12. Merchant-configurable settings should be limited to the backend Shop ID and backend API key.
+12. Merchant-configurable settings should be limited to the backend Shop ID and backend access token.
 
 ## WordPress and WooCommerce conventions
 
@@ -57,11 +57,11 @@ When changing functionality, preserve these invariants:
 
 - The plugin must PATCH the generated webhook secret to `/api/v1/shops/{shopId}` before activating delivery.
 - The plugin must send webhook deliveries to `/api/v1/webhooks/woocommerce/{shopId}`.
-- The backend API key is a separate credential from the WooCommerce webhook secret.
-- The backend API key must be validated lightly in the UI before saving.
+- The backend access token is a separate credential from the WooCommerce webhook secret.
+- The backend access token must be validated lightly in the UI before saving.
 - The Shop ID must be validated lightly as a UUID before saving.
-- The plugin should add `x-api-key` to outgoing webhook requests as safely as possible.
-- Prefer adding `x-api-key` late in the WordPress HTTP stack if that avoids leaking the header into WooCommerce delivery logs.
+- The plugin should add the access token to the webhook `x-api-key` header as safely as possible.
+- Prefer adding the access token to the webhook `x-api-key` header late in the WordPress HTTP stack if that avoids leaking the header into WooCommerce delivery logs.
 
 ## WordPress.org mindset
 
@@ -106,7 +106,7 @@ When changing behavior, add or update tests when sensible, especially around:
 
 - managed webhook creation
 - backend secret registration
-- outgoing `x-api-key` header behavior
+- outgoing webhook `x-api-key` access token header behavior
 - idempotent updates
 - pause/delete cleanup
 - drift recovery

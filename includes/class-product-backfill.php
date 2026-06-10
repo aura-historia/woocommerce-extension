@@ -283,15 +283,15 @@ class Product_Backfill
         $stored_shop_id = Webhook_Manager::normalize_shop_id(
             isset($settings["shop_id"]) ? (string) $settings["shop_id"] : "",
         );
-        $api_key = isset($settings["api_key"])
-            ? (string) $settings["api_key"]
+        $access_token = isset($settings["access_token"])
+            ? (string) $settings["access_token"]
             : "";
 
         if (
             $stored_shop_id !== $shop_id ||
-            "" === $api_key ||
+            "" === $access_token ||
             !Webhook_Manager::is_valid_shop_id($shop_id) ||
-            !Webhook_Manager::is_valid_api_key($api_key)
+            !Webhook_Manager::is_valid_access_token($access_token)
         ) {
             // Settings no longer valid for this shop; abort silently.
             return;
@@ -322,7 +322,7 @@ class Product_Backfill
             $client = new Backend_Api_Client(
                 Webhook_Manager::get_backend_base_url(),
             );
-            $result = $client->put_shop_products($shop_id, $api_key, $payloads);
+            $result = $client->put_shop_products($shop_id, $access_token, $payloads);
 
             if (is_wp_error($result)) {
                 $message = sanitize_text_field(

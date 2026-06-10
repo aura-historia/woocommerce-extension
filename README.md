@@ -73,8 +73,10 @@ Managed webhook topics:
 - creates and maintains exactly three managed WooCommerce webhooks
 - keeps webhook sync idempotent and repairs manual drift
 - generates the WooCommerce signing secret automatically and keeps it hidden from merchants
+- starts an OAuth connection flow from the settings page instead of asking merchants to paste credentials
+- exchanges the OAuth broker code for an Aura Historia access token and stores it locally
 - sends the generated secret to Aura Historia before activating delivery
-- injects `x-api-key` late in the WordPress HTTP stack for outgoing webhook deliveries
+- injects the access token into the `x-api-key` webhook header late in the WordPress HTTP stack
 - can backfill the current catalog in the background after a successful connection
 - pauses plugin-owned webhooks on deactivation
 - removes plugin-owned webhooks and plugin options on uninstall
@@ -95,8 +97,7 @@ Managed webhook topics:
 This plugin is for merchants and integrators who already have:
 
 - an Aura Historia account
-- an Aura Historia Shop ID
-- an Aura Historia API key
+- a partner shop in Aura Historia
 - a WooCommerce store that should sync product events to Aura Historia
 
 It is **not** a general-purpose WooCommerce webhook manager.
@@ -104,11 +105,13 @@ It is **not** a general-purpose WooCommerce webhook manager.
 ## How it works
 
 1. A merchant installs the plugin and opens `WooCommerce > Aura Historia`.
-2. The merchant saves the Aura Historia Shop ID and API key.
-3. The plugin generates a WooCommerce webhook signing secret and registers it with Aura Historia via `PATCH /api/v1/shops/{shopId}`.
-4. The plugin creates or repairs the three managed WooCommerce webhooks.
-5. WooCommerce sends live webhook deliveries to `POST /api/v1/webhooks/woocommerce/{shopId}`.
-6. The plugin can also backfill the current catalog to `PUT /api/v1/shops/{shopId}/products` in background batches.
+2. If the store is not connected yet, the settings page starts the Aura Historia OAuth flow automatically; the Connect button is available as a fallback.
+3. Aura Historia redirects back to the plugin settings page with the partner Shop ID and a short-lived third-party exchange code.
+4. The plugin exchanges that code for an Aura Historia access token and stores the Shop ID and token locally.
+5. The plugin generates a WooCommerce webhook signing secret and registers it with Aura Historia via `PATCH /api/v1/shops/{shopId}`.
+6. The plugin creates or repairs the three managed WooCommerce webhooks.
+7. WooCommerce sends live webhook deliveries to `POST /api/v1/webhooks/woocommerce/{shopId}`.
+8. The plugin can also backfill the current catalog to `PUT /api/v1/shops/{shopId}/products` in background batches.
 
 ## External service behavior
 
@@ -119,7 +122,8 @@ This plugin depends on the Aura Historia service.
 Depending on the action, the plugin may send:
 
 - Shop ID
-- Aura Historia API key in the `x-api-key` header
+- Aura Historia access token in the bearer `Authorization` header for backend API calls
+- Aura Historia access token in the webhook `x-api-key` header for WooCommerce deliveries
 - generated WooCommerce webhook secret
 - store language and currency
 - WooCommerce product webhook payloads
@@ -127,12 +131,16 @@ Depending on the action, the plugin may send:
 
 ### When it gets sent
 
-- when valid settings are saved and a webhook sync runs
+- when a merchant connects the store through Aura Historia OAuth
+- when a webhook sync registers the generated WooCommerce signing secret
 - when WooCommerce triggers one of the managed webhook events
 - when the plugin schedules or processes a product backfill
 
 ### Service endpoints
 
+- `GET https://aura-historia.com/oauth/authorize`
+- `GET https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce`
+- `GET https://api.aura-historia.com/api/v1/oauth/tokens/by-third-party-code/{thirdPartyCode}`
 - `PATCH https://api.aura-historia.com/api/v1/shops/{shopId}`
 - `POST https://api.aura-historia.com/api/v1/webhooks/woocommerce/{shopId}`
 - `PUT https://api.aura-historia.com/api/v1/shops/{shopId}/products`
@@ -153,9 +161,9 @@ Depending on the action, the plugin may send:
 3. Upload the ZIP through `Plugins > Add New > Upload Plugin`, or extract it into `/wp-content/plugins/`.
 4. Activate the plugin.
 5. Open `WooCommerce > Aura Historia`.
-6. Save the Shop ID and API key from Aura Historia.
+6. Approve the Aura Historia OAuth connection when prompted.
 
-Once the settings are valid, the plugin syncs the managed webhooks automatically.
+Once OAuth completes, the plugin stores the returned Shop ID and access token locally and syncs the managed webhooks automatically.
 
 ## Configuration model
 
@@ -163,12 +171,12 @@ The distributed plugin defaults to the production Aura Historia API base URL:
 
 - `https://api.aura-historia.com`
 
-Merchants configure only:
+Merchants do **not** manually configure credentials in wp-admin. The OAuth flow sets and stores:
 
-- `Shop ID`
-- `API key`
+- the Aura Historia Shop ID
+- an Aura Historia access token
 
-Merchants do **not** configure:
+Merchants also do **not** configure:
 
 - the webhook delivery URL
 - the webhook secret
@@ -190,6 +198,31 @@ AHPC_BACKEND_BASE_URL=https://api.dev.aura-historia.com
 ```
 
 Tests can also override the URL via the `ahpc_backend_base_url` filter.
+
+### Override OAuth client settings for non-production environments
+
+The distributed plugin defaults to the production Aura Historia OAuth client and broker redirect URI:
+
+- client ID: `019eb0ab-c08d-7212-8169-312d465e4210`
+- broker redirect URI: `https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce`
+
+For staging, local development, or custom test environments, override these before the plugin runs.
+
+Using `wp-config.php`:
+
+```php
+define( 'AHPC_OAUTH_CLIENT_ID', '01970f22-2bf0-7000-8000-000000000010' );
+define( 'AHPC_OAUTH_BROKER_REDIRECT_URI', 'https://app.dev.example/api/oauth/client/redirect-broker/woocommerce' );
+```
+
+Using server-level environment variables:
+
+```sh
+AHPC_OAUTH_CLIENT_ID=01970f22-2bf0-7000-8000-000000000010
+AHPC_OAUTH_BROKER_REDIRECT_URI=https://app.dev.example/api/oauth/client/redirect-broker/woocommerce
+```
+
+Tests can also override these values via the `ahpc_oauth_client_id` and `ahpc_oauth_broker_redirect_uri` filters.
 
 ## Local development
 
@@ -244,7 +277,8 @@ Coverage focuses on the plugin's main contract, including:
 
 - managed webhook creation
 - backend secret registration
-- `x-api-key` header handling
+- OAuth connection and callback handling
+- bearer `Authorization` and webhook access token header handling
 - idempotent updates without duplicates
 - pause/delete cleanup
 - drift recovery

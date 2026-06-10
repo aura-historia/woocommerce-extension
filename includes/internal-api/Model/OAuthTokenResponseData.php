@@ -1,6 +1,6 @@
 <?php
 /**
- * StructuredAddressData
+ * OAuthTokenResponseData
  *
  * PHP version 8.1
  *
@@ -34,16 +34,16 @@ use \ArrayAccess;
 use \AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
 
 /**
- * StructuredAddressData Class Doc Comment
+ * OAuthTokenResponseData Class Doc Comment
  *
  * @category Class
- * @description Structured postal address used for shop metadata and geocoding. When supplied in shop create/update payloads, at least one component among &#x60;addressline&#x60;, &#x60;addresslineExtra&#x60;, &#x60;locality&#x60;, &#x60;region&#x60;, &#x60;postalCode&#x60;, or &#x60;country&#x60; must contain a non-empty value; &#x60;continent&#x60; alone does not make the address valid, and otherwise the backend rejects the request with &#x60;400 BAD_BODY_VALUE&#x60;.
+ * @description Token response returned by &#x60;POST /api/v1/oauth/token&#x60; and &#x60;GET /api/v1/oauth/tokens/by-third-party-code/{thirdPartyCode}&#x60;. The &#x60;access_token&#x60; is an Aura Historia bearer access token. &#x60;expires_in&#x60; is omitted (&#x60;null&#x60;) for non-expiring tokens. &#x60;third_party_exchange_code&#x60; is only present on the direct token exchange response.
  * @package  AuraHistoria\PartnerConnect\InternalApi
  * @author   OpenAPI Generator team
  * @link     https://openapi-generator.tech
  * @implements \ArrayAccess<string, mixed>
  */
-class StructuredAddressData implements ModelInterface, ArrayAccess, \JsonSerializable
+class OAuthTokenResponseData implements ModelInterface, ArrayAccess, \JsonSerializable
 {
     public const DISCRIMINATOR = null;
 
@@ -52,7 +52,7 @@ class StructuredAddressData implements ModelInterface, ArrayAccess, \JsonSeriali
      *
      * @var string
      */
-    protected static $openAPIModelName = 'StructuredAddressData';
+    protected static $openAPIModelName = 'OAuthTokenResponseData';
 
     /**
      * Array of property to type mappings. Used for (de)serialization
@@ -60,13 +60,11 @@ class StructuredAddressData implements ModelInterface, ArrayAccess, \JsonSeriali
      * @var string[]
      */
     protected static $openAPITypes = [
-        'addressline' => 'string',
-        'addressline_extra' => 'string',
-        'locality' => 'string',
-        'region' => 'string',
-        'postal_code' => 'string',
-        'country' => '\AuraHistoria\PartnerConnect\InternalApi\Model\CountryCodeData',
-        'continent' => '\AuraHistoria\PartnerConnect\InternalApi\Model\ContinentData'
+        'access_token' => 'string',
+        'token_type' => '\AuraHistoria\PartnerConnect\InternalApi\Model\AccessTokenTypeData',
+        'expires_in' => 'int',
+        'scope' => 'string',
+        'third_party_exchange_code' => 'string'
     ];
 
     /**
@@ -77,13 +75,11 @@ class StructuredAddressData implements ModelInterface, ArrayAccess, \JsonSeriali
      * @psalm-var array<string, string|null>
      */
     protected static $openAPIFormats = [
-        'addressline' => null,
-        'addressline_extra' => null,
-        'locality' => null,
-        'region' => null,
-        'postal_code' => null,
-        'country' => null,
-        'continent' => null
+        'access_token' => null,
+        'token_type' => null,
+        'expires_in' => 'int64',
+        'scope' => null,
+        'third_party_exchange_code' => 'uuid'
     ];
 
     /**
@@ -92,13 +88,11 @@ class StructuredAddressData implements ModelInterface, ArrayAccess, \JsonSeriali
      * @var boolean[]
      */
     protected static array $openAPINullables = [
-        'addressline' => false,
-        'addressline_extra' => false,
-        'locality' => false,
-        'region' => false,
-        'postal_code' => false,
-        'country' => false,
-        'continent' => false
+        'access_token' => false,
+        'token_type' => false,
+        'expires_in' => true,
+        'scope' => false,
+        'third_party_exchange_code' => false
     ];
 
     /**
@@ -187,13 +181,11 @@ class StructuredAddressData implements ModelInterface, ArrayAccess, \JsonSeriali
      * @var string[]
      */
     protected static $attributeMap = [
-        'addressline' => 'addressline',
-        'addressline_extra' => 'addresslineExtra',
-        'locality' => 'locality',
-        'region' => 'region',
-        'postal_code' => 'postalCode',
-        'country' => 'country',
-        'continent' => 'continent'
+        'access_token' => 'access_token',
+        'token_type' => 'token_type',
+        'expires_in' => 'expires_in',
+        'scope' => 'scope',
+        'third_party_exchange_code' => 'third_party_exchange_code'
     ];
 
     /**
@@ -202,13 +194,11 @@ class StructuredAddressData implements ModelInterface, ArrayAccess, \JsonSeriali
      * @var string[]
      */
     protected static $setters = [
-        'addressline' => 'setAddressline',
-        'addressline_extra' => 'setAddresslineExtra',
-        'locality' => 'setLocality',
-        'region' => 'setRegion',
-        'postal_code' => 'setPostalCode',
-        'country' => 'setCountry',
-        'continent' => 'setContinent'
+        'access_token' => 'setAccessToken',
+        'token_type' => 'setTokenType',
+        'expires_in' => 'setExpiresIn',
+        'scope' => 'setScope',
+        'third_party_exchange_code' => 'setThirdPartyExchangeCode'
     ];
 
     /**
@@ -217,13 +207,11 @@ class StructuredAddressData implements ModelInterface, ArrayAccess, \JsonSeriali
      * @var string[]
      */
     protected static $getters = [
-        'addressline' => 'getAddressline',
-        'addressline_extra' => 'getAddresslineExtra',
-        'locality' => 'getLocality',
-        'region' => 'getRegion',
-        'postal_code' => 'getPostalCode',
-        'country' => 'getCountry',
-        'continent' => 'getContinent'
+        'access_token' => 'getAccessToken',
+        'token_type' => 'getTokenType',
+        'expires_in' => 'getExpiresIn',
+        'scope' => 'getScope',
+        'third_party_exchange_code' => 'getThirdPartyExchangeCode'
     ];
 
     /**
@@ -283,13 +271,11 @@ class StructuredAddressData implements ModelInterface, ArrayAccess, \JsonSeriali
      */
     public function __construct(?array $data = null)
     {
-        $this->setIfExists('addressline', $data ?? [], null);
-        $this->setIfExists('addressline_extra', $data ?? [], null);
-        $this->setIfExists('locality', $data ?? [], null);
-        $this->setIfExists('region', $data ?? [], null);
-        $this->setIfExists('postal_code', $data ?? [], null);
-        $this->setIfExists('country', $data ?? [], null);
-        $this->setIfExists('continent', $data ?? [], null);
+        $this->setIfExists('access_token', $data ?? [], null);
+        $this->setIfExists('token_type', $data ?? [], null);
+        $this->setIfExists('expires_in', $data ?? [], null);
+        $this->setIfExists('scope', $data ?? [], null);
+        $this->setIfExists('third_party_exchange_code', $data ?? [], null);
     }
 
     /**
@@ -319,6 +305,19 @@ class StructuredAddressData implements ModelInterface, ArrayAccess, \JsonSeriali
     {
         $invalidProperties = [];
 
+        if ($this->container['access_token'] === null) {
+            $invalidProperties[] = "'access_token' can't be null";
+        }
+        if ($this->container['token_type'] === null) {
+            $invalidProperties[] = "'token_type' can't be null";
+        }
+        if (!is_null($this->container['expires_in']) && ($this->container['expires_in'] < 0)) {
+            $invalidProperties[] = "invalid value for 'expires_in', must be bigger than or equal to 0.";
+        }
+
+        if ($this->container['scope'] === null) {
+            $invalidProperties[] = "'scope' can't be null";
+        }
         return $invalidProperties;
     }
 
@@ -335,190 +334,148 @@ class StructuredAddressData implements ModelInterface, ArrayAccess, \JsonSeriali
 
 
     /**
-     * Gets addressline
+     * Gets access_token
+     *
+     * @return string
+     */
+    public function getAccessToken()
+    {
+        return $this->container['access_token'];
+    }
+
+    /**
+     * Sets access_token
+     *
+     * @param string $access_token The issued Aura Historia access token (plaintext bearer value).
+     *
+     * @return self
+     */
+    public function setAccessToken($access_token)
+    {
+        if (is_null($access_token)) {
+            throw new \InvalidArgumentException('non-nullable access_token cannot be null');
+        }
+        $this->container['access_token'] = $access_token;
+
+        return $this;
+    }
+
+    /**
+     * Gets token_type
+     *
+     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\AccessTokenTypeData
+     */
+    public function getTokenType()
+    {
+        return $this->container['token_type'];
+    }
+
+    /**
+     * Sets token_type
+     *
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\AccessTokenTypeData $token_type token_type
+     *
+     * @return self
+     */
+    public function setTokenType($token_type)
+    {
+        if (is_null($token_type)) {
+            throw new \InvalidArgumentException('non-nullable token_type cannot be null');
+        }
+        $this->container['token_type'] = $token_type;
+
+        return $this;
+    }
+
+    /**
+     * Gets expires_in
+     *
+     * @return int|null
+     */
+    public function getExpiresIn()
+    {
+        return $this->container['expires_in'];
+    }
+
+    /**
+     * Sets expires_in
+     *
+     * @param int|null $expires_in Seconds until the access token expires. `null` when the token does not expire.
+     *
+     * @return self
+     */
+    public function setExpiresIn($expires_in)
+    {
+        if (is_null($expires_in)) {
+            array_push($this->openAPINullablesSetToNull, 'expires_in');
+        } else {
+            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
+            $index = array_search('expires_in', $nullablesSetToNull);
+            if ($index !== FALSE) {
+                unset($nullablesSetToNull[$index]);
+                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
+            }
+        }
+
+        if (!is_null($expires_in) && ($expires_in < 0)) {
+            throw new \InvalidArgumentException('invalid value for $expires_in when calling OAuthTokenResponseData., must be bigger than or equal to 0.');
+        }
+
+        $this->container['expires_in'] = $expires_in;
+
+        return $this;
+    }
+
+    /**
+     * Gets scope
+     *
+     * @return string
+     */
+    public function getScope()
+    {
+        return $this->container['scope'];
+    }
+
+    /**
+     * Sets scope
+     *
+     * @param string $scope Space-separated list of scopes granted to the access token.
+     *
+     * @return self
+     */
+    public function setScope($scope)
+    {
+        if (is_null($scope)) {
+            throw new \InvalidArgumentException('non-nullable scope cannot be null');
+        }
+        $this->container['scope'] = $scope;
+
+        return $this;
+    }
+
+    /**
+     * Gets third_party_exchange_code
      *
      * @return string|null
      */
-    public function getAddressline()
+    public function getThirdPartyExchangeCode()
     {
-        return $this->container['addressline'];
+        return $this->container['third_party_exchange_code'];
     }
 
     /**
-     * Sets addressline
+     * Sets third_party_exchange_code
      *
-     * @param string|null $addressline Primary free-form address line such as street and house number.
+     * @param string|null $third_party_exchange_code Optional one-time exchange code returned by `POST /api/v1/oauth/token`. It can be redeemed once via `GET /api/v1/oauth/tokens/by-third-party-code/{thirdPartyCode}` within 60 seconds to obtain the same access token.
      *
      * @return self
      */
-    public function setAddressline($addressline)
+    public function setThirdPartyExchangeCode($third_party_exchange_code)
     {
-        if (is_null($addressline)) {
-            throw new \InvalidArgumentException('non-nullable addressline cannot be null');
+        if (is_null($third_party_exchange_code)) {
+            throw new \InvalidArgumentException('non-nullable third_party_exchange_code cannot be null');
         }
-        $this->container['addressline'] = $addressline;
-
-        return $this;
-    }
-
-    /**
-     * Gets addressline_extra
-     *
-     * @return string|null
-     */
-    public function getAddresslineExtra()
-    {
-        return $this->container['addressline_extra'];
-    }
-
-    /**
-     * Sets addressline_extra
-     *
-     * @param string|null $addressline_extra Optional secondary address line such as floor, suite, building, or c/o information.
-     *
-     * @return self
-     */
-    public function setAddresslineExtra($addressline_extra)
-    {
-        if (is_null($addressline_extra)) {
-            throw new \InvalidArgumentException('non-nullable addressline_extra cannot be null');
-        }
-        $this->container['addressline_extra'] = $addressline_extra;
-
-        return $this;
-    }
-
-    /**
-     * Gets locality
-     *
-     * @return string|null
-     */
-    public function getLocality()
-    {
-        return $this->container['locality'];
-    }
-
-    /**
-     * Sets locality
-     *
-     * @param string|null $locality City, town, or locality.
-     *
-     * @return self
-     */
-    public function setLocality($locality)
-    {
-        if (is_null($locality)) {
-            throw new \InvalidArgumentException('non-nullable locality cannot be null');
-        }
-        $this->container['locality'] = $locality;
-
-        return $this;
-    }
-
-    /**
-     * Gets region
-     *
-     * @return string|null
-     */
-    public function getRegion()
-    {
-        return $this->container['region'];
-    }
-
-    /**
-     * Sets region
-     *
-     * @param string|null $region Region, state, province, or administrative area.
-     *
-     * @return self
-     */
-    public function setRegion($region)
-    {
-        if (is_null($region)) {
-            throw new \InvalidArgumentException('non-nullable region cannot be null');
-        }
-        $this->container['region'] = $region;
-
-        return $this;
-    }
-
-    /**
-     * Gets postal_code
-     *
-     * @return string|null
-     */
-    public function getPostalCode()
-    {
-        return $this->container['postal_code'];
-    }
-
-    /**
-     * Sets postal_code
-     *
-     * @param string|null $postal_code Postal or ZIP code.
-     *
-     * @return self
-     */
-    public function setPostalCode($postal_code)
-    {
-        if (is_null($postal_code)) {
-            throw new \InvalidArgumentException('non-nullable postal_code cannot be null');
-        }
-        $this->container['postal_code'] = $postal_code;
-
-        return $this;
-    }
-
-    /**
-     * Gets country
-     *
-     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\CountryCodeData|null
-     */
-    public function getCountry()
-    {
-        return $this->container['country'];
-    }
-
-    /**
-     * Sets country
-     *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\CountryCodeData|null $country ISO 3166-1 alpha-2 country code serialized by the backend. When `continent` is omitted but `country` is present, the backend derives the continent from this code.
-     *
-     * @return self
-     */
-    public function setCountry($country)
-    {
-        if (is_null($country)) {
-            throw new \InvalidArgumentException('non-nullable country cannot be null');
-        }
-        $this->container['country'] = $country;
-
-        return $this;
-    }
-
-    /**
-     * Gets continent
-     *
-     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\ContinentData|null
-     */
-    public function getContinent()
-    {
-        return $this->container['continent'];
-    }
-
-    /**
-     * Sets continent
-     *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\ContinentData|null $continent Optional continent value exposed alongside `country` in structured-address data. If omitted while `country` is present, the backend derives it automatically.
-     *
-     * @return self
-     */
-    public function setContinent($continent)
-    {
-        if (is_null($continent)) {
-            throw new \InvalidArgumentException('non-nullable continent cannot be null');
-        }
-        $this->container['continent'] = $continent;
+        $this->container['third_party_exchange_code'] = $third_party_exchange_code;
 
         return $this;
     }
