@@ -55,7 +55,7 @@ if (!defined("AHPC_OAUTH_CLIENT_ID")) {
         $ahpc_env_oauth_client_id !== false &&
         $ahpc_env_oauth_client_id !== ""
             ? $ahpc_env_oauth_client_id
-            : "019e7e6a-052b-78a3-9f57-eaaf619ca5ac",
+            : "019eb0ab-c08d-7212-8169-312d465e4210",
     );
     unset($ahpc_env_oauth_client_id);
 }

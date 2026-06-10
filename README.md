@@ -164,7 +164,7 @@ Tests can also override the URL via the `ahpc_backend_base_url` filter.
 
 The distributed plugin defaults to the production Aura Historia OAuth client and broker redirect URI:
 
-- client ID: `019e7e6a-052b-78a3-9f57-eaaf619ca5ac`
+- client ID: `019eb0ab-c08d-7212-8169-312d465e4210`
 - broker redirect URI: `https://aura-historia.com/api/oauth/client/redirect-broker`
 
 For staging, local development, or custom test environments, override these before the plugin runs.

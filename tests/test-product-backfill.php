@@ -324,7 +324,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             [
                 "shop_id" => "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
                 "api_key" =>
-                    "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
+                    "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
                 "secret" => "test-secret",
             ],
             false,
@@ -405,7 +405,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
     public function test_process_batch_puts_products_to_backend()
     {
         $shop_id = "123e4567-e89b-12d3-a456-426614174000";
-        $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+        $api_key = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
 
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
@@ -483,7 +483,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
     public function test_process_batch_puts_products_to_backend_without_logged_in_user()
     {
         $shop_id = "123e4567-e89b-12d3-a456-426614174000";
-        $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+        $api_key = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
 
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
@@ -560,7 +560,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             [
                 "shop_id" => $shop_id,
                 "api_key" =>
-                    "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
+                    "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
                 "secret" => "test-secret",
             ],
             false,
@@ -607,7 +607,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             [
                 "shop_id" => $shop_id,
                 "api_key" =>
-                    "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
+                    "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
                 "secret" => "test-secret",
             ],
             false,
@@ -644,7 +644,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             [
                 "shop_id" => $shop_id,
                 "api_key" =>
-                    "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
+                    "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
                 "secret" => "test-secret",
             ],
             false,
@@ -677,7 +677,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             [
                 "shop_id" => $shop_id,
                 "api_key" =>
-                    "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
+                    "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
                 "secret" => "test-secret",
             ],
             false,
@@ -731,7 +731,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         }
 
         $shop_id = "123e4567-e89b-12d3-a456-426614174000";
-        $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+        $api_key = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
 
         // Provide enough mock responses: 1 for registration + 10 spare.
         $this->set_backend_mock_responses(
@@ -822,7 +822,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         }
 
         $shop_id = "123e4567-e89b-12d3-a456-426614174000";
-        $api_key = "aurahistoria_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+        $api_key = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
 
         // First sync: active.
         $this->set_backend_mock_responses(

@@ -111,7 +111,7 @@ class Webhook_Manager
     {
         return 1 ===
             preg_match(
-                "/\Aaurahistoria_[A-Za-z0-9]{6,}_[A-Za-z0-9]{12,}\z/",
+                "/\Aaurahistoria_accesstoken_[A-Za-z0-9]{6,}_[A-Za-z0-9]{12,}\z/",
                 self::normalize_api_key($api_key),
             );
     }
