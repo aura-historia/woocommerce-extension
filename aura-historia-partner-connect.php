@@ -7,7 +7,7 @@
  * Description:       Synchronizes WooCommerce Products to Aura Historia to help you reach a global audience for your antiques, art and collectables.
  * Version:           0.1.0
  * Requires at least: 6.5
- * Requires PHP:      8.1
+ * Requires PHP:      8.2
  * Author:            Aura Historia
  * License:           GPLv2 or later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html

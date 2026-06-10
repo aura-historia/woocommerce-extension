@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "b5d92fef665068bc214d449ebb597571",
+    "content-hash": "fbf76ba79df655f1bb20d861a8eb6cce",
     "packages": [
         {
             "name": "guzzlehttp/guzzle",
@@ -336,6 +336,24 @@
                 }
             ],
             "time": "2026-06-02T12:30:48+00:00"
+        },
+        {
+            "name": "kreuzberg-dev/html-to-markdown",
+            "version": "3.5.7",
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/kreuzberg-dev/html-to-markdown/zipball/ac780560126ba74d4851a08b2cbe891523884d1a",
+                "reference": "ac780560126ba74d4851a08b2cbe891523884d1a"
+            },
+            "require": {
+                "php": ">=8.2"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "HtmlToMarkdown\\": "packages/php/src/"
+                }
+            }
         },
         {
             "name": "psr/http-client",
@@ -2565,13 +2583,13 @@
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": {
-        "php": ">=8.1",
+        "php": ">=8.2",
         "ext-json": "*",
         "ext-mbstring": "*"
     },
     "platform-dev": {},
     "platform-overrides": {
-        "php": "8.1"
+        "php": "8.2"
     },
     "plugin-api-version": "2.9.0"
 }

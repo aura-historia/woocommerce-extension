@@ -21,7 +21,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/WordPress-6.5%2B-21759B?style=flat&logo=wordpress&logoColor=white" alt="WordPress 6.5+" />
   <img src="https://img.shields.io/badge/WooCommerce-required-96588A?style=flat&logo=woocommerce&logoColor=white" alt="WooCommerce required" />
-  <img src="https://img.shields.io/badge/PHP-8.1%2B-777BB4?style=flat&logo=php&logoColor=white" alt="PHP 8.1+" />
+  <img src="https://img.shields.io/badge/PHP-8.2%2B-777BB4?style=flat&logo=php&logoColor=white" alt="PHP 8.2+" />
 </p>
 
 <!-- WordPress plugin live stats row -->
@@ -88,7 +88,7 @@ Managed webhook topics:
 | Plugin version | `0.1.0` |
 | WordPress | `6.5+` |
 | WooCommerce | Required |
-| PHP | `8.1+` |
+| PHP | `8.2+` |
 | License | `GPLv2 or later` |
 | Release artifact | `aura-historia-partner-connect.zip` |
 
@@ -127,7 +127,7 @@ Depending on the action, the plugin may send:
 - generated WooCommerce webhook secret
 - store language and currency
 - WooCommerce product webhook payloads
-- current product data during catalog backfill
+- current product data during catalog backfill, with product descriptions converted from HTML to Markdown
 
 ### When it gets sent
 

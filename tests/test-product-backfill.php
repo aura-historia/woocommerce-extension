@@ -547,6 +547,110 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
     }
 
     /**
+     * It converts HTML product descriptions to Markdown for the backfill payload.
+     *
+     * @return void
+     */
+    public function test_process_batch_converts_product_description_html_to_markdown()
+    {
+        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+
+        update_option(
+            Webhook_Manager::OPTION_SETTINGS,
+            [
+                "shop_id" => $shop_id,
+                "access_token" =>
+                    "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
+                "secret" => "test-secret",
+            ],
+            false,
+        );
+
+        $product = new WC_Product_Simple();
+        $product->set_name("Markdown Product");
+        $product->set_description(
+            '<p>A <strong>bold</strong> item with ' .
+                '<a href="https://example.com/details">details</a>.</p>' .
+                '<ul><li>Included stand</li></ul>',
+        );
+        $product->set_status("publish");
+        $product->save();
+
+        try {
+            $backfill = new Product_Backfill();
+            $backfill->process_batch($shop_id, 1);
+        } finally {
+            $product->delete(true);
+        }
+
+        $requests = $this->get_backend_requests_for_url(
+            "https://example.com/api/v1/shops/" . $shop_id . "/products",
+        );
+
+        $this->assertCount(1, $requests);
+
+        $body = json_decode((string) $requests[0]["request"]->getBody(), true);
+        $description = $body[0]["description"]["text"];
+
+        $this->assertStringContainsString("**bold**", $description);
+        $this->assertStringContainsString(
+            "[details](https://example.com/details)",
+            $description,
+        );
+        $this->assertStringContainsString("- Included stand", $description);
+        $this->assertStringNotContainsString("<strong>", $description);
+    }
+
+    /**
+     * It falls back to the short description and converts it to Markdown.
+     *
+     * @return void
+     */
+    public function test_process_batch_converts_short_description_html_to_markdown()
+    {
+        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+
+        update_option(
+            Webhook_Manager::OPTION_SETTINGS,
+            [
+                "shop_id" => $shop_id,
+                "access_token" =>
+                    "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
+                "secret" => "test-secret",
+            ],
+            false,
+        );
+
+        $product = new WC_Product_Simple();
+        $product->set_name("Short Markdown Product");
+        $product->set_short_description(
+            "<p>An <em>elegant</em> short description.</p>",
+        );
+        $product->set_status("publish");
+        $product->save();
+
+        try {
+            $backfill = new Product_Backfill();
+            $backfill->process_batch($shop_id, 1);
+        } finally {
+            $product->delete(true);
+        }
+
+        $requests = $this->get_backend_requests_for_url(
+            "https://example.com/api/v1/shops/" . $shop_id . "/products",
+        );
+
+        $this->assertCount(1, $requests);
+
+        $body = json_decode((string) $requests[0]["request"]->getBody(), true);
+
+        $this->assertSame(
+            "An *elegant* short description.",
+            $body[0]["description"]["text"],
+        );
+    }
+
+    /**
      * It does not call the backend when there are no products on the page.
      *
      * @return void
