@@ -454,6 +454,7 @@ class Configuration
         return $this->keyFile;
     }
 
+
     /**
      * Resolves the managed uploads subdirectory used for generated client files.
      *

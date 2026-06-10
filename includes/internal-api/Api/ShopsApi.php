@@ -223,6 +223,8 @@ class ShopsApi
                     );
             }
 
+
+
             if ($statusCode < 200 || $statusCode > 299) {
                 throw new ApiException(
                     sprintf(
@@ -292,6 +294,7 @@ class ShopsApi
                     $e->setResponseObject($data);
                     throw $e;
             }
+
 
             throw $e;
         }

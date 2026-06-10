@@ -1,7 +1,7 @@
 {
   "source": {
     "repositoryUrl": "https://github.com/aura-historia/backend",
-    "commit": "develop",
+    "commit": "5757432d394dda447a186da6deaaf98860d63a4a",
     "specPath": "docs/swagger.yaml"
   },
   "generator": {
