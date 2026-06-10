@@ -113,7 +113,7 @@ info:
     name: License
     url: https://github.com/aura-historia/backend/blob/develop/LICENSE
 servers:
-  - url: https://api.dev.aura-historia.com
+  - url: https://api.aura-historia.com
     description: Development environment
   - url: https://api.aura-historia.com
     description: Production environment

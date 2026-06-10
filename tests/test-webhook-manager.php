@@ -725,7 +725,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
 
         $this->assertInstanceOf(WP_Error::class, $result);
         $this->assertSame(
-            "ahpc_oauth_invalid_token_type",
+            "ahpc_oauth_exchange_failed",
             $result->get_error_code(),
         );
         $this->assertFalse(
@@ -1015,9 +1015,9 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $manager = new Webhook_Manager();
         $shop_id = "123e4567-e89b-12d3-a456-426614174000";
         $original_access_token =
-            "aurahistoria_originaltoken_abcdefghijklmnopqrstuvwxyz1234567";
+            "aurahistoria_accesstoken_originaltoken_abcdefghijklmnopqrstuvwxyz1234567";
         $updated_access_token =
-            "aurahistoria_updatedtoken_abcdefghijklmnopqrstuvwxyz7654321";
+            "aurahistoria_accesstoken_updatedtoken_abcdefghijklmnopqrstuvwxyz7654321";
 
         update_option(
             Webhook_Manager::OPTION_SETTINGS,

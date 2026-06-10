@@ -1,0 +1,125 @@
+name: Deploy to WordPress.org
+
+on:
+  push:
+    tags:
+      - "*"
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PLUGIN_SLUG: aura-historia-partner-connect
+      SVN_URL: https://plugins.svn.wordpress.org/aura-historia-partner-connect
+      SVN_USERNAME: ${{ secrets.WP_ORG_USERNAME }}
+      SVN_PASSWORD: ${{ secrets.WP_ORG_PASSWORD }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          coverage: none
+          tools: composer:v2
+          cache: composer
+
+      - name: Derive deploy version
+        shell: bash
+        run: echo "DEPLOY_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Validate release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${SVN_USERNAME}" || -z "${SVN_PASSWORD}" ]]; then
+            echo "WP_ORG_USERNAME and WP_ORG_PASSWORD secrets must be configured." >&2
+            exit 1
+          fi
+
+          plugin_version=$(sed -n 's/^ \* Version:[[:space:]]*\(.*\)$/\1/p' aura-historia-partner-connect.php | head -n1 | tr -d '[:space:]')
+          stable_tag=$(sed -n 's/^Stable tag:[[:space:]]*\(.*\)$/\1/p' readme.txt | head -n1 | tr -d '[:space:]')
+
+          if [[ "${plugin_version}" != "${DEPLOY_VERSION}" ]]; then
+            echo "Git tag ${DEPLOY_VERSION} does not match plugin version ${plugin_version}." >&2
+            exit 1
+          fi
+
+          if [[ "${stable_tag}" != "${DEPLOY_VERSION}" ]]; then
+            echo "Git tag ${DEPLOY_VERSION} does not match readme stable tag ${stable_tag}." >&2
+            exit 1
+          fi
+
+      - name: Build release payload
+        run: sh ./build-release.sh
+
+      - name: Install Subversion
+        run: sudo apt-get update && sudo apt-get install -y subversion
+
+      - name: Check out WordPress.org SVN repository
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          svn checkout --depth immediates "${SVN_URL}" /tmp/wordpress-org
+          svn update --set-depth infinity /tmp/wordpress-org/trunk /tmp/wordpress-org/assets
+
+      - name: Sync trunk, assets, and tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          svn_dir=/tmp/wordpress-org
+          release_dir="${GITHUB_WORKSPACE}/build-release/${PLUGIN_SLUG}"
+
+          if svn info "${SVN_URL}/tags/${DEPLOY_VERSION}" >/dev/null 2>&1; then
+            echo "SVN tag ${DEPLOY_VERSION} already exists." >&2
+            exit 1
+          fi
+
+          rsync -a --delete --exclude '.svn/' "${release_dir}/" "${svn_dir}/trunk/"
+          rsync -a --delete --exclude '.svn/' "${GITHUB_WORKSPACE}/assets/" "${svn_dir}/assets/"
+
+          svn status "${svn_dir}" | while IFS= read -r line; do
+            status="${line:0:1}"
+            path="${line:8}"
+
+            case "${status}" in
+              '?')
+                svn add --parents "${path}"
+                ;;
+              '!')
+                svn delete "${path}"
+                ;;
+            esac
+          done
+
+          svn copy "${svn_dir}/trunk" "${svn_dir}/tags/${DEPLOY_VERSION}"
+
+      - name: Commit deployment to WordPress.org SVN
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$(svn status /tmp/wordpress-org)" ]]; then
+            echo "No SVN changes to commit."
+            exit 0
+          fi
+
+          svn commit /tmp/wordpress-org \
+            -m "Deploy version ${DEPLOY_VERSION}" \
+            --username "${SVN_USERNAME}" \
+            --password "${SVN_PASSWORD}" \
+            --no-auth-cache \
+            --non-interactive
