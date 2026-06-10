@@ -12,6 +12,8 @@
     "WP_DEBUG_LOG": true,
     "SCRIPT_DEBUG": true,
     "AHPC_FORCE_SYNC_DELIVERY": true,
-    "AHPC_BACKEND_BASE_URL": "https://api.dev.aura-historia.com"
+    "AHPC_BACKEND_BASE_URL": "https://api.dev.aura-historia.com",
+    "AHPC_OAUTH_CLIENT_ID": "019eb09e-563a-7ad2-8e71-1ae86f8430ab",
+    "AHPC_OAUTH_BROKER_REDIRECT_URI": "https://feat-757-oauth-client-redirect-broker-aura-historia-staging.bitter-frog-5102.workers.dev/api/oauth/client/redirect-broker"
   }
 }

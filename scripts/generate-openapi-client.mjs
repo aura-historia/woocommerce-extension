@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, cpSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
@@ -357,6 +357,39 @@ function replaceRegexOrThrow(content, pattern, replacement, description) {
     return content.replace(pattern, replacement);
 }
 
+function normalizeGeneratedPhpWhitespace(config) {
+    const outputPath = path.join(projectRoot, config.outputPath);
+    const stack = [outputPath];
+
+    while (stack.length > 0) {
+        const currentPath = stack.pop();
+
+        for (const entry of readdirSync(currentPath, { withFileTypes: true })) {
+            const entryPath = path.join(currentPath, entry.name);
+
+            if (entry.isDirectory()) {
+                stack.push(entryPath);
+                continue;
+            }
+
+            if (!entry.isFile() || !entry.name.endsWith('.php')) {
+                continue;
+            }
+
+            const content = readFileSync(entryPath, 'utf8');
+            const normalized = content
+                .split(/\r?\n/)
+                .map((line) => line.replace(/[ \t]+$/u, ''))
+                .join('\n')
+                .replace(/\n*$/u, '\n');
+
+            if (normalized !== content) {
+                writeFileSync(entryPath, normalized, 'utf8');
+            }
+        }
+    }
+}
+
 function applyWordPressGeneratedClientPatches(config) {
     const outputPath = path.join(projectRoot, config.outputPath);
 
@@ -691,7 +724,7 @@ async function main() {
     const config = readConfig();
     const specUrl = buildRawSpecUrl(config);
 
-    console.log(`Fetching pinned OpenAPI spec from ${specUrl}`);
+    console.log(`Fetching OpenAPI spec from ${specUrl}`);
 
     const upstreamSpec = await fetchSpec(specUrl);
     const filteredSpec = filterSpec(upstreamSpec, config.operations);
@@ -703,6 +736,7 @@ async function main() {
     runGenerator(config);
     copyGeneratedClient(config);
     applyWordPressGeneratedClientPatches(config);
+    normalizeGeneratedPhpWhitespace(config);
     cleanupTemporaryOutput(config);
 
     console.log(`Updated generated OpenAPI client in ${config.outputPath}`);

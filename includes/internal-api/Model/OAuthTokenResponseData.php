@@ -1,6 +1,6 @@
 <?php
 /**
- * LocalizedTextData
+ * OAuthTokenResponseData
  *
  * PHP version 8.1
  *
@@ -32,16 +32,16 @@ use \ArrayAccess;
 use \AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
 
 /**
- * LocalizedTextData Class Doc Comment
+ * OAuthTokenResponseData Class Doc Comment
  *
  * @category Class
- * @description Text content with language information
+ * @description Token response returned by &#x60;POST /api/v1/oauth/token&#x60; and &#x60;GET /api/v1/oauth/tokens/by-third-party-code/{thirdPartyCode}&#x60;. The &#x60;access_token&#x60; is an Aura Historia bearer access token. &#x60;expires_in&#x60; is omitted (&#x60;null&#x60;) for non-expiring tokens. &#x60;third_party_exchange_code&#x60; is only present on the direct token exchange response.
  * @package  AuraHistoria\PartnerConnect\InternalApi
  * @author   OpenAPI Generator team
  * @link     https://openapi-generator.tech
  * @implements \ArrayAccess<string, mixed>
  */
-class LocalizedTextData implements ModelInterface, ArrayAccess, \JsonSerializable
+class OAuthTokenResponseData implements ModelInterface, ArrayAccess, \JsonSerializable
 {
     public const DISCRIMINATOR = null;
 
@@ -50,7 +50,7 @@ class LocalizedTextData implements ModelInterface, ArrayAccess, \JsonSerializabl
      *
      * @var string
      */
-    protected static $openAPIModelName = 'LocalizedTextData';
+    protected static $openAPIModelName = 'OAuthTokenResponseData';
 
     /**
      * Array of property to type mappings. Used for (de)serialization
@@ -58,8 +58,11 @@ class LocalizedTextData implements ModelInterface, ArrayAccess, \JsonSerializabl
      * @var string[]
      */
     protected static $openAPITypes = [
-        'text' => 'string',
-        'language' => '\AuraHistoria\PartnerConnect\InternalApi\Model\LanguageData'
+        'access_token' => 'string',
+        'token_type' => '\AuraHistoria\PartnerConnect\InternalApi\Model\AccessTokenTypeData',
+        'expires_in' => 'int',
+        'scope' => 'string',
+        'third_party_exchange_code' => 'string'
     ];
 
     /**
@@ -70,8 +73,11 @@ class LocalizedTextData implements ModelInterface, ArrayAccess, \JsonSerializabl
      * @psalm-var array<string, string|null>
      */
     protected static $openAPIFormats = [
-        'text' => null,
-        'language' => null
+        'access_token' => null,
+        'token_type' => null,
+        'expires_in' => 'int64',
+        'scope' => null,
+        'third_party_exchange_code' => 'uuid'
     ];
 
     /**
@@ -80,8 +86,11 @@ class LocalizedTextData implements ModelInterface, ArrayAccess, \JsonSerializabl
      * @var boolean[]
      */
     protected static array $openAPINullables = [
-        'text' => false,
-        'language' => false
+        'access_token' => false,
+        'token_type' => false,
+        'expires_in' => true,
+        'scope' => false,
+        'third_party_exchange_code' => false
     ];
 
     /**
@@ -170,8 +179,11 @@ class LocalizedTextData implements ModelInterface, ArrayAccess, \JsonSerializabl
      * @var string[]
      */
     protected static $attributeMap = [
-        'text' => 'text',
-        'language' => 'language'
+        'access_token' => 'access_token',
+        'token_type' => 'token_type',
+        'expires_in' => 'expires_in',
+        'scope' => 'scope',
+        'third_party_exchange_code' => 'third_party_exchange_code'
     ];
 
     /**
@@ -180,8 +192,11 @@ class LocalizedTextData implements ModelInterface, ArrayAccess, \JsonSerializabl
      * @var string[]
      */
     protected static $setters = [
-        'text' => 'setText',
-        'language' => 'setLanguage'
+        'access_token' => 'setAccessToken',
+        'token_type' => 'setTokenType',
+        'expires_in' => 'setExpiresIn',
+        'scope' => 'setScope',
+        'third_party_exchange_code' => 'setThirdPartyExchangeCode'
     ];
 
     /**
@@ -190,8 +205,11 @@ class LocalizedTextData implements ModelInterface, ArrayAccess, \JsonSerializabl
      * @var string[]
      */
     protected static $getters = [
-        'text' => 'getText',
-        'language' => 'getLanguage'
+        'access_token' => 'getAccessToken',
+        'token_type' => 'getTokenType',
+        'expires_in' => 'getExpiresIn',
+        'scope' => 'getScope',
+        'third_party_exchange_code' => 'getThirdPartyExchangeCode'
     ];
 
     /**
@@ -251,8 +269,11 @@ class LocalizedTextData implements ModelInterface, ArrayAccess, \JsonSerializabl
      */
     public function __construct(?array $data = null)
     {
-        $this->setIfExists('text', $data ?? [], null);
-        $this->setIfExists('language', $data ?? [], null);
+        $this->setIfExists('access_token', $data ?? [], null);
+        $this->setIfExists('token_type', $data ?? [], null);
+        $this->setIfExists('expires_in', $data ?? [], null);
+        $this->setIfExists('scope', $data ?? [], null);
+        $this->setIfExists('third_party_exchange_code', $data ?? [], null);
     }
 
     /**
@@ -282,11 +303,18 @@ class LocalizedTextData implements ModelInterface, ArrayAccess, \JsonSerializabl
     {
         $invalidProperties = [];
 
-        if ($this->container['text'] === null) {
-            $invalidProperties[] = "'text' can't be null";
+        if ($this->container['access_token'] === null) {
+            $invalidProperties[] = "'access_token' can't be null";
         }
-        if ($this->container['language'] === null) {
-            $invalidProperties[] = "'language' can't be null";
+        if ($this->container['token_type'] === null) {
+            $invalidProperties[] = "'token_type' can't be null";
+        }
+        if (!is_null($this->container['expires_in']) && ($this->container['expires_in'] < 0)) {
+            $invalidProperties[] = "invalid value for 'expires_in', must be bigger than or equal to 0.";
+        }
+
+        if ($this->container['scope'] === null) {
+            $invalidProperties[] = "'scope' can't be null";
         }
         return $invalidProperties;
     }
@@ -304,55 +332,148 @@ class LocalizedTextData implements ModelInterface, ArrayAccess, \JsonSerializabl
 
 
     /**
-     * Gets text
+     * Gets access_token
      *
      * @return string
      */
-    public function getText()
+    public function getAccessToken()
     {
-        return $this->container['text'];
+        return $this->container['access_token'];
     }
 
     /**
-     * Sets text
+     * Sets access_token
      *
-     * @param string $text The text content
+     * @param string $access_token The issued Aura Historia access token (plaintext bearer value).
      *
      * @return self
      */
-    public function setText($text)
+    public function setAccessToken($access_token)
     {
-        if (is_null($text)) {
-            throw new \InvalidArgumentException('non-nullable text cannot be null');
+        if (is_null($access_token)) {
+            throw new \InvalidArgumentException('non-nullable access_token cannot be null');
         }
-        $this->container['text'] = $text;
+        $this->container['access_token'] = $access_token;
 
         return $this;
     }
 
     /**
-     * Gets language
+     * Gets token_type
      *
-     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\LanguageData
+     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\AccessTokenTypeData
      */
-    public function getLanguage()
+    public function getTokenType()
     {
-        return $this->container['language'];
+        return $this->container['token_type'];
     }
 
     /**
-     * Sets language
+     * Sets token_type
      *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\LanguageData $language language
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\AccessTokenTypeData $token_type token_type
      *
      * @return self
      */
-    public function setLanguage($language)
+    public function setTokenType($token_type)
     {
-        if (is_null($language)) {
-            throw new \InvalidArgumentException('non-nullable language cannot be null');
+        if (is_null($token_type)) {
+            throw new \InvalidArgumentException('non-nullable token_type cannot be null');
         }
-        $this->container['language'] = $language;
+        $this->container['token_type'] = $token_type;
+
+        return $this;
+    }
+
+    /**
+     * Gets expires_in
+     *
+     * @return int|null
+     */
+    public function getExpiresIn()
+    {
+        return $this->container['expires_in'];
+    }
+
+    /**
+     * Sets expires_in
+     *
+     * @param int|null $expires_in Seconds until the access token expires. `null` when the token does not expire.
+     *
+     * @return self
+     */
+    public function setExpiresIn($expires_in)
+    {
+        if (is_null($expires_in)) {
+            array_push($this->openAPINullablesSetToNull, 'expires_in');
+        } else {
+            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
+            $index = array_search('expires_in', $nullablesSetToNull);
+            if ($index !== FALSE) {
+                unset($nullablesSetToNull[$index]);
+                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
+            }
+        }
+
+        if (!is_null($expires_in) && ($expires_in < 0)) {
+            throw new \InvalidArgumentException('invalid value for $expires_in when calling OAuthTokenResponseData., must be bigger than or equal to 0.');
+        }
+
+        $this->container['expires_in'] = $expires_in;
+
+        return $this;
+    }
+
+    /**
+     * Gets scope
+     *
+     * @return string
+     */
+    public function getScope()
+    {
+        return $this->container['scope'];
+    }
+
+    /**
+     * Sets scope
+     *
+     * @param string $scope Space-separated list of scopes granted to the access token.
+     *
+     * @return self
+     */
+    public function setScope($scope)
+    {
+        if (is_null($scope)) {
+            throw new \InvalidArgumentException('non-nullable scope cannot be null');
+        }
+        $this->container['scope'] = $scope;
+
+        return $this;
+    }
+
+    /**
+     * Gets third_party_exchange_code
+     *
+     * @return string|null
+     */
+    public function getThirdPartyExchangeCode()
+    {
+        return $this->container['third_party_exchange_code'];
+    }
+
+    /**
+     * Sets third_party_exchange_code
+     *
+     * @param string|null $third_party_exchange_code Optional one-time exchange code returned by `POST /api/v1/oauth/token`. It can be redeemed once via `GET /api/v1/oauth/tokens/by-third-party-code/{thirdPartyCode}` within 60 seconds to obtain the same access token.
+     *
+     * @return self
+     */
+    public function setThirdPartyExchangeCode($third_party_exchange_code)
+    {
+        if (is_null($third_party_exchange_code)) {
+            throw new \InvalidArgumentException('non-nullable third_party_exchange_code cannot be null');
+        }
+        $this->container['third_party_exchange_code'] = $third_party_exchange_code;
 
         return $this;
     }

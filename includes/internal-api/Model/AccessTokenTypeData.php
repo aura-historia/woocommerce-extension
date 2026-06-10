@@ -1,6 +1,6 @@
 <?php
 /**
- * ShopPartnerStatusData
+ * AccessTokenTypeData
  *
  * PHP version 8.1
  *
@@ -30,22 +30,20 @@ namespace AuraHistoria\PartnerConnect\InternalApi\Model;
 use \AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
 
 /**
- * ShopPartnerStatusData Class Doc Comment
+ * AccessTokenTypeData Class Doc Comment
  *
  * @category Class
- * @description Partner relationship status of a shop: - SCRAPED: Shop data exists without a linked partner user - PARTNERED: Shop is linked to a partner user
+ * @description Token type returned for Aura Historia access tokens.
  * @package  AuraHistoria\PartnerConnect\InternalApi
  * @author   OpenAPI Generator team
  * @link     https://openapi-generator.tech
  */
-class ShopPartnerStatusData
+class AccessTokenTypeData
 {
     /**
      * Possible values of this enum
      */
-    public const SCRAPED = 'SCRAPED';
-
-    public const PARTNERED = 'PARTNERED';
+    public const BEARER = 'BEARER';
 
     /**
      * Gets allowable values of the enum
@@ -54,8 +52,7 @@ class ShopPartnerStatusData
     public static function getAllowableEnumValues()
     {
         return [
-            self::SCRAPED,
-            self::PARTNERED
+            self::BEARER
         ];
     }
 }

@@ -1,6 +1,6 @@
 <?php
 /**
- * ProductsApi
+ * OAuthApi
  * PHP version 8.1
  *
  * @category Class
@@ -43,14 +43,14 @@ use AuraHistoria\PartnerConnect\InternalApi\HeaderSelector;
 use AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
 
 /**
- * ProductsApi Class Doc Comment
+ * OAuthApi Class Doc Comment
  *
  * @category Class
  * @package  AuraHistoria\PartnerConnect\InternalApi
  * @author   OpenAPI Generator team
  * @link     https://openapi-generator.tech
  */
-class ProductsApi
+class OAuthApi
 {
     /**
      * @var ClientInterface
@@ -74,7 +74,7 @@ class ProductsApi
 
     /** @var string[] $contentTypes **/
     public const contentTypes = [
-        'putPartnerProducts' => [
+        'oauthTokenByThirdPartyCode' => [
             'application/json',
         ],
     ];
@@ -126,40 +126,38 @@ class ProductsApi
     }
 
     /**
-     * Operation putPartnerProducts
+     * Operation oauthTokenByThirdPartyCode
      *
-     * Batch upsert products (Partner API)
+     * Exchange OAuth token by third-party code
      *
-     * @param  string $shop_id Unique identifier of the partner shop (required)
-     * @param  \AuraHistoria\PartnerConnect\InternalApi\Model\PutProductData[] $put_product_data Array of products to upsert. Must not be empty. (required)
-     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['putPartnerProducts'] to see the possible values for this operation
+     * @param  string $third_party_code UUIDv7 one-time exchange code returned by the OAuth token endpoint. (required)
+     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['oauthTokenByThirdPartyCode'] to see the possible values for this operation
      *
      * @throws \AuraHistoria\PartnerConnect\InternalApi\ApiException on non-2xx response or if the response body is not in the expected format
      * @throws \InvalidArgumentException
-     * @return string[]|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError
+     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\OAuthTokenResponseData|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError
      */
-    public function putPartnerProducts($shop_id, $put_product_data, string $contentType = self::contentTypes['putPartnerProducts'][0])
+    public function oauthTokenByThirdPartyCode($third_party_code, string $contentType = self::contentTypes['oauthTokenByThirdPartyCode'][0])
     {
-        list($response) = $this->putPartnerProductsWithHttpInfo($shop_id, $put_product_data, $contentType);
+        list($response) = $this->oauthTokenByThirdPartyCodeWithHttpInfo($third_party_code, $contentType);
         return $response;
     }
 
     /**
-     * Operation putPartnerProductsWithHttpInfo
+     * Operation oauthTokenByThirdPartyCodeWithHttpInfo
      *
-     * Batch upsert products (Partner API)
+     * Exchange OAuth token by third-party code
      *
-     * @param  string $shop_id Unique identifier of the partner shop (required)
-     * @param  \AuraHistoria\PartnerConnect\InternalApi\Model\PutProductData[] $put_product_data Array of products to upsert. Must not be empty. (required)
-     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['putPartnerProducts'] to see the possible values for this operation
+     * @param  string $third_party_code UUIDv7 one-time exchange code returned by the OAuth token endpoint. (required)
+     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['oauthTokenByThirdPartyCode'] to see the possible values for this operation
      *
      * @throws \AuraHistoria\PartnerConnect\InternalApi\ApiException on non-2xx response or if the response body is not in the expected format
      * @throws \InvalidArgumentException
-     * @return array of string[]|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError, HTTP status code, HTTP response headers (array of strings)
+     * @return array of \AuraHistoria\PartnerConnect\InternalApi\Model\OAuthTokenResponseData|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError, HTTP status code, HTTP response headers (array of strings)
      */
-    public function putPartnerProductsWithHttpInfo($shop_id, $put_product_data, string $contentType = self::contentTypes['putPartnerProducts'][0])
+    public function oauthTokenByThirdPartyCodeWithHttpInfo($third_party_code, string $contentType = self::contentTypes['oauthTokenByThirdPartyCode'][0])
     {
-        $request = $this->putPartnerProductsRequest($shop_id, $put_product_data, $contentType);
+        $request = $this->oauthTokenByThirdPartyCodeRequest($third_party_code, $contentType);
 
         try {
             $options = $this->createHttpClientOption();
@@ -185,31 +183,13 @@ class ProductsApi
 
 
             switch($statusCode) {
-                case 202:
+                case 200:
                     return $this->handleResponseWithDataType(
-                        'string[]',
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\OAuthTokenResponseData',
                         $request,
                         $response,
                     );
                 case 400:
-                    return $this->handleResponseWithDataType(
-                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
-                        $request,
-                        $response,
-                    );
-                case 401:
-                    return $this->handleResponseWithDataType(
-                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
-                        $request,
-                        $response,
-                    );
-                case 403:
-                    return $this->handleResponseWithDataType(
-                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
-                        $request,
-                        $response,
-                    );
-                case 404:
                     return $this->handleResponseWithDataType(
                         '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
                         $request,
@@ -221,13 +201,9 @@ class ProductsApi
                         $request,
                         $response,
                     );
-                case 503:
-                    return $this->handleResponseWithDataType(
-                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
-                        $request,
-                        $response,
-                    );
             }
+
+
 
             if ($statusCode < 200 || $statusCode > 299) {
                 throw new ApiException(
@@ -243,45 +219,21 @@ class ProductsApi
             }
 
             return $this->handleResponseWithDataType(
-                'string[]',
+                '\AuraHistoria\PartnerConnect\InternalApi\Model\OAuthTokenResponseData',
                 $request,
                 $response,
             );
         } catch (ApiException $e) {
             switch ($e->getCode()) {
-                case 202:
+                case 200:
                     $data = ObjectSerializer::deserialize(
                         $e->getResponseBody(),
-                        'string[]',
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\OAuthTokenResponseData',
                         $e->getResponseHeaders()
                     );
                     $e->setResponseObject($data);
                     throw $e;
                 case 400:
-                    $data = ObjectSerializer::deserialize(
-                        $e->getResponseBody(),
-                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
-                        $e->getResponseHeaders()
-                    );
-                    $e->setResponseObject($data);
-                    throw $e;
-                case 401:
-                    $data = ObjectSerializer::deserialize(
-                        $e->getResponseBody(),
-                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
-                        $e->getResponseHeaders()
-                    );
-                    $e->setResponseObject($data);
-                    throw $e;
-                case 403:
-                    $data = ObjectSerializer::deserialize(
-                        $e->getResponseBody(),
-                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
-                        $e->getResponseHeaders()
-                    );
-                    $e->setResponseObject($data);
-                    throw $e;
-                case 404:
                     $data = ObjectSerializer::deserialize(
                         $e->getResponseBody(),
                         '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
@@ -297,35 +249,27 @@ class ProductsApi
                     );
                     $e->setResponseObject($data);
                     throw $e;
-                case 503:
-                    $data = ObjectSerializer::deserialize(
-                        $e->getResponseBody(),
-                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
-                        $e->getResponseHeaders()
-                    );
-                    $e->setResponseObject($data);
-                    throw $e;
             }
+
 
             throw $e;
         }
     }
 
     /**
-     * Operation putPartnerProductsAsync
+     * Operation oauthTokenByThirdPartyCodeAsync
      *
-     * Batch upsert products (Partner API)
+     * Exchange OAuth token by third-party code
      *
-     * @param  string $shop_id Unique identifier of the partner shop (required)
-     * @param  \AuraHistoria\PartnerConnect\InternalApi\Model\PutProductData[] $put_product_data Array of products to upsert. Must not be empty. (required)
-     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['putPartnerProducts'] to see the possible values for this operation
+     * @param  string $third_party_code UUIDv7 one-time exchange code returned by the OAuth token endpoint. (required)
+     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['oauthTokenByThirdPartyCode'] to see the possible values for this operation
      *
      * @throws \InvalidArgumentException
      * @return \GuzzleHttp\Promise\PromiseInterface
      */
-    public function putPartnerProductsAsync($shop_id, $put_product_data, string $contentType = self::contentTypes['putPartnerProducts'][0])
+    public function oauthTokenByThirdPartyCodeAsync($third_party_code, string $contentType = self::contentTypes['oauthTokenByThirdPartyCode'][0])
     {
-        return $this->putPartnerProductsAsyncWithHttpInfo($shop_id, $put_product_data, $contentType)
+        return $this->oauthTokenByThirdPartyCodeAsyncWithHttpInfo($third_party_code, $contentType)
             ->then(
                 function ($response) {
                     return $response[0];
@@ -334,21 +278,20 @@ class ProductsApi
     }
 
     /**
-     * Operation putPartnerProductsAsyncWithHttpInfo
+     * Operation oauthTokenByThirdPartyCodeAsyncWithHttpInfo
      *
-     * Batch upsert products (Partner API)
+     * Exchange OAuth token by third-party code
      *
-     * @param  string $shop_id Unique identifier of the partner shop (required)
-     * @param  \AuraHistoria\PartnerConnect\InternalApi\Model\PutProductData[] $put_product_data Array of products to upsert. Must not be empty. (required)
-     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['putPartnerProducts'] to see the possible values for this operation
+     * @param  string $third_party_code UUIDv7 one-time exchange code returned by the OAuth token endpoint. (required)
+     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['oauthTokenByThirdPartyCode'] to see the possible values for this operation
      *
      * @throws \InvalidArgumentException
      * @return \GuzzleHttp\Promise\PromiseInterface
      */
-    public function putPartnerProductsAsyncWithHttpInfo($shop_id, $put_product_data, string $contentType = self::contentTypes['putPartnerProducts'][0])
+    public function oauthTokenByThirdPartyCodeAsyncWithHttpInfo($third_party_code, string $contentType = self::contentTypes['oauthTokenByThirdPartyCode'][0])
     {
-        $returnType = 'string[]';
-        $request = $this->putPartnerProductsRequest($shop_id, $put_product_data, $contentType);
+        $returnType = '\AuraHistoria\PartnerConnect\InternalApi\Model\OAuthTokenResponseData';
+        $request = $this->oauthTokenByThirdPartyCodeRequest($third_party_code, $contentType);
 
         return $this->client
             ->sendAsync($request, $this->createHttpClientOption())
@@ -387,34 +330,26 @@ class ProductsApi
     }
 
     /**
-     * Create request for operation 'putPartnerProducts'
+     * Create request for operation 'oauthTokenByThirdPartyCode'
      *
-     * @param  string $shop_id Unique identifier of the partner shop (required)
-     * @param  \AuraHistoria\PartnerConnect\InternalApi\Model\PutProductData[] $put_product_data Array of products to upsert. Must not be empty. (required)
-     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['putPartnerProducts'] to see the possible values for this operation
+     * @param  string $third_party_code UUIDv7 one-time exchange code returned by the OAuth token endpoint. (required)
+     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['oauthTokenByThirdPartyCode'] to see the possible values for this operation
      *
      * @throws \InvalidArgumentException
      * @return \GuzzleHttp\Psr7\Request
      */
-    public function putPartnerProductsRequest($shop_id, $put_product_data, string $contentType = self::contentTypes['putPartnerProducts'][0])
+    public function oauthTokenByThirdPartyCodeRequest($third_party_code, string $contentType = self::contentTypes['oauthTokenByThirdPartyCode'][0])
     {
 
-        // verify the required parameter 'shop_id' is set
-        if ($shop_id === null || (is_array($shop_id) && count($shop_id) === 0)) {
+        // verify the required parameter 'third_party_code' is set
+        if ($third_party_code === null || (is_array($third_party_code) && count($third_party_code) === 0)) {
             throw new \InvalidArgumentException(
-                'Missing the required parameter $shop_id when calling putPartnerProducts'
-            );
-        }
-
-        // verify the required parameter 'put_product_data' is set
-        if ($put_product_data === null || (is_array($put_product_data) && count($put_product_data) === 0)) {
-            throw new \InvalidArgumentException(
-                'Missing the required parameter $put_product_data when calling putPartnerProducts'
+                'Missing the required parameter $third_party_code when calling oauthTokenByThirdPartyCode'
             );
         }
 
 
-        $resourcePath = '/api/v1/shops/{shopId}/products';
+        $resourcePath = '/api/v1/oauth/tokens/by-third-party-code/{thirdPartyCode}';
         $formParams = [];
         $queryParams = [];
         $headerParams = [];
@@ -424,10 +359,10 @@ class ProductsApi
 
 
         // path params
-        if ($shop_id !== null) {
+        if ($third_party_code !== null) {
             $resourcePath = str_replace(
-                '{shopId}',
-                ObjectSerializer::toPathValue($shop_id),
+                '{thirdPartyCode}',
+                ObjectSerializer::toPathValue($third_party_code),
                 $resourcePath
             );
         }
@@ -440,14 +375,7 @@ class ProductsApi
         );
 
         // for model (json/xml)
-        if (isset($put_product_data)) {
-            if (stripos($headers['Content-Type'], 'application/json') !== false) {
-                # if Content-Type contains "application/json", json_encode the body
-                $httpBody = \GuzzleHttp\Utils::jsonEncode(ObjectSerializer::sanitizeForSerialization($put_product_data));
-            } else {
-                $httpBody = $put_product_data;
-            }
-        } elseif (count($formParams) > 0) {
+        if (count($formParams) > 0) {
             if ($multipart) {
                 $multipartContents = [];
                 foreach ($formParams as $formParamName => $formParamValue) {
@@ -471,14 +399,6 @@ class ProductsApi
             }
         }
 
-        // this endpoint requires Bearer (opaque) authentication (access token)
-        if (!empty($this->config->getAccessToken())) {
-            $headers['Authorization'] = 'Bearer ' . $this->config->getAccessToken();
-        }
-        // this endpoint requires Bearer (JWT) authentication (access token)
-        if (!empty($this->config->getAccessToken())) {
-            $headers['Authorization'] = 'Bearer ' . $this->config->getAccessToken();
-        }
 
         $defaultHeaders = [];
         if ($this->config->getUserAgent()) {
@@ -494,7 +414,7 @@ class ProductsApi
         $operationHost = $this->config->getHost();
         $query = ObjectSerializer::buildQuery($queryParams);
         return new Request(
-            'PUT',
+            'GET',
             $operationHost . $resourcePath . ($query ? "?{$query}" : ''),
             $headers,
             $httpBody

@@ -48,6 +48,32 @@ if (!defined("AHPC_BACKEND_BASE_URL")) {
     unset($ahpc_env_backend_base_url);
 }
 
+if (!defined("AHPC_OAUTH_CLIENT_ID")) {
+    $ahpc_env_oauth_client_id = getenv("AHPC_OAUTH_CLIENT_ID");
+    define(
+        "AHPC_OAUTH_CLIENT_ID",
+        $ahpc_env_oauth_client_id !== false &&
+        $ahpc_env_oauth_client_id !== ""
+            ? $ahpc_env_oauth_client_id
+            : "019e7e6a-052b-78a3-9f57-eaaf619ca5ac",
+    );
+    unset($ahpc_env_oauth_client_id);
+}
+
+if (!defined("AHPC_OAUTH_BROKER_REDIRECT_URI")) {
+    $ahpc_env_oauth_broker_redirect_uri = getenv(
+        "AHPC_OAUTH_BROKER_REDIRECT_URI",
+    );
+    define(
+        "AHPC_OAUTH_BROKER_REDIRECT_URI",
+        $ahpc_env_oauth_broker_redirect_uri !== false &&
+        $ahpc_env_oauth_broker_redirect_uri !== ""
+            ? $ahpc_env_oauth_broker_redirect_uri
+            : "https://aura-historia.com/api/oauth/client/redirect-broker",
+    );
+    unset($ahpc_env_oauth_broker_redirect_uri);
+}
+
 $ahpc_autoload = AHPC_PLUGIN_DIR . "vendor/autoload.php";
 
 if (file_exists($ahpc_autoload)) {

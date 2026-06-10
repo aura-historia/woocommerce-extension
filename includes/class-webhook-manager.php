@@ -28,6 +28,7 @@ class Webhook_Manager
     const OPTION_PLUGIN_VERSION = "ahpc_plugin_version";
     const OPTION_LAST_SYNC_ERROR = "ahpc_last_sync_error";
     const OPTION_LAST_SYNC_AT = "ahpc_last_sync_at";
+    const OPTION_LAST_OAUTH_ERROR = "ahpc_last_oauth_error";
     const SETTINGS_GROUP = "ahpc_settings_group";
     const TEXT_DOMAIN = "aura-historia-partner-connect";
     const API_VERSION = 3;
@@ -90,9 +91,9 @@ class Webhook_Manager
     }
 
     /**
-     * Normalizes an API key.
+     * Normalizes an Aura Historia access token.
      *
-     * @param string $api_key API key.
+     * @param string $api_key Aura Historia access token.
      * @return string
      */
     public static function normalize_api_key($api_key)
@@ -101,9 +102,9 @@ class Webhook_Manager
     }
 
     /**
-     * Returns whether the given API key matches the expected lightweight format.
+     * Returns whether the given Aura Historia access token matches the expected lightweight format.
      *
-     * @param string $api_key API key.
+     * @param string $api_key Aura Historia access token.
      * @return bool
      */
     public static function is_valid_api_key($api_key)
@@ -374,7 +375,7 @@ class Webhook_Manager
                     $setup_error = new WP_Error(
                         "ahpc_invalid_shop_id",
                         __(
-                            "The Shop ID does not match the value shown in Aura Historia. Copy it again and save once more.",
+                            "The OAuth connection returned an invalid Aura Historia Shop ID. Reconnect this store and try once more.",
                             "aura-historia-partner-connect",
                         ),
                     );
@@ -382,7 +383,7 @@ class Webhook_Manager
                     $setup_error = new WP_Error(
                         "ahpc_invalid_api_key",
                         __(
-                            "The API key does not match the value shown in Aura Historia. Copy it again and save once more.",
+                            "The OAuth connection returned an invalid Aura Historia access token. Reconnect this store and try once more.",
                             "aura-historia-partner-connect",
                         ),
                     );
@@ -493,7 +494,7 @@ class Webhook_Manager
      * separate configuration step.
      *
      * @param string $shop_id Shop UUID.
-     * @param string $api_key Backend API key.
+     * @param string $api_key Aura Historia access token.
      * @param string $secret  Generated webhook secret.
      * @return true|WP_Error
      */
@@ -724,6 +725,7 @@ class Webhook_Manager
         delete_option(self::OPTION_PLUGIN_VERSION);
         delete_option(self::OPTION_LAST_SYNC_ERROR);
         delete_option(self::OPTION_LAST_SYNC_AT);
+        delete_option(self::OPTION_LAST_OAUTH_ERROR);
 
         if (class_exists(Product_Backfill::class)) {
             (new Product_Backfill())->cancel_backfill();

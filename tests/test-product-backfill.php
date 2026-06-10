@@ -96,7 +96,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             array_fill(
                 0,
                 20,
-                new Response(200, ["Content-Type" => "application/json"], '{"errors":{}}'),
+                new Response(202, ["Content-Type" => "application/json"], '[]'),
             ),
         );
 
@@ -344,7 +344,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
     }
 
     /**
-     * It aborts silently when the stored API key is empty.
+     * It aborts silently when the stored access token is empty.
      *
      * @return void
      */
@@ -443,8 +443,8 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             strtoupper($requests[0]["request"]->getMethod()),
         );
         $this->assertSame(
-            $api_key,
-            $requests[0]["request"]->getHeaderLine("x-api-key"),
+            "Bearer " . $api_key,
+            $requests[0]["request"]->getHeaderLine("Authorization"),
         );
 
         $body = json_decode((string) $requests[0]["request"]->getBody(), true);
@@ -687,8 +687,8 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         $error_body = [
             "status" => 401,
             "title" => "Unauthorized",
-            "error" => "PARTNER_SHOP_API_KEY_MISMATCH",
-            "detail" => "Missing or invalid x-api-key.",
+            "error" => "UNAUTHORIZED",
+            "detail" => "Missing or invalid Authorization header.",
         ];
         $this->set_backend_mock_responses([
             new Response(
@@ -748,6 +748,8 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
                         "shopType" => "COMMERCIAL_DEALER",
                         "domains" => ["example.com"],
                         "partnerStatus" => "PARTNERED",
+                        "createdBy" => "SYSTEM",
+                        "updatedBy" => "SYSTEM",
                         "created" => "2024-01-01T10:00:00Z",
                         "updated" => "2024-01-01T12:00:00Z",
                     ]),
@@ -837,6 +839,8 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
                         "shopType" => "COMMERCIAL_DEALER",
                         "domains" => ["example.com"],
                         "partnerStatus" => "PARTNERED",
+                        "createdBy" => "SYSTEM",
+                        "updatedBy" => "SYSTEM",
                         "created" => "2024-01-01T10:00:00Z",
                         "updated" => "2024-01-01T12:00:00Z",
                     ]),
