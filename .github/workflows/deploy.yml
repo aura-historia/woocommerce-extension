@@ -15,7 +15,6 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     env:
       PLUGIN_SLUG: aura-historia-partner-connect
       SVN_URL: https://plugins.svn.wordpress.org/aura-historia-partner-connect
