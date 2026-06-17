@@ -2,7 +2,7 @@
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.2
-Stable tag: 0.1.0
+Stable tag: 0.2.0
 Contributors: aurahistoria
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -119,6 +119,9 @@ Yes. After a successful connection, the plugin can send the current catalog to A
 Plugin-owned webhooks are paused on deactivation so WooCommerce stops sending deliveries.
 
 == Changelog ==
+
+= 0.2.0 =
+* The plugin now auto-configures with Aura Historia on installation. No more manual insertion of credentials needed. Just install, activate, and approve the OAuth connection when prompted.
 
 = 0.1.0 =
 * Initial release.

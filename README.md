@@ -85,7 +85,7 @@ Managed webhook topics:
 
 | Item | Value |
 | --- | --- |
-| Plugin version | `0.1.0` |
+| Plugin version | `0.2.0` |
 | WordPress | `6.5+` |
 | WooCommerce | Required |
 | PHP | `8.2+` |
