@@ -361,7 +361,7 @@ class Product_Backfill
             if (!update_option(self::OPTION_BATCH, $snapshot, false)) {
                 $message = sprintf("Aura Historia backfill batch (page %d) could not save its request snapshot.", $page);
                 $this->record_failed($message);
-                throw new \RuntimeException($message);
+                throw new \RuntimeException(esc_html($message));
             }
         }
 
@@ -406,7 +406,7 @@ class Product_Backfill
                     }
                     $this->schedule_retry($snapshot, $listing_source_id, $page, $message);
                     // Never include free-form backend details in Action Scheduler logs.
-                    throw new \RuntimeException($message);
+                    throw new \RuntimeException(esc_html($message));
                 }
 
                 if (!$has_report) {
@@ -425,7 +425,7 @@ class Product_Backfill
                 if (!empty($failure["retryable"])) {
                     $message = sprintf("Aura Historia backfill batch (page %d) has retryable listing admission failures.", $page);
                     $this->schedule_retry($snapshot, $listing_source_id, $page, $message);
-                    throw new \RuntimeException($message);
+                    throw new \RuntimeException(esc_html($message));
                 }
             }
         } else {
@@ -447,7 +447,7 @@ class Product_Backfill
         if (!delete_option(self::OPTION_BATCH)) {
             $message = sprintf("Aura Historia backfill batch (page %d) could not clear its request snapshot.", $page);
             $this->record_failed($message);
-            throw new \RuntimeException($message);
+            throw new \RuntimeException(esc_html($message));
         }
         $this->record_complete($page);
     }
@@ -472,7 +472,7 @@ class Product_Backfill
         if (!update_option(self::OPTION_BATCH, $snapshot, false)) {
             $failure = sprintf("Aura Historia backfill batch (page %d) could not persist its retry.", $page);
             $this->record_failed($failure);
-            throw new \RuntimeException($failure);
+            throw new \RuntimeException(esc_html($failure));
         }
 
         $args = [$listing_source_id, $page, $this->retry_token($snapshot["idempotency_key"], $attempt)];
@@ -484,7 +484,7 @@ class Product_Backfill
             as_has_scheduled_action(self::ACTION_HOOK, $args, self::ACTION_GROUP))) {
             $failure = sprintf("Aura Historia backfill batch (page %d) could not schedule its retry.", $page);
             $this->record_failed($failure);
-            throw new \RuntimeException($failure);
+            throw new \RuntimeException(esc_html($failure));
         }
 
         $this->record_failed($message);
@@ -542,7 +542,7 @@ class Product_Backfill
         if (!delete_option(self::OPTION_BATCH)) {
             $message = sprintf("Aura Historia backfill batch (page %d) could not clear its request snapshot.", $page);
             $this->record_failed($message);
-            throw new \RuntimeException($message);
+            throw new \RuntimeException(esc_html($message));
         }
 
         $this->record_scheduled();
@@ -566,11 +566,11 @@ class Product_Backfill
 
         if (!update_option(self::OPTION_BATCH, $snapshot, false)) {
             $this->record_failed($message);
-            throw new \RuntimeException($message);
+            throw new \RuntimeException(esc_html($message));
         }
 
         $this->schedule_retry($snapshot, $listing_source_id, $page, $message);
-        throw new \RuntimeException($message);
+        throw new \RuntimeException(esc_html($message));
     }
 
     /**
@@ -607,10 +607,10 @@ class Product_Backfill
         }
 
         if (!$this->update_state($changes)) {
-            throw new \RuntimeException(sprintf(
+            throw new \RuntimeException(esc_html(sprintf(
                 "Aura Historia backfill batch (page %d) could not save its admission outcome.",
                 $page,
-            ));
+            )));
         }
     }
 

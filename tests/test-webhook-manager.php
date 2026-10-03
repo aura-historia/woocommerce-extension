@@ -526,7 +526,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $this->assertSame("code", $query["response_type"]);
         $this->assertSame("S256", $query["code_challenge_method"]);
         $this->assertSame("product-listings:write listing-sources:write", $query["scope"]);
-        $this->assertSame("true", $query["requires_partner_listing_source_id"]);
+        $this->assertSame("true", $query["requires_partner_shop_id"]);
         $this->assertNotEmpty($query["code_challenge"]);
         $this->assertNotEmpty($query["state"]);
 
@@ -1355,7 +1355,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
 
         $this->assertStringContainsString("Connection status", $output);
         $this->assertStringContainsString("Connected", $output);
-        $this->assertStringContainsString("most recent webhook sync", $output);
+        $this->assertStringContainsString("most recent sync", $output);
         $this->assertCount($request_count, $this->backend_http_requests);
     }
 
@@ -1492,7 +1492,15 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $product->save();
 
         $this->set_backend_mock_responses([
-            new Response(202, ["Content-Type" => "application/json"], "[]"),
+            new Response(
+                202,
+                ["Content-Type" => "application/json"],
+                wp_json_encode([
+                    "submissionId" => "submission-status-test",
+                    "acceptedCount" => 1,
+                    "failures" => [],
+                ]),
+            ),
         ]);
 
         $backfill = new Product_Backfill();
@@ -1502,7 +1510,11 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
 
         $this->assertStringContainsString("Product backfill", $output);
         $this->assertStringContainsString("Completed", $output);
-        $this->assertStringContainsString("completed successfully", $output);
+        $this->assertStringContainsString("finished submitting", $output);
+        $this->assertStringContainsString(
+            "Backend ingestion may still be processing",
+            $output,
+        );
         $this->assertStringContainsString(
             Product_Backfill::ACTION_HOOK,
             $output,
@@ -1538,7 +1550,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         ]);
 
         $this->assertStringContainsString(
-            "Aura Historia connection completed and managed webhooks synced.",
+            "Aura Historia authorization completed and webhook sync submitted. Product listings are processed asynchronously.",
             $output,
         );
         $this->assertCount($request_count, $this->backend_http_requests);

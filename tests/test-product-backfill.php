@@ -48,6 +48,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         (new Webhook_Manager())->delete_webhooks();
         (new Webhook_Manager())->initialize_options();
         delete_option(Product_Backfill::OPTION_BATCH);
+        delete_option(Product_Backfill::OPTION_STATE);
         $this->configure_connection();
         $this->mock_responses([$this->admission(1)]);
     }
@@ -57,6 +58,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         (new Webhook_Manager())->delete_webhooks();
         (new Product_Backfill())->cancel_backfill();
         delete_option(Product_Backfill::OPTION_BATCH);
+        delete_option(Product_Backfill::OPTION_STATE);
         remove_filter("ahpc_backend_base_url", [$this, "backend_url"]);
         remove_filter("ahpc_backend_guzzle_client", [$this, "backend_client"], 10);
         wp_set_current_user(0);
@@ -208,7 +210,9 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         $this->assertSame([], $body[0]["images"]);
         $this->assertMatchesRegularExpression('~^https?://[^/]+/~', $body[0]["url"]);
         $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH));
-        $this->assertSame(Product_Backfill::STATUS_COMPLETE, (new Product_Backfill())->get_status_details()["status"]);
+        $state = (new Product_Backfill())->get_status_details();
+        $this->assertSame(Product_Backfill::STATUS_COMPLETE, $state["status"]);
+        $this->assertSame("0", $state["permanent_failure_count"]);
     }
 
     public function test_maps_stock_and_omits_optional_price_and_title()

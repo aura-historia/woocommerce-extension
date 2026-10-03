@@ -500,17 +500,19 @@ class Webhook_Manager
 
             update_option(self::OPTION_WEBHOOK_IDS, $webhook_ids, false);
             update_option(self::OPTION_PLUGIN_VERSION, AHPC_VERSION, false);
+
+            if ($setup_error) {
+                // Webhooks are paused; leave sync required so a later attempt can
+                // register the secret before activating delivery.
+                return $this->record_sync_error($setup_error);
+            }
+
             update_option(self::OPTION_NEEDS_SYNC, "no", false);
             update_option(
                 self::OPTION_LAST_SYNC_AT,
                 current_time("mysql"),
                 false,
             );
-
-            if ($setup_error) {
-                return $this->record_sync_error($setup_error, false);
-            }
-
             delete_option(self::OPTION_LAST_SYNC_ERROR);
 
             $this->maybe_schedule_backfill($settings, $desired_status);
