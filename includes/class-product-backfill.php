@@ -15,11 +15,10 @@ if (!defined("ABSPATH")) {
  * Schedules and processes asynchronous product backfills via Action Scheduler.
  *
  * When the plugin connects to the Aura Historia backend with valid settings,
- * all existing WooCommerce products are pushed to the backend endpoint
- * `PUT /api/v1/shops/{shopId}/products` in batches of {@see BATCH_SIZE}.
- *
- * Using PUT means the backfill is idempotent: re-running it (e.g. after
- * reconnecting a shop) updates changed products and skips unchanged ones.
+ * published WooCommerce products are submitted to the listing-source async
+ * admission endpoint in batches of {@see BATCH_SIZE}. A batch snapshot and
+ * idempotency key are retained until it has been admitted and its successor
+ * scheduled, so request-wide retries cannot change the submitted payload.
  *
  * Action Scheduler (bundled with WooCommerce) is used so that large catalogs
  * do not block the HTTP response and can be retried automatically on failure.
@@ -40,6 +39,9 @@ class Product_Backfill
      * Option key used to persist the latest backfill status for the admin UI.
      */
     const OPTION_STATE = "ahpc_backfill_state";
+
+    /** Pending batch snapshot; deliberately separate from admin-visible status. */
+    const OPTION_BATCH = "ahpc_backfill_batch";
 
     /**
      * Backfill status: no batch is currently queued.
@@ -71,6 +73,9 @@ class Product_Backfill
      */
     const BATCH_SIZE = 100;
 
+    /** Seconds between attempts to replay an unchanged batch. */
+    const RETRY_DELAY = 60;
+
     /**
      * Plugin text domain.
      */
@@ -91,19 +96,19 @@ class Product_Backfill
     private static $deferred_operation_registered = false;
 
     /**
-     * Schedules a fresh product backfill for the given shop.
+     * Schedules a fresh product backfill for the listing source.
      *
      * Any pending backfill batches are cancelled before the new one is
      * enqueued so that settings changes always trigger a clean restart.
      *
-     * @param string $shop_id Shop UUID.
+     * @param string $listing_source_id Listing source TypeID.
      * @return bool Whether the backfill was successfully scheduled.
      */
-    public function schedule_backfill($shop_id)
+    public function schedule_backfill($listing_source_id)
     {
-        $shop_id = Webhook_Manager::normalize_shop_id($shop_id);
+        $listing_source_id = Webhook_Manager::normalize_listing_source_id($listing_source_id);
 
-        if (!Webhook_Manager::is_valid_shop_id($shop_id)) {
+        if (!Webhook_Manager::is_valid_listing_source_id($listing_source_id)) {
             return false;
         }
 
@@ -124,7 +129,7 @@ class Product_Backfill
         if (!$this->is_action_scheduler_ready()) {
             self::$deferred_operation = [
                 "type" => "schedule",
-                "shop_id" => $shop_id,
+                "listing_source_id" => $listing_source_id,
             ];
 
             if (!self::$deferred_operation_registered) {
@@ -137,12 +142,13 @@ class Product_Backfill
                 );
             }
 
+            $this->reset_admission_status();
             $this->record_scheduled();
 
             return true;
         }
 
-        return $this->schedule_backfill_now($shop_id);
+        return $this->schedule_backfill_now($listing_source_id);
     }
 
     /**
@@ -152,6 +158,8 @@ class Product_Backfill
      */
     public function cancel_backfill()
     {
+        delete_option(self::OPTION_BATCH);
+
         if (!function_exists("as_unschedule_all_actions")) {
             $this->record_not_scheduled();
             return;
@@ -160,7 +168,7 @@ class Product_Backfill
         if (!$this->is_action_scheduler_ready()) {
             self::$deferred_operation = [
                 "type" => "cancel",
-                "shop_id" => "",
+                "listing_source_id" => "",
             ];
 
             if (!self::$deferred_operation_registered) {
@@ -254,127 +262,372 @@ class Product_Backfill
     /**
      * Processes a single product batch.
      *
-     * Invoked by Action Scheduler via the {@see ACTION_HOOK} action.
-     * Fetches up to {@see BATCH_SIZE} products for the given page, maps each
-     * one to the backend's strict `PutProductData` schema, and posts the batch
-     * to the partner upsert endpoint. If the page was full (i.e. there may be
-     * more products), the next page is immediately re-enqueued.
-     *
-     * Throwing an exception causes Action Scheduler to retry this batch
-     * automatically, so backend errors propagate as exceptions.
-     *
-     * @param string $shop_id Shop UUID, as stored in the scheduled action args.
-     * @param int    $page    One-based page number within the product catalog.
+     * @param string $listing_source_id Listing source TypeID in the action args.
+     * @param int    $page One-based catalog page.
      * @return void
-     * @throws \RuntimeException When the backend rejects the batch, so Action Scheduler retries it.
+     * @throws \RuntimeException On retryable request or listing admission failure.
      */
-    public function process_batch($shop_id, $page)
+    public function process_batch($listing_source_id, $page)
     {
-        $shop_id = Webhook_Manager::normalize_shop_id((string) $shop_id);
+        $listing_source_id = Webhook_Manager::normalize_listing_source_id((string) $listing_source_id);
         $page = max(1, (int) $page);
-
-        // Validate that the current settings still match the scheduled shop.
         $settings = get_option(Webhook_Manager::OPTION_SETTINGS, []);
 
         if (!is_array($settings)) {
+            delete_option(self::OPTION_BATCH);
             return;
         }
 
-        $stored_shop_id = Webhook_Manager::normalize_shop_id(
-            isset($settings["shop_id"]) ? (string) $settings["shop_id"] : "",
+        $stored_id = Webhook_Manager::normalize_listing_source_id(
+            isset($settings["listing_source_id"]) ? (string) $settings["listing_source_id"] : "",
         );
         $access_token = isset($settings["access_token"])
             ? (string) $settings["access_token"]
             : "";
 
         if (
-            $stored_shop_id !== $shop_id ||
-            "" === $access_token ||
-            !Webhook_Manager::is_valid_shop_id($shop_id) ||
+            $stored_id !== $listing_source_id ||
+            !Webhook_Manager::is_valid_listing_source_id($listing_source_id) ||
             !Webhook_Manager::is_valid_access_token($access_token)
         ) {
-            // Settings no longer valid for this shop; abort silently.
+            delete_option(self::OPTION_BATCH);
             return;
         }
 
-        // Fetch the product IDs for this page.
-        $product_ids = $this->get_product_ids($page);
+        $snapshot = get_option(self::OPTION_BATCH, []);
 
-        if (empty($product_ids)) {
-            $this->record_complete();
+        if (
+            $page <= (int) $this->get_state()["last_completed_page"] &&
+            !(
+                is_array($snapshot) &&
+                isset($snapshot["listing_source_id"], $snapshot["page"]) &&
+                $snapshot["listing_source_id"] === $listing_source_id &&
+                (int) $snapshot["page"] === $page &&
+                !empty($snapshot["handoff_pending"])
+            )
+        ) {
+            // Ignore a delayed duplicate after this page has already advanced.
+            return;
+        }
+
+        if (
+            is_array($snapshot) &&
+            isset($snapshot["listing_source_id"], $snapshot["page"]) &&
+            $snapshot["listing_source_id"] === $listing_source_id &&
+            (int) $snapshot["page"] !== $page
+        ) {
+            // Another page has an in-flight retry; never overwrite its snapshot.
+            return;
+        }
+
+        if (
+            !is_array($snapshot) ||
+            !isset($snapshot["listing_source_id"], $snapshot["page"], $snapshot["payloads"], $snapshot["idempotency_key"], $snapshot["product_count"]) ||
+            $snapshot["listing_source_id"] !== $listing_source_id ||
+            (int) $snapshot["page"] !== $page ||
+            !is_array($snapshot["payloads"]) ||
+            !is_string($snapshot["idempotency_key"])
+        ) {
+            $product_ids = $this->get_product_ids($page);
+
+            if (empty($product_ids)) {
+                delete_option(self::OPTION_BATCH);
+                $this->record_complete($page);
+                return;
+            }
+
+            $payloads = [];
+            $local_failures = 0;
+
+            foreach ($product_ids as $product_id) {
+                $payload = $this->build_product_payload((int) $product_id);
+
+                if (is_wp_error($payload)) {
+                    ++$local_failures;
+                } elseif (is_array($payload)) {
+                    $payloads[] = $payload;
+                }
+            }
+
+            $snapshot = [
+                "listing_source_id" => $listing_source_id,
+                "page" => $page,
+                "product_count" => count($product_ids),
+                "local_failures" => $local_failures,
+                "payloads" => $payloads,
+                "idempotency_key" => wp_generate_uuid4(),
+            ];
+            // Never send a batch whose request cannot be replayed unchanged.
+            if (!update_option(self::OPTION_BATCH, $snapshot, false)) {
+                $message = sprintf("Aura Historia backfill batch (page %d) could not save its request snapshot.", $page);
+                $this->record_failed($message);
+                throw new \RuntimeException($message);
+            }
+        }
+
+        // Older pending snapshots predate local failure accounting; retain
+        // their exact payload and idempotency key when resuming a retry.
+        $snapshot["local_failures"] = isset($snapshot["local_failures"])
+            ? (int) $snapshot["local_failures"]
+            : 0;
+
+        if (!empty($snapshot["handoff_pending"])) {
+            $this->schedule_next_page($snapshot, $listing_source_id, $page);
             return;
         }
 
         $this->record_running();
+        $report = ["accepted_count" => 0, "failures" => [], "submission_id" => ""];
 
-        // Build each product using the backend's strict PutProductData shape.
-        $payloads = [];
-
-        foreach ($product_ids as $product_id) {
-            $payload = $this->build_product_payload((int) $product_id);
-
-            if (!empty($payload) && is_array($payload)) {
-                $payloads[] = $payload;
-            }
-        }
-
-        if (!empty($payloads)) {
-            $client = new Backend_Api_Client(
-                Webhook_Manager::get_backend_base_url(),
+        if (!empty($snapshot["payloads"])) {
+            $client = new Backend_Api_Client(Webhook_Manager::get_backend_base_url());
+            $result = $client->post_async_partner_product_listings(
+                $listing_source_id,
+                $access_token,
+                $snapshot["payloads"],
+                $snapshot["idempotency_key"],
             );
-            $result = $client->put_shop_products($shop_id, $access_token, $payloads);
 
             if (is_wp_error($result)) {
-                $message = sanitize_text_field(
-                    sprintf(
-                        "Aura Historia backfill batch (page %d) failed: %s",
-                        $page,
-                        $result->get_error_message(),
-                    ),
-                );
+                $error_data = $result->get_error_data();
+                $has_report = is_array($error_data) &&
+                    isset($error_data["accepted_count"], $error_data["failures"], $error_data["submission_id"]) &&
+                    is_array($error_data["failures"]);
+                $message = sprintf("Aura Historia backfill batch (page %d) request failed.", $page);
 
-                $this->record_failed($message);
+                if ($has_report) {
+                    $report = $error_data;
+                    $message = sprintf("Aura Historia backfill batch (page %d) had listing admission failures.", $page);
+                }
 
-                // Throw so Action Scheduler retries this batch automatically.
-                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception message is internal and already sanitized above.
-                throw new \RuntimeException($message);
+                if (is_array($error_data) && !empty($error_data["retryable"])) {
+                    if ($has_report) {
+                        $this->record_admission($report, (int) $snapshot["local_failures"]);
+                    }
+                    $this->schedule_retry($snapshot, $listing_source_id, $page, $message);
+                    // Never include free-form backend details in Action Scheduler logs.
+                    throw new \RuntimeException($message);
+                }
+
+                if (!$has_report) {
+                    $this->record_failed($message);
+                    $this->cancel_batch_retries($snapshot, $listing_source_id, $page);
+                    delete_option(self::OPTION_BATCH);
+                    return;
+                }
+            } else {
+                $report = $result;
             }
+
+            $this->record_admission($report, (int) $snapshot["local_failures"]);
+
+            foreach ($report["failures"] as $failure) {
+                if (!empty($failure["retryable"])) {
+                    $message = sprintf("Aura Historia backfill batch (page %d) has retryable listing admission failures.", $page);
+                    $this->schedule_retry($snapshot, $listing_source_id, $page, $message);
+                    throw new \RuntimeException($message);
+                }
+            }
+        } else {
+            $this->record_admission($report, (int) $snapshot["local_failures"]);
         }
 
-        // Schedule the next page only when this page was a full batch,
-        // indicating there may be more products.
-        if (
-            count($product_ids) >= self::BATCH_SIZE &&
-            function_exists("as_schedule_single_action")
-        ) {
-            $next_action_id = as_schedule_single_action(
-                time(),
-                self::ACTION_HOOK,
-                [$shop_id, $page + 1],
-                self::ACTION_GROUP,
-                true,
-            );
+        $this->record_permanent_failures(
+            $snapshot,
+            count($report["failures"]) + (int) $snapshot["local_failures"],
+            $page,
+        );
+        $this->cancel_batch_retries($snapshot, $listing_source_id, $page);
 
-            if (!$next_action_id) {
-                $message = sanitize_text_field(
-                    sprintf(
-                        "Aura Historia backfill batch (page %d) could not schedule page %d.",
-                        $page,
-                        $page + 1,
-                    ),
-                );
-
-                $this->record_failed($message);
-                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Exception message is internal and already sanitized above.
-                throw new \RuntimeException($message);
-            }
-
-            $this->record_scheduled();
-
+        if ((int) $snapshot["product_count"] >= self::BATCH_SIZE) {
+            $this->schedule_next_page($snapshot, $listing_source_id, $page);
             return;
         }
 
-        $this->record_complete();
+        if (!delete_option(self::OPTION_BATCH)) {
+            $message = sprintf("Aura Historia backfill batch (page %d) could not clear its request snapshot.", $page);
+            $this->record_failed($message);
+            throw new \RuntimeException($message);
+        }
+        $this->record_complete($page);
+    }
+
+    /**
+     * Queues a delayed retry with distinct Action Scheduler args, while the
+     * original two callback arguments and persisted request remain unchanged.
+     *
+     * @param array  $snapshot Persisted batch snapshot.
+     * @param string $listing_source_id Listing source TypeID.
+     * @param int    $page Catalog page.
+     * @param string $message Safe failure message.
+     * @return void
+     */
+    private function schedule_retry(array $snapshot, $listing_source_id, $page, $message)
+    {
+        $attempt = isset($snapshot["retry_attempt"])
+            ? min(PHP_INT_MAX - 1, max(0, (int) $snapshot["retry_attempt"])) + 1
+            : 1;
+        $snapshot["retry_attempt"] = $attempt;
+
+        if (!update_option(self::OPTION_BATCH, $snapshot, false)) {
+            $failure = sprintf("Aura Historia backfill batch (page %d) could not persist its retry.", $page);
+            $this->record_failed($failure);
+            throw new \RuntimeException($failure);
+        }
+
+        $args = [$listing_source_id, $page, $this->retry_token($snapshot["idempotency_key"], $attempt)];
+        $action_id = function_exists("as_schedule_single_action")
+            ? as_schedule_single_action(time() + self::RETRY_DELAY, self::ACTION_HOOK, $args, self::ACTION_GROUP, true)
+            : 0;
+
+        if (!$action_id && !(function_exists("as_has_scheduled_action") &&
+            as_has_scheduled_action(self::ACTION_HOOK, $args, self::ACTION_GROUP))) {
+            $failure = sprintf("Aura Historia backfill batch (page %d) could not schedule its retry.", $page);
+            $this->record_failed($failure);
+            throw new \RuntimeException($failure);
+        }
+
+        $this->record_failed($message);
+    }
+
+    /**
+     * Removes outstanding retries for a completed or terminal batch.
+     *
+     * @param array  $snapshot Persisted batch snapshot.
+     * @param string $listing_source_id Listing source TypeID.
+     * @param int    $page Catalog page.
+     * @return void
+     */
+    private function cancel_batch_retries(array $snapshot, $listing_source_id, $page)
+    {
+        if (!function_exists("as_unschedule_all_actions")) {
+            return;
+        }
+
+        $attempts = isset($snapshot["retry_attempt"]) ? max(0, (int) $snapshot["retry_attempt"]) : 0;
+
+        for ($attempt = 1; $attempt <= $attempts; ++$attempt) {
+            as_unschedule_all_actions(
+                self::ACTION_HOOK,
+                [$listing_source_id, $page, $this->retry_token($snapshot["idempotency_key"], $attempt)],
+                self::ACTION_GROUP,
+            );
+        }
+
+        as_unschedule_all_actions(self::ACTION_HOOK, [$listing_source_id, $page], self::ACTION_GROUP);
+    }
+
+    /**
+     * @param string $idempotency_key Persisted backend key.
+     * @param int    $attempt Retry number.
+     * @return string Non-sensitive uniqueness argument.
+     */
+    private function retry_token($idempotency_key, $attempt)
+    {
+        return "retry-" . hash("sha256", $idempotency_key . ":" . $attempt);
+    }
+
+    /**
+     * Hands off a committed full page without letting page two see page one's
+     * snapshot. A failed enqueue restores a handoff-only snapshot: retries
+     * can enqueue the successor without re-sending an admitted batch.
+     *
+     * @param array  $snapshot Persisted batch snapshot.
+     * @param string $listing_source_id Listing source TypeID.
+     * @param int    $page Completed catalog page.
+     * @return void
+     */
+    private function schedule_next_page(array $snapshot, $listing_source_id, $page)
+    {
+        if (!delete_option(self::OPTION_BATCH)) {
+            $message = sprintf("Aura Historia backfill batch (page %d) could not clear its request snapshot.", $page);
+            $this->record_failed($message);
+            throw new \RuntimeException($message);
+        }
+
+        $this->record_scheduled();
+        $args = [$listing_source_id, $page + 1];
+        $action_id = function_exists("as_schedule_single_action")
+            ? as_schedule_single_action(time(), self::ACTION_HOOK, $args, self::ACTION_GROUP, true)
+            : 0;
+
+        $current_snapshot = get_option(self::OPTION_BATCH, []);
+
+        if ($action_id || (function_exists("as_has_scheduled_action") &&
+            as_has_scheduled_action(self::ACTION_HOOK, $args, self::ACTION_GROUP)) ||
+            (int) $this->get_state()["last_completed_page"] >= $page + 1 ||
+            (is_array($current_snapshot) && isset($current_snapshot["listing_source_id"], $current_snapshot["page"]) &&
+                $current_snapshot["listing_source_id"] === $listing_source_id && (int) $current_snapshot["page"] === $page + 1)) {
+            return;
+        }
+
+        $snapshot["handoff_pending"] = true;
+        $message = sprintf("Aura Historia backfill batch (page %d) could not schedule page %d.", $page, $page + 1);
+
+        if (!update_option(self::OPTION_BATCH, $snapshot, false)) {
+            $this->record_failed($message);
+            throw new \RuntimeException($message);
+        }
+
+        $this->schedule_retry($snapshot, $listing_source_id, $page, $message);
+        throw new \RuntimeException($message);
+    }
+
+    /**
+     * Commits a page's permanent failures before handing off to the next page.
+     * A handoff-only retry does not count the same failures again.
+     *
+     * @param array $snapshot Persisted batch snapshot.
+     * @param int   $count Number of permanently failed listings on this page.
+     * @param int   $page Page number for a safe status message.
+     * @return void
+     */
+    private function record_permanent_failures(array $snapshot, $count, $page)
+    {
+        $state = $this->get_state();
+        $batch_hash = hash("sha256", $snapshot["idempotency_key"]);
+
+        if ($state["last_counted_batch"] === $batch_hash) {
+            return;
+        }
+
+        $changes = [
+            "last_counted_batch" => $batch_hash,
+            "last_completed_page" => $page,
+        ];
+
+        if ($count > 0) {
+            $changes["permanent_failure_count"] = (int) $state["permanent_failure_count"] + $count;
+            $changes["failed_at"] = current_time("mysql");
+            $changes["last_error"] = sprintf(
+                "Aura Historia backfill batch (page %d) had %d permanent listing failures.",
+                $page,
+                $count,
+            );
+        }
+
+        if (!$this->update_state($changes)) {
+            throw new \RuntimeException(sprintf(
+                "Aura Historia backfill batch (page %d) could not save its admission outcome.",
+                $page,
+            ));
+        }
+    }
+
+    /**
+     * Keeps only safe admission counts and a bounded submission identifier in status.
+     *
+     * @param array $report Validated backend admission report.
+     * @param int   $local_failures Listings without a valid canonical URL.
+     * @return void
+     */
+    private function record_admission(array $report, $local_failures)
+    {
+        $this->update_state([
+            "accepted_count" => (int) $report["accepted_count"],
+            "failed_count" => count($report["failures"]) + $local_failures,
+            "submission_id" => sanitize_text_field((string) $report["submission_id"]),
+        ]);
     }
 
     /**
@@ -397,8 +650,8 @@ class Product_Backfill
 
         if ("schedule" === $operation["type"]) {
             $backfill->schedule_backfill(
-                isset($operation["shop_id"])
-                    ? (string) $operation["shop_id"]
+                isset($operation["listing_source_id"])
+                    ? (string) $operation["listing_source_id"]
                     : "",
             );
             return;
@@ -410,9 +663,7 @@ class Product_Backfill
     /**
      * Returns the product IDs for a given page, ordered by ascending ID.
      *
-     * Both `publish` and `private` products are intentionally included so that
-     * privately listed products (accessible by direct URL but hidden from the
-     * shop archive) are also represented in the Aura Historia backend catalog.
+     * Only public, published products may be admitted.
      *
      * @param int $page One-based page number.
      * @return int[]
@@ -426,7 +677,7 @@ class Product_Backfill
         $ids = wc_get_products([
             "limit" => self::BATCH_SIZE,
             "paged" => $page,
-            "status" => ["publish", "private"],
+            "status" => "publish",
             "orderby" => "ID",
             "order" => "ASC",
             "return" => "ids",
@@ -436,15 +687,10 @@ class Product_Backfill
     }
 
     /**
-     * Builds the backend `PutProductData` representation of a single product.
-     *
-     * The batch backfill endpoint does not accept the raw WooCommerce webhook or
-     * REST payload shape. It expects the stricter partner-ingestion schema from
-     * the Aura Historia OpenAPI contract, so this method maps the WooCommerce
-     * product object to that schema directly.
+     * Builds one partner listing for async admission.
      *
      * @param int $product_id WooCommerce product ID.
-     * @return array<string,mixed>|null Serialised product data, or null on failure.
+     * @return array<string,mixed>|\WP_Error|null Product data or a local admission failure.
      */
     private function build_product_payload($product_id)
     {
@@ -454,15 +700,30 @@ class Product_Backfill
 
         $product = wc_get_product($product_id);
 
-        if (!$product || !is_object($product)) {
+        if (!$product || "publish" !== $product->get_status()) {
             return null;
         }
 
+        $url = $this->normalize_url_value(get_permalink($product_id));
+
+        if ("" === $url) {
+            return new \WP_Error(
+                "ahpc_backfill_missing_product_url",
+                "A published product has no absolute canonical URL.",
+            );
+        }
+
         $payload = [
-            "shopsProductId" => (string) $product_id,
-            "state" => $this->get_product_state($product),
+            "sourceListingId" => (string) $product_id,
+            "url" => $url,
             "images" => $this->get_product_image_urls($product),
         ];
+
+        $availability = $this->get_product_availability($product);
+
+        if (null !== $availability) {
+            $payload["availability"] = $availability;
+        }
 
         $language = Store_Locale::get_language();
         $title = $this->normalize_text_value(
@@ -476,53 +737,13 @@ class Product_Backfill
             ];
         }
 
-        $description = $this->get_product_description_markdown($product);
-
-        if ("" !== $description) {
-            $payload["description"] = [
-                "text" => $description,
-                "language" => $language,
-            ];
-        }
-
         $price = $this->build_price_payload($product);
 
         if (is_array($price)) {
             $payload["price"] = $price;
         }
 
-        $url = $this->normalize_url_value(get_permalink($product_id));
-
-        if ("" !== $url) {
-            $payload["url"] = $url;
-        }
-
         return $payload;
-    }
-
-    /**
-     * Returns a Markdown description suitable for `LocalizedTextData.text`.
-     *
-     * @param object $product WooCommerce product object.
-     * @return string
-     */
-    private function get_product_description_markdown($product)
-    {
-        $description = $this->normalize_markdown_value(
-            method_exists($product, "get_description")
-                ? $product->get_description()
-                : "",
-        );
-
-        if ("" !== $description) {
-            return $description;
-        }
-
-        return $this->normalize_markdown_value(
-            method_exists($product, "get_short_description")
-                ? $product->get_short_description()
-                : "",
-        );
     }
 
     /**
@@ -554,6 +775,7 @@ class Product_Backfill
         }
 
         return [
+            "type" => "MONETARY",
             "currency" => $currency,
             "amount" => $amount,
         ];
@@ -567,54 +789,59 @@ class Product_Backfill
      */
     private function convert_price_to_minor_units($price)
     {
+        $price = trim((string) $price);
+
+        // wc_format_decimal strips non-numeric characters; reject them first
+        // rather than turning a malformed price into a different valid amount.
+        if (1 !== preg_match('/\A[0-9]+(?:\.[0-9]+)?\z/D', $price)) {
+            return null;
+        }
+
         $decimals = function_exists("wc_get_price_decimals")
             ? max(0, (int) wc_get_price_decimals())
             : 2;
         $normalized = function_exists("wc_format_decimal")
             ? (string) wc_format_decimal($price, $decimals, false)
-            : (string) $price;
+            : $price;
 
-        if ("" === trim($normalized) || false !== strpos($normalized, "-")) {
+        if (1 !== preg_match('/\A[0-9]+(?:\.[0-9]+)?\z/D', $normalized)) {
             return null;
         }
 
         $parts = explode(".", $normalized, 2);
-        $whole = preg_replace("/\D/", "", $parts[0]);
-        $fraction = isset($parts[1]) ? preg_replace("/\D/", "", $parts[1]) : "";
+        $whole = $parts[0];
+        $fraction = isset($parts[1]) ? $parts[1] : "";
         $fraction = substr(str_pad($fraction, $decimals, "0"), 0, $decimals);
-        $amount = ltrim((string) $whole . (string) $fraction, "0");
+        $amount = ltrim($whole . $fraction, "0");
+
+        if (strlen($amount) > strlen((string) PHP_INT_MAX) ||
+            (strlen($amount) === strlen((string) PHP_INT_MAX) && strcmp($amount, (string) PHP_INT_MAX) > 0)
+        ) {
+            return null;
+        }
 
         return "" === $amount ? 0 : (int) $amount;
     }
 
     /**
-     * Maps the WooCommerce product visibility/stock state to the backend enum.
+     * Maps WooCommerce stock status to listing availability.
      *
      * @param object $product WooCommerce product object.
-     * @return string
+     * @return string|null Null when WooCommerce reports no supported stock status.
      */
-    private function get_product_state($product)
+    private function get_product_availability($product)
     {
-        $status = method_exists($product, "get_status")
-            ? (string) $product->get_status()
-            : "";
-        $stock_status = method_exists($product, "get_stock_status")
-            ? (string) $product->get_stock_status()
-            : "";
+        $status = (string) $product->get_stock_status();
 
-        if ("publish" === $status) {
-            return "outofstock" === $stock_status ? "SOLD" : "AVAILABLE";
+        if ("instock" === $status) {
+            return "IN_STOCK";
         }
 
-        if (in_array($status, ["draft", "pending", "private"], true)) {
-            return "LISTED";
+        if ("outofstock" === $status) {
+            return "OUT_OF_STOCK";
         }
 
-        if ("trash" === $status) {
-            return "REMOVED";
-        }
-
-        return "UNKNOWN";
+        return "onbackorder" === $status ? "BACK_ORDER" : null;
     }
 
     /**
@@ -675,123 +902,6 @@ class Product_Backfill
     }
 
     /**
-     * Normalizes HTML-rich product description content to Markdown.
-     *
-     * @param mixed $value Raw text or HTML content.
-     * @return string
-     */
-    private function normalize_markdown_value($value)
-    {
-        $html = trim((string) $value);
-
-        if ("" === $html) {
-            return "";
-        }
-
-        $markdown = $this->convert_html_to_markdown($html);
-        $markdown = html_entity_decode($markdown, ENT_QUOTES, "UTF-8");
-        $markdown = preg_replace("/[ \t]+\n/u", "\n", $markdown);
-        $markdown = preg_replace("/\n{3,}/u", "\n\n", trim($markdown));
-
-        return is_string($markdown) ? $markdown : "";
-    }
-
-    /**
-     * Converts HTML to Markdown using kreuzberg-dev/html-to-markdown when available.
-     *
-     * @param string $html Raw HTML content.
-     * @return string
-     */
-    private function convert_html_to_markdown($html)
-    {
-        if (class_exists("\\HtmlToMarkdown\\HtmlToMarkdown")) {
-            try {
-                $result = \HtmlToMarkdown\HtmlToMarkdown::convert($html);
-                $content = $this->extract_markdown_content($result);
-
-                if ("" !== $content) {
-                    return $content;
-                }
-            } catch (\Throwable $exception) {
-                // Fall back below when the optional native extension is unavailable.
-                unset($exception);
-            }
-        }
-
-        return $this->convert_html_to_markdown_fallback($html);
-    }
-
-    /**
-     * Extracts Markdown content from the package conversion result.
-     *
-     * @param mixed $result Conversion result from HtmlToMarkdown.
-     * @return string
-     */
-    private function extract_markdown_content($result)
-    {
-        if (is_object($result)) {
-            if (isset($result->content) && is_string($result->content)) {
-                return $result->content;
-            }
-
-            if (method_exists($result, "getContent")) {
-                return (string) $result->getContent();
-            }
-        }
-
-        return is_string($result) ? $result : "";
-    }
-
-    /**
-     * Conservative Markdown fallback for environments without the native extension.
-     *
-     * @param string $html Raw HTML content.
-     * @return string
-     */
-    private function convert_html_to_markdown_fallback($html)
-    {
-        $markdown = preg_replace("#<(script|style)[^>]*>.*?</\\1>#is", "", $html);
-        $markdown = is_string($markdown) ? $markdown : $html;
-        $markdown = preg_replace_callback(
-            "#<a[^>]+href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>#is",
-            static function ($matches) {
-                $label = trim(wp_strip_all_tags($matches[2]));
-                $url = esc_url_raw(
-                    html_entity_decode($matches[1], ENT_QUOTES, "UTF-8"),
-                );
-
-                return "" === $label || "" === $url
-                    ? $label
-                    : "[" . $label . "](" . $url . ")";
-            },
-            $markdown,
-        );
-        $markdown = preg_replace(
-            "#<(strong|b)\\b[^>]*>(.*?)</\\1>#is",
-            "**$2**",
-            $markdown,
-        );
-        $markdown = preg_replace(
-            "#<(em|i)\\b[^>]*>(.*?)</\\1>#is",
-            "*$2*",
-            $markdown,
-        );
-        $markdown = preg_replace("#<li\\b[^>]*>#i", "\n- ", $markdown);
-        $markdown = preg_replace("#</li>#i", "\n", $markdown);
-        $markdown = preg_replace("#<br\\s*/?>#i", "\n", $markdown);
-        $markdown = preg_replace(
-            "#</?(p|div|section|article|ul|ol|h[1-6])\\b[^>]*>#i",
-            "\n\n",
-            $markdown,
-        );
-        $markdown = wp_strip_all_tags($markdown);
-        $markdown = preg_replace("/[ \t]+/u", " ", $markdown);
-        $markdown = preg_replace("/\n[ \t]+/u", "\n", $markdown);
-
-        return is_string($markdown) ? $markdown : wp_strip_all_tags($html);
-    }
-
-    /**
      * Normalizes a URL for the backend schema.
      *
      * @param mixed $value Raw URL value.
@@ -801,7 +911,12 @@ class Product_Backfill
     {
         $url = esc_url_raw(trim((string) $value), ["http", "https"]);
 
-        return is_string($url) ? $url : "";
+        $parts = is_string($url) ? wp_parse_url($url) : false;
+
+        return is_array($parts) && !empty($parts["host"]) &&
+            in_array(isset($parts["scheme"]) ? strtolower($parts["scheme"]) : "", ["http", "https"], true)
+            ? $url
+            : "";
     }
 
     /**
@@ -817,17 +932,18 @@ class Product_Backfill
     /**
      * Schedules the initial backfill batch immediately.
      *
-     * @param string $shop_id Shop UUID.
+     * @param string $listing_source_id Listing source TypeID.
      * @return bool
      */
-    private function schedule_backfill_now($shop_id)
+    private function schedule_backfill_now($listing_source_id)
     {
         $this->cancel_backfill_actions();
+        delete_option(self::OPTION_BATCH);
 
         $action_id = as_schedule_single_action(
             time(),
             self::ACTION_HOOK,
-            [$shop_id, 1],
+            [$listing_source_id, 1],
             self::ACTION_GROUP,
             true,
         );
@@ -843,6 +959,7 @@ class Product_Backfill
             return false;
         }
 
+        $this->reset_admission_status();
         $this->record_scheduled();
 
         return true;
@@ -883,6 +1000,12 @@ class Product_Backfill
     {
         return [
             "status" => self::STATUS_NOT_SCHEDULED,
+            "last_completed_page" => "0",
+            "accepted_count" => "",
+            "failed_count" => "",
+            "permanent_failure_count" => "0",
+            "last_counted_batch" => "",
+            "submission_id" => "",
             "scheduled_at" => "",
             "started_at" => "",
             "completed_at" => "",
@@ -895,7 +1018,7 @@ class Product_Backfill
      * Persists the current backfill state.
      *
      * @param array<string,string> $changes State changes to store.
-     * @return void
+     * @return bool Whether the state was persisted.
      */
     private function update_state($changes)
     {
@@ -905,7 +1028,25 @@ class Product_Backfill
             $state[$key] = (string) $value;
         }
 
-        update_option(self::OPTION_STATE, $state, false);
+        return update_option(self::OPTION_STATE, $state, false);
+    }
+
+    /**
+     * Resets admission details when starting a distinct backfill run.
+     *
+     * @return void
+     */
+    private function reset_admission_status()
+    {
+        $this->update_state([
+            "last_completed_page" => "0",
+            "accepted_count" => "",
+            "failed_count" => "",
+            "permanent_failure_count" => "0",
+            "last_counted_batch" => "",
+            "submission_id" => "",
+            "completed_at" => "",
+        ]);
     }
 
     /**
@@ -915,13 +1056,18 @@ class Product_Backfill
      */
     private function record_scheduled()
     {
-        $this->update_state([
+        $changes = [
             "status" => self::STATUS_SCHEDULED,
             "scheduled_at" => current_time("mysql"),
             "started_at" => "",
-            "failed_at" => "",
-            "last_error" => "",
-        ]);
+        ];
+
+        if (0 === (int) $this->get_state()["permanent_failure_count"]) {
+            $changes["failed_at"] = "";
+            $changes["last_error"] = "";
+        }
+
+        $this->update_state($changes);
     }
 
     /**
@@ -931,29 +1077,48 @@ class Product_Backfill
      */
     private function record_running()
     {
-        $this->update_state([
+        $changes = [
             "status" => self::STATUS_RUNNING,
             "started_at" => current_time("mysql"),
-            "failed_at" => "",
-            "last_error" => "",
-        ]);
+        ];
+
+        if (0 === (int) $this->get_state()["permanent_failure_count"]) {
+            $changes["failed_at"] = "";
+            $changes["last_error"] = "";
+        }
+
+        $this->update_state($changes);
     }
 
     /**
-     * Records that the most recent backfill run completed successfully.
+     * Records that the most recent backfill run finished submitting pages.
      *
+     * @param int $page Final page (including an empty trailing page).
      * @return void
      */
-    private function record_complete()
+    private function record_complete($page)
     {
-        $this->update_state([
-            "status" => self::STATUS_COMPLETE,
+        $state = $this->get_state();
+        $has_permanent_failures = (int) $state["permanent_failure_count"] > 0;
+        $changes = [
+            "last_completed_page" => max($page, (int) $state["last_completed_page"]),
+            "status" => $has_permanent_failures ? self::STATUS_FAILED : self::STATUS_COMPLETE,
             "scheduled_at" => "",
             "started_at" => "",
             "completed_at" => current_time("mysql"),
-            "failed_at" => "",
-            "last_error" => "",
-        ]);
+        ];
+
+        if ($has_permanent_failures) {
+            $changes["last_error"] = sprintf(
+                "Aura Historia backfill finished with %d permanent listing failures.",
+                (int) $this->get_state()["permanent_failure_count"],
+            );
+        } else {
+            $changes["failed_at"] = "";
+            $changes["last_error"] = "";
+        }
+
+        $this->update_state($changes);
     }
 
     /**
@@ -965,10 +1130,16 @@ class Product_Backfill
     {
         $this->update_state([
             "status" => self::STATUS_NOT_SCHEDULED,
+            "last_completed_page" => "0",
             "scheduled_at" => "",
             "started_at" => "",
             "failed_at" => "",
             "last_error" => "",
+            "accepted_count" => "",
+            "failed_count" => "",
+            "permanent_failure_count" => "0",
+            "last_counted_batch" => "",
+            "submission_id" => "",
         ]);
     }
 

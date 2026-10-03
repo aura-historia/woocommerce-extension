@@ -1,6 +1,6 @@
 <?php
 /**
- * PriceData
+ * AsyncProductListingBatchFailure
  *
  * PHP version 8.1
  *
@@ -34,16 +34,15 @@ use \ArrayAccess;
 use \AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
 
 /**
- * PriceData Class Doc Comment
+ * AsyncProductListingBatchFailure Class Doc Comment
  *
  * @category Class
- * @description Price information with currency
  * @package  AuraHistoria\PartnerConnect\InternalApi
  * @author   OpenAPI Generator team
  * @link     https://openapi-generator.tech
  * @implements \ArrayAccess<string, mixed>
  */
-class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
+class AsyncProductListingBatchFailure implements ModelInterface, ArrayAccess, \JsonSerializable
 {
     public const DISCRIMINATOR = null;
 
@@ -52,7 +51,7 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      *
      * @var string
      */
-    protected static $openAPIModelName = 'PriceData';
+    protected static $openAPIModelName = 'AsyncProductListingBatchFailure';
 
     /**
      * Array of property to type mappings. Used for (de)serialization
@@ -60,8 +59,10 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $openAPITypes = [
-        'currency' => '\AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData',
-        'amount' => 'int'
+        'index' => 'int',
+        'source_listing_id' => 'string',
+        'error' => 'string',
+        'retryable' => 'bool'
     ];
 
     /**
@@ -72,8 +73,10 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @psalm-var array<string, string|null>
      */
     protected static $openAPIFormats = [
-        'currency' => null,
-        'amount' => null
+        'index' => null,
+        'source_listing_id' => null,
+        'error' => null,
+        'retryable' => null
     ];
 
     /**
@@ -82,8 +85,10 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var boolean[]
      */
     protected static array $openAPINullables = [
-        'currency' => false,
-        'amount' => false
+        'index' => false,
+        'source_listing_id' => false,
+        'error' => false,
+        'retryable' => false
     ];
 
     /**
@@ -172,8 +177,10 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $attributeMap = [
-        'currency' => 'currency',
-        'amount' => 'amount'
+        'index' => 'index',
+        'source_listing_id' => 'sourceListingId',
+        'error' => 'error',
+        'retryable' => 'retryable'
     ];
 
     /**
@@ -182,8 +189,10 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $setters = [
-        'currency' => 'setCurrency',
-        'amount' => 'setAmount'
+        'index' => 'setIndex',
+        'source_listing_id' => 'setSourceListingId',
+        'error' => 'setError',
+        'retryable' => 'setRetryable'
     ];
 
     /**
@@ -192,8 +201,10 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $getters = [
-        'currency' => 'getCurrency',
-        'amount' => 'getAmount'
+        'index' => 'getIndex',
+        'source_listing_id' => 'getSourceListingId',
+        'error' => 'getError',
+        'retryable' => 'getRetryable'
     ];
 
     /**
@@ -253,8 +264,10 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      */
     public function __construct(?array $data = null)
     {
-        $this->setIfExists('currency', $data ?? [], null);
-        $this->setIfExists('amount', $data ?? [], null);
+        $this->setIfExists('index', $data ?? [], null);
+        $this->setIfExists('source_listing_id', $data ?? [], null);
+        $this->setIfExists('error', $data ?? [], null);
+        $this->setIfExists('retryable', $data ?? [], null);
     }
 
     /**
@@ -284,16 +297,27 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
     {
         $invalidProperties = [];
 
-        if ($this->container['currency'] === null) {
-            $invalidProperties[] = "'currency' can't be null";
+        if ($this->container['index'] === null) {
+            $invalidProperties[] = "'index' can't be null";
         }
-        if ($this->container['amount'] === null) {
-            $invalidProperties[] = "'amount' can't be null";
-        }
-        if (($this->container['amount'] < 0)) {
-            $invalidProperties[] = "invalid value for 'amount', must be bigger than or equal to 0.";
+        if (($this->container['index'] > 99)) {
+            $invalidProperties[] = "invalid value for 'index', must be smaller than or equal to 99.";
         }
 
+        if (($this->container['index'] < 0)) {
+            $invalidProperties[] = "invalid value for 'index', must be bigger than or equal to 0.";
+        }
+
+        if ($this->container['error'] === null) {
+            $invalidProperties[] = "'error' can't be null";
+        }
+        if (!preg_match("/^[A-Z][A-Z0-9_]*$/", $this->container['error'])) {
+            $invalidProperties[] = "invalid value for 'error', must be conform to the pattern /^[A-Z][A-Z0-9_]*$/.";
+        }
+
+        if ($this->container['retryable'] === null) {
+            $invalidProperties[] = "'retryable' can't be null";
+        }
         return $invalidProperties;
     }
 
@@ -310,60 +334,122 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
 
 
     /**
-     * Gets currency
+     * Gets index
      *
-     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData
+     * @return int
      */
-    public function getCurrency()
+    public function getIndex()
     {
-        return $this->container['currency'];
+        return $this->container['index'];
     }
 
     /**
-     * Sets currency
+     * Sets index
      *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData $currency currency
+     * @param int $index Original zero-based batch position, authoritative even when sourceListingId cannot be echoed.
      *
      * @return self
      */
-    public function setCurrency($currency)
+    public function setIndex($index)
     {
-        if (is_null($currency)) {
-            throw new \InvalidArgumentException('non-nullable currency cannot be null');
+        if (is_null($index)) {
+            throw new \InvalidArgumentException('non-nullable index cannot be null');
         }
-        $this->container['currency'] = $currency;
+
+        if (($index > 99)) {
+            throw new \InvalidArgumentException('invalid value for $index when calling AsyncProductListingBatchFailure., must be smaller than or equal to 99.');
+        }
+        if (($index < 0)) {
+            throw new \InvalidArgumentException('invalid value for $index when calling AsyncProductListingBatchFailure., must be bigger than or equal to 0.');
+        }
+
+        $this->container['index'] = $index;
 
         return $this;
     }
 
     /**
-     * Gets amount
+     * Gets source_listing_id
      *
-     * @return int
+     * @return string|null
      */
-    public function getAmount()
+    public function getSourceListingId()
     {
-        return $this->container['amount'];
+        return $this->container['source_listing_id'];
     }
 
     /**
-     * Sets amount
+     * Sets source_listing_id
      *
-     * @param int $amount Price amount in minor currency units (e.g., cents for most supported currencies, whole yen for JPY)
+     * @param string|null $source_listing_id Included only if present, valid, and safe to echo; omitted otherwise.
      *
      * @return self
      */
-    public function setAmount($amount)
+    public function setSourceListingId($source_listing_id)
     {
-        if (is_null($amount)) {
-            throw new \InvalidArgumentException('non-nullable amount cannot be null');
+        if (is_null($source_listing_id)) {
+            throw new \InvalidArgumentException('non-nullable source_listing_id cannot be null');
+        }
+        $this->container['source_listing_id'] = $source_listing_id;
+
+        return $this;
+    }
+
+    /**
+     * Gets error
+     *
+     * @return string
+     */
+    public function getError()
+    {
+        return $this->container['error'];
+    }
+
+    /**
+     * Sets error
+     *
+     * @param string $error Bounded safe code, never raw exception or payload text. Includes BAD_BODY_VALUE, PRODUCT_LISTING_INGESTION_PAYLOAD_TOO_LARGE, ENQUEUE_FAILED (definitely unsuccessful send), ENQUEUE_UNCONFIRMED (possibly queued), ENQUEUE_NOT_ATTEMPTED (budget before send), ENQUEUE_BLOCKED (eligible FIFO successor held), PRODUCT_LISTING_INGESTION_INTERNAL_ERROR, and applicable narrower item-validation codes.
+     *
+     * @return self
+     */
+    public function setError($error)
+    {
+        if (is_null($error)) {
+            throw new \InvalidArgumentException('non-nullable error cannot be null');
         }
 
-        if (($amount < 0)) {
-            throw new \InvalidArgumentException('invalid value for $amount when calling PriceData., must be bigger than or equal to 0.');
+        if ((!preg_match("/^[A-Z][A-Z0-9_]*$/", ObjectSerializer::toString($error)))) {
+            throw new \InvalidArgumentException("invalid value for \$error when calling AsyncProductListingBatchFailure., must conform to the pattern /^[A-Z][A-Z0-9_]*$/.");
         }
 
-        $this->container['amount'] = $amount;
+        $this->container['error'] = $error;
+
+        return $this;
+    }
+
+    /**
+     * Gets retryable
+     *
+     * @return bool
+     */
+    public function getRetryable()
+    {
+        return $this->container['retryable'];
+    }
+
+    /**
+     * Sets retryable
+     *
+     * @param bool $retryable Whether unchanged-whole-batch retry is appropriate; never permission to resubmit a compacted subset with the same key. Unconfirmed is retryable; validation and size errors are not. Blocked inherits its predecessor's retryability; deterministic configuration errors need repair.
+     *
+     * @return self
+     */
+    public function setRetryable($retryable)
+    {
+        if (is_null($retryable)) {
+            throw new \InvalidArgumentException('non-nullable retryable cannot be null');
+        }
+        $this->container['retryable'] = $retryable;
 
         return $this;
     }

@@ -1,6 +1,6 @@
 <?php
 /**
- * OAuthApi
+ * ProductListingsApi
  * PHP version 8.1
  *
  * @category Class
@@ -45,14 +45,14 @@ use AuraHistoria\PartnerConnect\InternalApi\HeaderSelector;
 use AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
 
 /**
- * OAuthApi Class Doc Comment
+ * ProductListingsApi Class Doc Comment
  *
  * @category Class
  * @package  AuraHistoria\PartnerConnect\InternalApi
  * @author   OpenAPI Generator team
  * @link     https://openapi-generator.tech
  */
-class OAuthApi
+class ProductListingsApi
 {
     /**
      * @var ClientInterface
@@ -76,7 +76,7 @@ class OAuthApi
 
     /** @var string[] $contentTypes **/
     public const contentTypes = [
-        'oauthTokenByThirdPartyCode' => [
+        'postAsyncPartnerProductListings' => [
             'application/json',
         ],
     ];
@@ -128,38 +128,42 @@ class OAuthApi
     }
 
     /**
-     * Operation oauthTokenByThirdPartyCode
+     * Operation postAsyncPartnerProductListings
      *
-     * Exchange OAuth token by third-party code
+     * Submit a batch of product-listing creates asynchronously (Partner API)
      *
-     * @param  string $third_party_code UUIDv7 one-time exchange code returned by the OAuth token endpoint. (required)
-     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['oauthTokenByThirdPartyCode'] to see the possible values for this operation
+     * @param  string $listing_source_id Strict &#x60;ls_&#x60; ListingSource TypeID. (required)
+     * @param  \AuraHistoria\PartnerConnect\InternalApi\Model\CreateProductListingData[] $create_product_listing_data Same array and item contract as synchronous create; individual invalid items produce report failures, not whole-batch rejection. (required)
+     * @param  string|null $idempotency_key One value only; native duplicates and comma-joined values are invalid (&#x60;400 BAD_HEADER_VALUE&#x60;) before publication. Use 1–128 visible ASCII bytes excluding comma. Supply the same key with the unchanged ordered batch for transport retries. If absent, a key is generated and returned on evaluated reports; it cannot be recovered if that response is lost. (optional)
+     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['postAsyncPartnerProductListings'] to see the possible values for this operation
      *
      * @throws \AuraHistoria\PartnerConnect\InternalApi\ApiException on non-2xx response or if the response body is not in the expected format
      * @throws \InvalidArgumentException
-     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\OAuthTokenResponseData|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError
+     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\AsyncProductListingBatchReport|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError
      */
-    public function oauthTokenByThirdPartyCode($third_party_code, string $contentType = self::contentTypes['oauthTokenByThirdPartyCode'][0])
+    public function postAsyncPartnerProductListings($listing_source_id, $create_product_listing_data, $idempotency_key = null, string $contentType = self::contentTypes['postAsyncPartnerProductListings'][0])
     {
-        list($response) = $this->oauthTokenByThirdPartyCodeWithHttpInfo($third_party_code, $contentType);
+        list($response) = $this->postAsyncPartnerProductListingsWithHttpInfo($listing_source_id, $create_product_listing_data, $idempotency_key, $contentType);
         return $response;
     }
 
     /**
-     * Operation oauthTokenByThirdPartyCodeWithHttpInfo
+     * Operation postAsyncPartnerProductListingsWithHttpInfo
      *
-     * Exchange OAuth token by third-party code
+     * Submit a batch of product-listing creates asynchronously (Partner API)
      *
-     * @param  string $third_party_code UUIDv7 one-time exchange code returned by the OAuth token endpoint. (required)
-     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['oauthTokenByThirdPartyCode'] to see the possible values for this operation
+     * @param  string $listing_source_id Strict &#x60;ls_&#x60; ListingSource TypeID. (required)
+     * @param  \AuraHistoria\PartnerConnect\InternalApi\Model\CreateProductListingData[] $create_product_listing_data Same array and item contract as synchronous create; individual invalid items produce report failures, not whole-batch rejection. (required)
+     * @param  string|null $idempotency_key One value only; native duplicates and comma-joined values are invalid (&#x60;400 BAD_HEADER_VALUE&#x60;) before publication. Use 1–128 visible ASCII bytes excluding comma. Supply the same key with the unchanged ordered batch for transport retries. If absent, a key is generated and returned on evaluated reports; it cannot be recovered if that response is lost. (optional)
+     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['postAsyncPartnerProductListings'] to see the possible values for this operation
      *
      * @throws \AuraHistoria\PartnerConnect\InternalApi\ApiException on non-2xx response or if the response body is not in the expected format
      * @throws \InvalidArgumentException
-     * @return array of \AuraHistoria\PartnerConnect\InternalApi\Model\OAuthTokenResponseData|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError, HTTP status code, HTTP response headers (array of strings)
+     * @return array of \AuraHistoria\PartnerConnect\InternalApi\Model\AsyncProductListingBatchReport|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError|\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError, HTTP status code, HTTP response headers (array of strings)
      */
-    public function oauthTokenByThirdPartyCodeWithHttpInfo($third_party_code, string $contentType = self::contentTypes['oauthTokenByThirdPartyCode'][0])
+    public function postAsyncPartnerProductListingsWithHttpInfo($listing_source_id, $create_product_listing_data, $idempotency_key = null, string $contentType = self::contentTypes['postAsyncPartnerProductListings'][0])
     {
-        $request = $this->oauthTokenByThirdPartyCodeRequest($third_party_code, $contentType);
+        $request = $this->postAsyncPartnerProductListingsRequest($listing_source_id, $create_product_listing_data, $idempotency_key, $contentType);
 
         try {
             $options = $this->createHttpClientOption();
@@ -185,9 +189,9 @@ class OAuthApi
 
 
             switch($statusCode) {
-                case 200:
+                case 202:
                     return $this->handleResponseWithDataType(
-                        '\AuraHistoria\PartnerConnect\InternalApi\Model\OAuthTokenResponseData',
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\AsyncProductListingBatchReport',
                         $request,
                         $response,
                     );
@@ -197,7 +201,31 @@ class OAuthApi
                         $request,
                         $response,
                     );
+                case 401:
+                    return $this->handleResponseWithDataType(
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
+                        $request,
+                        $response,
+                    );
+                case 403:
+                    return $this->handleResponseWithDataType(
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
+                        $request,
+                        $response,
+                    );
+                case 413:
+                    return $this->handleResponseWithDataType(
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
+                        $request,
+                        $response,
+                    );
                 case 500:
+                    return $this->handleResponseWithDataType(
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
+                        $request,
+                        $response,
+                    );
+                case 503:
                     return $this->handleResponseWithDataType(
                         '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
                         $request,
@@ -221,21 +249,45 @@ class OAuthApi
             }
 
             return $this->handleResponseWithDataType(
-                '\AuraHistoria\PartnerConnect\InternalApi\Model\OAuthTokenResponseData',
+                '\AuraHistoria\PartnerConnect\InternalApi\Model\AsyncProductListingBatchReport',
                 $request,
                 $response,
             );
         } catch (ApiException $e) {
             switch ($e->getCode()) {
-                case 200:
+                case 202:
                     $data = ObjectSerializer::deserialize(
                         $e->getResponseBody(),
-                        '\AuraHistoria\PartnerConnect\InternalApi\Model\OAuthTokenResponseData',
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\AsyncProductListingBatchReport',
                         $e->getResponseHeaders()
                     );
                     $e->setResponseObject($data);
                     throw $e;
                 case 400:
+                    $data = ObjectSerializer::deserialize(
+                        $e->getResponseBody(),
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
+                        $e->getResponseHeaders()
+                    );
+                    $e->setResponseObject($data);
+                    throw $e;
+                case 401:
+                    $data = ObjectSerializer::deserialize(
+                        $e->getResponseBody(),
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
+                        $e->getResponseHeaders()
+                    );
+                    $e->setResponseObject($data);
+                    throw $e;
+                case 403:
+                    $data = ObjectSerializer::deserialize(
+                        $e->getResponseBody(),
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
+                        $e->getResponseHeaders()
+                    );
+                    $e->setResponseObject($data);
+                    throw $e;
+                case 413:
                     $data = ObjectSerializer::deserialize(
                         $e->getResponseBody(),
                         '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
@@ -251,6 +303,14 @@ class OAuthApi
                     );
                     $e->setResponseObject($data);
                     throw $e;
+                case 503:
+                    $data = ObjectSerializer::deserialize(
+                        $e->getResponseBody(),
+                        '\AuraHistoria\PartnerConnect\InternalApi\Model\ApiError',
+                        $e->getResponseHeaders()
+                    );
+                    $e->setResponseObject($data);
+                    throw $e;
             }
 
 
@@ -259,19 +319,21 @@ class OAuthApi
     }
 
     /**
-     * Operation oauthTokenByThirdPartyCodeAsync
+     * Operation postAsyncPartnerProductListingsAsync
      *
-     * Exchange OAuth token by third-party code
+     * Submit a batch of product-listing creates asynchronously (Partner API)
      *
-     * @param  string $third_party_code UUIDv7 one-time exchange code returned by the OAuth token endpoint. (required)
-     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['oauthTokenByThirdPartyCode'] to see the possible values for this operation
+     * @param  string $listing_source_id Strict &#x60;ls_&#x60; ListingSource TypeID. (required)
+     * @param  \AuraHistoria\PartnerConnect\InternalApi\Model\CreateProductListingData[] $create_product_listing_data Same array and item contract as synchronous create; individual invalid items produce report failures, not whole-batch rejection. (required)
+     * @param  string|null $idempotency_key One value only; native duplicates and comma-joined values are invalid (&#x60;400 BAD_HEADER_VALUE&#x60;) before publication. Use 1–128 visible ASCII bytes excluding comma. Supply the same key with the unchanged ordered batch for transport retries. If absent, a key is generated and returned on evaluated reports; it cannot be recovered if that response is lost. (optional)
+     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['postAsyncPartnerProductListings'] to see the possible values for this operation
      *
      * @throws \InvalidArgumentException
      * @return \GuzzleHttp\Promise\PromiseInterface
      */
-    public function oauthTokenByThirdPartyCodeAsync($third_party_code, string $contentType = self::contentTypes['oauthTokenByThirdPartyCode'][0])
+    public function postAsyncPartnerProductListingsAsync($listing_source_id, $create_product_listing_data, $idempotency_key = null, string $contentType = self::contentTypes['postAsyncPartnerProductListings'][0])
     {
-        return $this->oauthTokenByThirdPartyCodeAsyncWithHttpInfo($third_party_code, $contentType)
+        return $this->postAsyncPartnerProductListingsAsyncWithHttpInfo($listing_source_id, $create_product_listing_data, $idempotency_key, $contentType)
             ->then(
                 function ($response) {
                     return $response[0];
@@ -280,20 +342,22 @@ class OAuthApi
     }
 
     /**
-     * Operation oauthTokenByThirdPartyCodeAsyncWithHttpInfo
+     * Operation postAsyncPartnerProductListingsAsyncWithHttpInfo
      *
-     * Exchange OAuth token by third-party code
+     * Submit a batch of product-listing creates asynchronously (Partner API)
      *
-     * @param  string $third_party_code UUIDv7 one-time exchange code returned by the OAuth token endpoint. (required)
-     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['oauthTokenByThirdPartyCode'] to see the possible values for this operation
+     * @param  string $listing_source_id Strict &#x60;ls_&#x60; ListingSource TypeID. (required)
+     * @param  \AuraHistoria\PartnerConnect\InternalApi\Model\CreateProductListingData[] $create_product_listing_data Same array and item contract as synchronous create; individual invalid items produce report failures, not whole-batch rejection. (required)
+     * @param  string|null $idempotency_key One value only; native duplicates and comma-joined values are invalid (&#x60;400 BAD_HEADER_VALUE&#x60;) before publication. Use 1–128 visible ASCII bytes excluding comma. Supply the same key with the unchanged ordered batch for transport retries. If absent, a key is generated and returned on evaluated reports; it cannot be recovered if that response is lost. (optional)
+     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['postAsyncPartnerProductListings'] to see the possible values for this operation
      *
      * @throws \InvalidArgumentException
      * @return \GuzzleHttp\Promise\PromiseInterface
      */
-    public function oauthTokenByThirdPartyCodeAsyncWithHttpInfo($third_party_code, string $contentType = self::contentTypes['oauthTokenByThirdPartyCode'][0])
+    public function postAsyncPartnerProductListingsAsyncWithHttpInfo($listing_source_id, $create_product_listing_data, $idempotency_key = null, string $contentType = self::contentTypes['postAsyncPartnerProductListings'][0])
     {
-        $returnType = '\AuraHistoria\PartnerConnect\InternalApi\Model\OAuthTokenResponseData';
-        $request = $this->oauthTokenByThirdPartyCodeRequest($third_party_code, $contentType);
+        $returnType = '\AuraHistoria\PartnerConnect\InternalApi\Model\AsyncProductListingBatchReport';
+        $request = $this->postAsyncPartnerProductListingsRequest($listing_source_id, $create_product_listing_data, $idempotency_key, $contentType);
 
         return $this->client
             ->sendAsync($request, $this->createHttpClientOption())
@@ -332,26 +396,48 @@ class OAuthApi
     }
 
     /**
-     * Create request for operation 'oauthTokenByThirdPartyCode'
+     * Create request for operation 'postAsyncPartnerProductListings'
      *
-     * @param  string $third_party_code UUIDv7 one-time exchange code returned by the OAuth token endpoint. (required)
-     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['oauthTokenByThirdPartyCode'] to see the possible values for this operation
+     * @param  string $listing_source_id Strict &#x60;ls_&#x60; ListingSource TypeID. (required)
+     * @param  \AuraHistoria\PartnerConnect\InternalApi\Model\CreateProductListingData[] $create_product_listing_data Same array and item contract as synchronous create; individual invalid items produce report failures, not whole-batch rejection. (required)
+     * @param  string|null $idempotency_key One value only; native duplicates and comma-joined values are invalid (&#x60;400 BAD_HEADER_VALUE&#x60;) before publication. Use 1–128 visible ASCII bytes excluding comma. Supply the same key with the unchanged ordered batch for transport retries. If absent, a key is generated and returned on evaluated reports; it cannot be recovered if that response is lost. (optional)
+     * @param  string $contentType The value for the Content-Type header. Check self::contentTypes['postAsyncPartnerProductListings'] to see the possible values for this operation
      *
      * @throws \InvalidArgumentException
      * @return \GuzzleHttp\Psr7\Request
      */
-    public function oauthTokenByThirdPartyCodeRequest($third_party_code, string $contentType = self::contentTypes['oauthTokenByThirdPartyCode'][0])
+    public function postAsyncPartnerProductListingsRequest($listing_source_id, $create_product_listing_data, $idempotency_key = null, string $contentType = self::contentTypes['postAsyncPartnerProductListings'][0])
     {
 
-        // verify the required parameter 'third_party_code' is set
-        if ($third_party_code === null || (is_array($third_party_code) && count($third_party_code) === 0)) {
+        // verify the required parameter 'listing_source_id' is set
+        if ($listing_source_id === null || (is_array($listing_source_id) && count($listing_source_id) === 0)) {
             throw new \InvalidArgumentException(
-                'Missing the required parameter $third_party_code when calling oauthTokenByThirdPartyCode'
+                'Missing the required parameter $listing_source_id when calling postAsyncPartnerProductListings'
             );
         }
 
+        // verify the required parameter 'create_product_listing_data' is set
+        if ($create_product_listing_data === null) {
+            throw new \InvalidArgumentException(
+                'Missing the required parameter $create_product_listing_data when calling postAsyncPartnerProductListings'
+            );
+        }
+        if (count($create_product_listing_data) > 100) {
+            throw new \InvalidArgumentException('invalid value for "$create_product_listing_data" when calling ProductListingsApi.postAsyncPartnerProductListings, number of items must be less than or equal to 100.');
+        }
 
-        $resourcePath = '/api/v1/oauth/tokens/by-third-party-code/{thirdPartyCode}';
+        if ($idempotency_key !== null && strlen($idempotency_key) > 128) {
+            throw new \InvalidArgumentException('invalid length for "$idempotency_key" when calling ProductListingsApi.postAsyncPartnerProductListings, must be smaller than or equal to 128.');
+        }
+        if ($idempotency_key !== null && strlen($idempotency_key) < 1) {
+            throw new \InvalidArgumentException('invalid length for "$idempotency_key" when calling ProductListingsApi.postAsyncPartnerProductListings, must be bigger than or equal to 1.');
+        }
+        if ($idempotency_key !== null && !preg_match("/^[\\x21-\\x2B\\x2D-\\x7E]{1,128}$/", $idempotency_key)) {
+            throw new \InvalidArgumentException("invalid value for \"idempotency_key\" when calling ProductListingsApi.postAsyncPartnerProductListings, must conform to the pattern /^[\\x21-\\x2B\\x2D-\\x7E]{1,128}$/.");
+        }
+
+
+        $resourcePath = '/api/v1/listing-sources/{listingSourceId}/product-listings/async';
         $formParams = [];
         $queryParams = [];
         $headerParams = [];
@@ -359,12 +445,16 @@ class OAuthApi
         $multipart = false;
 
 
+        // header params
+        if ($idempotency_key !== null) {
+            $headerParams['Idempotency-Key'] = ObjectSerializer::toHeaderValue($idempotency_key);
+        }
 
         // path params
-        if ($third_party_code !== null) {
+        if ($listing_source_id !== null) {
             $resourcePath = str_replace(
-                '{thirdPartyCode}',
-                ObjectSerializer::toPathValue($third_party_code),
+                '{listingSourceId}',
+                ObjectSerializer::toPathValue($listing_source_id),
                 $resourcePath
             );
         }
@@ -377,7 +467,14 @@ class OAuthApi
         );
 
         // for model (json/xml)
-        if (count($formParams) > 0) {
+        if (isset($create_product_listing_data)) {
+            if (stripos($headers['Content-Type'], 'application/json') !== false) {
+                # if Content-Type contains "application/json", json_encode the body
+                $httpBody = \GuzzleHttp\Utils::jsonEncode(ObjectSerializer::sanitizeForSerialization($create_product_listing_data));
+            } else {
+                $httpBody = $create_product_listing_data;
+            }
+        } elseif (count($formParams) > 0) {
             if ($multipart) {
                 $multipartContents = [];
                 foreach ($formParams as $formParamName => $formParamValue) {
@@ -401,6 +498,14 @@ class OAuthApi
             }
         }
 
+        // this endpoint requires Bearer (opaque) authentication (access token)
+        if (!empty($this->config->getAccessToken())) {
+            $headers['Authorization'] = 'Bearer ' . $this->config->getAccessToken();
+        }
+        // this endpoint requires Bearer (JWT) authentication (access token)
+        if (!empty($this->config->getAccessToken())) {
+            $headers['Authorization'] = 'Bearer ' . $this->config->getAccessToken();
+        }
 
         $defaultHeaders = [];
         if ($this->config->getUserAgent()) {
@@ -416,7 +521,7 @@ class OAuthApi
         $operationHost = $this->config->getHost();
         $query = ObjectSerializer::buildQuery($queryParams);
         return new Request(
-            'GET',
+            'POST',
             $operationHost . $resourcePath . ($query ? "?{$query}" : ''),
             $headers,
             $httpBody

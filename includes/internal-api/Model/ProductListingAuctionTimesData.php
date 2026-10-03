@@ -1,6 +1,6 @@
 <?php
 /**
- * PriceData
+ * ProductListingAuctionTimesData
  *
  * PHP version 8.1
  *
@@ -34,16 +34,16 @@ use \ArrayAccess;
 use \AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
 
 /**
- * PriceData Class Doc Comment
+ * ProductListingAuctionTimesData Class Doc Comment
  *
  * @category Class
- * @description Price information with currency
+ * @description Omit each leaf to preserve it; send null to clear it; values are RFC3339 instants.
  * @package  AuraHistoria\PartnerConnect\InternalApi
  * @author   OpenAPI Generator team
  * @link     https://openapi-generator.tech
  * @implements \ArrayAccess<string, mixed>
  */
-class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
+class ProductListingAuctionTimesData implements ModelInterface, ArrayAccess, \JsonSerializable
 {
     public const DISCRIMINATOR = null;
 
@@ -52,7 +52,7 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      *
      * @var string
      */
-    protected static $openAPIModelName = 'PriceData';
+    protected static $openAPIModelName = 'ProductListingAuctionTimesData';
 
     /**
      * Array of property to type mappings. Used for (de)serialization
@@ -60,8 +60,9 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $openAPITypes = [
-        'currency' => '\AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData',
-        'amount' => 'int'
+        'bidding_opens' => '\DateTime',
+        'scheduled_closes' => '\DateTime',
+        'reported_closed_at' => '\DateTime'
     ];
 
     /**
@@ -72,8 +73,9 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @psalm-var array<string, string|null>
      */
     protected static $openAPIFormats = [
-        'currency' => null,
-        'amount' => null
+        'bidding_opens' => 'date-time',
+        'scheduled_closes' => 'date-time',
+        'reported_closed_at' => 'date-time'
     ];
 
     /**
@@ -82,8 +84,9 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var boolean[]
      */
     protected static array $openAPINullables = [
-        'currency' => false,
-        'amount' => false
+        'bidding_opens' => true,
+        'scheduled_closes' => true,
+        'reported_closed_at' => true
     ];
 
     /**
@@ -172,8 +175,9 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $attributeMap = [
-        'currency' => 'currency',
-        'amount' => 'amount'
+        'bidding_opens' => 'biddingOpens',
+        'scheduled_closes' => 'scheduledCloses',
+        'reported_closed_at' => 'reportedClosedAt'
     ];
 
     /**
@@ -182,8 +186,9 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $setters = [
-        'currency' => 'setCurrency',
-        'amount' => 'setAmount'
+        'bidding_opens' => 'setBiddingOpens',
+        'scheduled_closes' => 'setScheduledCloses',
+        'reported_closed_at' => 'setReportedClosedAt'
     ];
 
     /**
@@ -192,8 +197,9 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $getters = [
-        'currency' => 'getCurrency',
-        'amount' => 'getAmount'
+        'bidding_opens' => 'getBiddingOpens',
+        'scheduled_closes' => 'getScheduledCloses',
+        'reported_closed_at' => 'getReportedClosedAt'
     ];
 
     /**
@@ -253,8 +259,9 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      */
     public function __construct(?array $data = null)
     {
-        $this->setIfExists('currency', $data ?? [], null);
-        $this->setIfExists('amount', $data ?? [], null);
+        $this->setIfExists('bidding_opens', $data ?? [], null);
+        $this->setIfExists('scheduled_closes', $data ?? [], null);
+        $this->setIfExists('reported_closed_at', $data ?? [], null);
     }
 
     /**
@@ -284,16 +291,6 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
     {
         $invalidProperties = [];
 
-        if ($this->container['currency'] === null) {
-            $invalidProperties[] = "'currency' can't be null";
-        }
-        if ($this->container['amount'] === null) {
-            $invalidProperties[] = "'amount' can't be null";
-        }
-        if (($this->container['amount'] < 0)) {
-            $invalidProperties[] = "invalid value for 'amount', must be bigger than or equal to 0.";
-        }
-
         return $invalidProperties;
     }
 
@@ -310,60 +307,103 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
 
 
     /**
-     * Gets currency
+     * Gets bidding_opens
      *
-     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData
+     * @return \DateTime|null
      */
-    public function getCurrency()
+    public function getBiddingOpens()
     {
-        return $this->container['currency'];
+        return $this->container['bidding_opens'];
     }
 
     /**
-     * Sets currency
+     * Sets bidding_opens
      *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData $currency currency
+     * @param \DateTime|null $bidding_opens bidding_opens
      *
      * @return self
      */
-    public function setCurrency($currency)
+    public function setBiddingOpens($bidding_opens)
     {
-        if (is_null($currency)) {
-            throw new \InvalidArgumentException('non-nullable currency cannot be null');
+        if (is_null($bidding_opens)) {
+            array_push($this->openAPINullablesSetToNull, 'bidding_opens');
+        } else {
+            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
+            $index = array_search('bidding_opens', $nullablesSetToNull);
+            if ($index !== FALSE) {
+                unset($nullablesSetToNull[$index]);
+                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
+            }
         }
-        $this->container['currency'] = $currency;
+        $this->container['bidding_opens'] = $bidding_opens;
 
         return $this;
     }
 
     /**
-     * Gets amount
+     * Gets scheduled_closes
      *
-     * @return int
+     * @return \DateTime|null
      */
-    public function getAmount()
+    public function getScheduledCloses()
     {
-        return $this->container['amount'];
+        return $this->container['scheduled_closes'];
     }
 
     /**
-     * Sets amount
+     * Sets scheduled_closes
      *
-     * @param int $amount Price amount in minor currency units (e.g., cents for most supported currencies, whole yen for JPY)
+     * @param \DateTime|null $scheduled_closes scheduled_closes
      *
      * @return self
      */
-    public function setAmount($amount)
+    public function setScheduledCloses($scheduled_closes)
     {
-        if (is_null($amount)) {
-            throw new \InvalidArgumentException('non-nullable amount cannot be null');
+        if (is_null($scheduled_closes)) {
+            array_push($this->openAPINullablesSetToNull, 'scheduled_closes');
+        } else {
+            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
+            $index = array_search('scheduled_closes', $nullablesSetToNull);
+            if ($index !== FALSE) {
+                unset($nullablesSetToNull[$index]);
+                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
+            }
         }
+        $this->container['scheduled_closes'] = $scheduled_closes;
 
-        if (($amount < 0)) {
-            throw new \InvalidArgumentException('invalid value for $amount when calling PriceData., must be bigger than or equal to 0.');
+        return $this;
+    }
+
+    /**
+     * Gets reported_closed_at
+     *
+     * @return \DateTime|null
+     */
+    public function getReportedClosedAt()
+    {
+        return $this->container['reported_closed_at'];
+    }
+
+    /**
+     * Sets reported_closed_at
+     *
+     * @param \DateTime|null $reported_closed_at reported_closed_at
+     *
+     * @return self
+     */
+    public function setReportedClosedAt($reported_closed_at)
+    {
+        if (is_null($reported_closed_at)) {
+            array_push($this->openAPINullablesSetToNull, 'reported_closed_at');
+        } else {
+            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
+            $index = array_search('reported_closed_at', $nullablesSetToNull);
+            if ($index !== FALSE) {
+                unset($nullablesSetToNull[$index]);
+                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
+            }
         }
-
-        $this->container['amount'] = $amount;
+        $this->container['reported_closed_at'] = $reported_closed_at;
 
         return $this;
     }

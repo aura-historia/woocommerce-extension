@@ -1,6 +1,6 @@
 <?php
 /**
- * PriceData
+ * AsyncProductListingBatchReport
  *
  * PHP version 8.1
  *
@@ -34,16 +34,16 @@ use \ArrayAccess;
 use \AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
 
 /**
- * PriceData Class Doc Comment
+ * AsyncProductListingBatchReport Class Doc Comment
  *
  * @category Class
- * @description Price information with currency
+ * @description Admission report, not a listing creation or update result. For every evaluated batch, acceptedCount plus the number of failures equals the original array length.
  * @package  AuraHistoria\PartnerConnect\InternalApi
  * @author   OpenAPI Generator team
  * @link     https://openapi-generator.tech
  * @implements \ArrayAccess<string, mixed>
  */
-class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
+class AsyncProductListingBatchReport implements ModelInterface, ArrayAccess, \JsonSerializable
 {
     public const DISCRIMINATOR = null;
 
@@ -52,7 +52,7 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      *
      * @var string
      */
-    protected static $openAPIModelName = 'PriceData';
+    protected static $openAPIModelName = 'AsyncProductListingBatchReport';
 
     /**
      * Array of property to type mappings. Used for (de)serialization
@@ -60,8 +60,9 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $openAPITypes = [
-        'currency' => '\AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData',
-        'amount' => 'int'
+        'submission_id' => 'string',
+        'accepted_count' => 'int',
+        'failures' => '\AuraHistoria\PartnerConnect\InternalApi\Model\AsyncProductListingBatchFailure[]'
     ];
 
     /**
@@ -72,8 +73,9 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @psalm-var array<string, string|null>
      */
     protected static $openAPIFormats = [
-        'currency' => null,
-        'amount' => null
+        'submission_id' => null,
+        'accepted_count' => null,
+        'failures' => null
     ];
 
     /**
@@ -82,8 +84,9 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var boolean[]
      */
     protected static array $openAPINullables = [
-        'currency' => false,
-        'amount' => false
+        'submission_id' => false,
+        'accepted_count' => false,
+        'failures' => false
     ];
 
     /**
@@ -172,8 +175,9 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $attributeMap = [
-        'currency' => 'currency',
-        'amount' => 'amount'
+        'submission_id' => 'submissionId',
+        'accepted_count' => 'acceptedCount',
+        'failures' => 'failures'
     ];
 
     /**
@@ -182,8 +186,9 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $setters = [
-        'currency' => 'setCurrency',
-        'amount' => 'setAmount'
+        'submission_id' => 'setSubmissionId',
+        'accepted_count' => 'setAcceptedCount',
+        'failures' => 'setFailures'
     ];
 
     /**
@@ -192,8 +197,9 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $getters = [
-        'currency' => 'getCurrency',
-        'amount' => 'getAmount'
+        'submission_id' => 'getSubmissionId',
+        'accepted_count' => 'getAcceptedCount',
+        'failures' => 'getFailures'
     ];
 
     /**
@@ -253,8 +259,9 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      */
     public function __construct(?array $data = null)
     {
-        $this->setIfExists('currency', $data ?? [], null);
-        $this->setIfExists('amount', $data ?? [], null);
+        $this->setIfExists('submission_id', $data ?? [], null);
+        $this->setIfExists('accepted_count', $data ?? [], null);
+        $this->setIfExists('failures', $data ?? [], null);
     }
 
     /**
@@ -284,14 +291,25 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
     {
         $invalidProperties = [];
 
-        if ($this->container['currency'] === null) {
-            $invalidProperties[] = "'currency' can't be null";
+        if ($this->container['submission_id'] === null) {
+            $invalidProperties[] = "'submission_id' can't be null";
         }
-        if ($this->container['amount'] === null) {
-            $invalidProperties[] = "'amount' can't be null";
+        if ($this->container['accepted_count'] === null) {
+            $invalidProperties[] = "'accepted_count' can't be null";
         }
-        if (($this->container['amount'] < 0)) {
-            $invalidProperties[] = "invalid value for 'amount', must be bigger than or equal to 0.";
+        if (($this->container['accepted_count'] > 100)) {
+            $invalidProperties[] = "invalid value for 'accepted_count', must be smaller than or equal to 100.";
+        }
+
+        if (($this->container['accepted_count'] < 0)) {
+            $invalidProperties[] = "invalid value for 'accepted_count', must be bigger than or equal to 0.";
+        }
+
+        if ($this->container['failures'] === null) {
+            $invalidProperties[] = "'failures' can't be null";
+        }
+        if ((count($this->container['failures']) > 100)) {
+            $invalidProperties[] = "invalid value for 'failures', number of items must be less than or equal to 100.";
         }
 
         return $invalidProperties;
@@ -310,60 +328,94 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
 
 
     /**
-     * Gets currency
+     * Gets submission_id
      *
-     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData
+     * @return string
      */
-    public function getCurrency()
+    public function getSubmissionId()
     {
-        return $this->container['currency'];
+        return $this->container['submission_id'];
     }
 
     /**
-     * Sets currency
+     * Sets submission_id
      *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData $currency currency
+     * @param string $submission_id Opaque correlation identifier only; not a status resource or batch deduplication token.
      *
      * @return self
      */
-    public function setCurrency($currency)
+    public function setSubmissionId($submission_id)
     {
-        if (is_null($currency)) {
-            throw new \InvalidArgumentException('non-nullable currency cannot be null');
+        if (is_null($submission_id)) {
+            throw new \InvalidArgumentException('non-nullable submission_id cannot be null');
         }
-        $this->container['currency'] = $currency;
+        $this->container['submission_id'] = $submission_id;
 
         return $this;
     }
 
     /**
-     * Gets amount
+     * Gets accepted_count
      *
      * @return int
      */
-    public function getAmount()
+    public function getAcceptedCount()
     {
-        return $this->container['amount'];
+        return $this->container['accepted_count'];
     }
 
     /**
-     * Sets amount
+     * Sets accepted_count
      *
-     * @param int $amount Price amount in minor currency units (e.g., cents for most supported currencies, whole yen for JPY)
+     * @param int $accepted_count Number of publisher-confirmed admitted entries; never includes unconfirmed sends.
      *
      * @return self
      */
-    public function setAmount($amount)
+    public function setAcceptedCount($accepted_count)
     {
-        if (is_null($amount)) {
-            throw new \InvalidArgumentException('non-nullable amount cannot be null');
+        if (is_null($accepted_count)) {
+            throw new \InvalidArgumentException('non-nullable accepted_count cannot be null');
         }
 
-        if (($amount < 0)) {
-            throw new \InvalidArgumentException('invalid value for $amount when calling PriceData., must be bigger than or equal to 0.');
+        if (($accepted_count > 100)) {
+            throw new \InvalidArgumentException('invalid value for $accepted_count when calling AsyncProductListingBatchReport., must be smaller than or equal to 100.');
+        }
+        if (($accepted_count < 0)) {
+            throw new \InvalidArgumentException('invalid value for $accepted_count when calling AsyncProductListingBatchReport., must be bigger than or equal to 0.');
         }
 
-        $this->container['amount'] = $amount;
+        $this->container['accepted_count'] = $accepted_count;
+
+        return $this;
+    }
+
+    /**
+     * Gets failures
+     *
+     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\AsyncProductListingBatchFailure[]
+     */
+    public function getFailures()
+    {
+        return $this->container['failures'];
+    }
+
+    /**
+     * Sets failures
+     *
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\AsyncProductListingBatchFailure[] $failures Exactly one per non-confirmed original entry, sorted by original zero-based index. Empty for fully admitted or empty batches.
+     *
+     * @return self
+     */
+    public function setFailures($failures)
+    {
+        if (is_null($failures)) {
+            throw new \InvalidArgumentException('non-nullable failures cannot be null');
+        }
+
+        if ((count($failures) > 100)) {
+            throw new \InvalidArgumentException('invalid value for $failures when calling AsyncProductListingBatchReport., number of items must be less than or equal to 100.');
+        }
+        $this->container['failures'] = $failures;
 
         return $this;
     }

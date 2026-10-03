@@ -30,7 +30,7 @@ After you connect the store through Aura Historia OAuth, the plugin automaticall
 
 The plugin keeps the settings surface intentionally small. Merchants do not manually enter Aura Historia credentials in wp-admin. The OAuth flow sets and stores:
 
-* Shop ID
+* ListingSource ID (`ls_` TypeID)
 * Aura Historia access token
 
 Merchants do not enter:
@@ -54,22 +54,22 @@ The service is used to:
 
 Data sent to the service may include:
 
-* Shop ID
+* ListingSource ID (`ls_` TypeID)
 * Aura Historia access token in the bearer `Authorization` header for backend API calls
-* Aura Historia access token in the webhook `x-api-key` header for WooCommerce deliveries
+* Aura Historia access token in a bearer `Authorization` header on managed live webhook deliveries
 * generated WooCommerce webhook secret
 * store language and currency
-* product webhook payloads for `product.created`, `product.updated`, and `product.deleted`
-* existing product data during an automatic or manual backfill, with product descriptions converted from HTML to Markdown
+* unchanged signed WooCommerce webhook payloads for `product.created`, `product.updated`, and `product.deleted`, including any WooCommerce descriptions
+* published products during backfill: WooCommerce product ID as `sourceListingId`, canonical URL, image URL array, optional localized title, optional tagged monetary price (integer minor units), and optional availability. Backfill does not send description/body yet (follow-up #93).
 
 Service endpoints:
 
 * `GET https://aura-historia.com/oauth/authorize`
 * `GET https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce`
 * `GET https://api.aura-historia.com/api/v1/oauth/tokens/by-third-party-code/{thirdPartyCode}`
-* `PATCH https://api.aura-historia.com/api/v1/shops/{shopId}`
-* `POST https://api.aura-historia.com/api/v1/webhooks/woocommerce/{shopId}`
-* `PUT https://api.aura-historia.com/api/v1/shops/{shopId}/products`
+* `PUT https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/ingestion-configurations/woocommerce`
+* `POST https://api.aura-historia.com/api/v1/webhooks/woocommerce/{listingSourceId}`
+* `POST https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/product-listings/async`
 
 Service provider and policies:
 
@@ -86,13 +86,13 @@ Service provider and policies:
 4. Go to `WooCommerce > Aura Historia`.
 5. Approve the Aura Historia OAuth connection when prompted.
 
-After OAuth completes, the plugin syncs the managed webhooks automatically and starts sending product updates to Aura Historia.
+A real registered `oc_` OAuth client ID must be supplied via `AHPC_OAUTH_CLIENT_ID` (constant or environment variable); none is bundled. Configure the same client ID and its matching secret in the webapp redirect broker, register the broker redirect URI, and grant exactly `product-listings:write listing-sources:write`. The broker must return an `ls_` ListingSource ID in its external `partner_shop_id` callback field; UUID Shop IDs are rejected. The API uses `https://api.aura-historia.com` in production and `https://api.stage.aura-historia.com` for stage. After OAuth completes, the plugin configures WooCommerce ingestion and syncs the managed webhooks.
 
 == Frequently Asked Questions ==
 
 = Do I need an Aura Historia account? =
 
-Yes. This plugin is intended for merchants who already use Aura Historia and have a partner shop they can authorize during OAuth.
+Yes. This plugin is intended for merchants who already use Aura Historia and administer a ListingSource they can authorize during OAuth.
 
 = Which WooCommerce events are sent? =
 
@@ -100,7 +100,7 @@ Only `product.created`, `product.updated`, and `product.deleted`.
 
 = What data is sent to Aura Historia? =
 
-After configuration, the plugin sends the generated WooCommerce webhook secret, store language and currency, product webhook payloads, and existing product data during backfill. Backfill product descriptions are converted from HTML to Markdown. See the `External services` section above for the full overview.
+After configuration, the plugin sends the generated WooCommerce webhook secret, store language and currency, unchanged signed live product webhook payloads, and published product listing data during backfill. The backfill never sends description/body; live WooCommerce webhook bodies remain untouched. See `External services` above.
 
 = Can I change the delivery URL or webhook secret in wp-admin? =
 
@@ -108,11 +108,11 @@ No. The plugin keeps the Aura Historia delivery URL built in and generates the W
 
 = What happens if I edit or delete one of the managed webhooks? =
 
-The plugin repairs plugin-owned webhooks during its sync flow so the required configuration is restored.
+The plugin first applies the exact WooCommerce signing secret, store currency, and language through the partner WooCommerce ingestion-configuration PUT; only after it succeeds does webhook sync activate or repair the managed webhooks.
 
 = Does this plugin backfill existing products? =
 
-Yes. After a successful connection, the plugin can send the current catalog to Aura Historia in the background. Merchants can also manually restart that backfill from `WooCommerce > Aura Historia`.
+Yes. After a successful connection, the plugin submits published products in background batches of up to 100 to the async ProductListings API. A `202` confirms queue admission, not completed creation or immediate search visibility. Retries reuse the same ordered request and idempotency key. Merchants can manually restart from `WooCommerce > Aura Historia`.
 
 = What happens when the plugin is disabled? =
 

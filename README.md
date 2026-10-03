@@ -60,7 +60,7 @@
 
 Aura Historia Partner Connect is a focused WordPress plugin for WooCommerce stores that already use Aura Historia.
 
-Its job is intentionally narrow: it owns exactly three WooCommerce product webhooks and keeps them correctly configured for the connected Aura Historia shop without creating duplicates or exposing unnecessary settings.
+Its job is intentionally narrow: it owns exactly three WooCommerce product webhooks and keeps them correctly configured for the connected Aura Historia ListingSource without creating duplicates or exposing unnecessary settings.
 
 Managed webhook topics:
 
@@ -76,8 +76,8 @@ Managed webhook topics:
 - starts an OAuth connection flow from the settings page instead of asking merchants to paste credentials
 - exchanges the OAuth broker code for an Aura Historia access token and stores it locally
 - sends the generated secret to Aura Historia before activating delivery
-- injects the access token into the `x-api-key` webhook header late in the WordPress HTTP stack
-- can backfill the current catalog in the background after a successful connection
+- injects bearer `Authorization` into signed, managed webhook deliveries late in the WordPress HTTP stack without rewriting WooCommerce's signed body
+- submits published catalog listings to the async ProductListings API in background batches after connection; admission does not mean ingestion is complete
 - pauses plugin-owned webhooks on deactivation
 - removes plugin-owned webhooks and plugin options on uninstall
 
@@ -97,7 +97,7 @@ Managed webhook topics:
 This plugin is for merchants and integrators who already have:
 
 - an Aura Historia account
-- a partner shop in Aura Historia
+- a ListingSource in Aura Historia
 - a WooCommerce store that should sync product events to Aura Historia
 
 It is **not** a general-purpose WooCommerce webhook manager.
@@ -106,12 +106,12 @@ It is **not** a general-purpose WooCommerce webhook manager.
 
 1. A merchant installs the plugin and opens `WooCommerce > Aura Historia`.
 2. If the store is not connected yet, the settings page starts the Aura Historia OAuth flow automatically; the Connect button is available as a fallback.
-3. Aura Historia redirects back to the plugin settings page with the partner Shop ID and a short-lived third-party exchange code.
-4. The plugin exchanges that code for an Aura Historia access token and stores the Shop ID and token locally.
-5. The plugin generates a WooCommerce webhook signing secret and registers it with Aura Historia via `PATCH /api/v1/shops/{shopId}`.
-6. The plugin creates or repairs the three managed WooCommerce webhooks.
-7. WooCommerce sends live webhook deliveries to `POST /api/v1/webhooks/woocommerce/{shopId}`.
-8. The plugin can also backfill the current catalog to `PUT /api/v1/shops/{shopId}/products` in background batches.
+3. Aura Historia redirects back to the plugin settings page with a selected `ls_` ListingSource ID and a short-lived third-party exchange code. The broker may use the external callback field `partner_shop_id`, but its value must be an `ls_` ID.
+4. The plugin exchanges that code for an Aura Historia access token and stores the ListingSource ID and token locally.
+5. The plugin generates a WooCommerce webhook signing secret and applies that exact secret, store currency, and language via `PUT /api/v1/listing-sources/{listingSourceId}/ingestion-configurations/woocommerce` before enabling delivery.
+6. The plugin creates or repairs the three managed WooCommerce webhooks only after provider configuration succeeds.
+7. WooCommerce sends unchanged, signed live webhook bodies to `POST /api/v1/webhooks/woocommerce/{listingSourceId}` with bearer authorization injected late.
+8. The plugin can also submit published products to `POST /api/v1/listing-sources/{listingSourceId}/product-listings/async` in batches of up to 100. HTTP `202` reports queue admission, not completed creation; no `submissionId` polling occurs.
 
 ## External service behavior
 
@@ -121,13 +121,12 @@ This plugin depends on the Aura Historia service.
 
 Depending on the action, the plugin may send:
 
-- Shop ID
-- Aura Historia access token in the bearer `Authorization` header for backend API calls
-- Aura Historia access token in the webhook `x-api-key` header for WooCommerce deliveries
-- generated WooCommerce webhook secret
+- ListingSource ID (`ls_` TypeID)
+- Aura Historia access token in bearer `Authorization` headers for API calls and managed live webhook deliveries
+- generated WooCommerce webhook signing secret for provider configuration (never as an Authorization header)
 - store language and currency
-- WooCommerce product webhook payloads
-- current product data during catalog backfill, with product descriptions converted from HTML to Markdown
+- unchanged WooCommerce signed product webhook payloads, including any descriptions supplied by WooCommerce
+- published product listings during backfill: WooCommerce product ID as `sourceListingId`, canonical URL, image URL array, optional localized title, optional monetary price in integer minor units, and optional availability. Backfill does **not** send description/body (tracked in [#93](https://github.com/aura-historia/woocommerce-extension/issues/93)).
 
 ### When it gets sent
 
@@ -141,9 +140,9 @@ Depending on the action, the plugin may send:
 - `GET https://aura-historia.com/oauth/authorize`
 - `GET https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce`
 - `GET https://api.aura-historia.com/api/v1/oauth/tokens/by-third-party-code/{thirdPartyCode}`
-- `PATCH https://api.aura-historia.com/api/v1/shops/{shopId}`
-- `POST https://api.aura-historia.com/api/v1/webhooks/woocommerce/{shopId}`
-- `PUT https://api.aura-historia.com/api/v1/shops/{shopId}/products`
+- `PUT https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/ingestion-configurations/woocommerce`
+- `POST https://api.aura-historia.com/api/v1/webhooks/woocommerce/{listingSourceId}`
+- `POST https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/product-listings/async`
 
 ### Service policies
 
@@ -163,7 +162,7 @@ Depending on the action, the plugin may send:
 5. Open `WooCommerce > Aura Historia`.
 6. Approve the Aura Historia OAuth connection when prompted.
 
-Once OAuth completes, the plugin stores the returned Shop ID and access token locally and syncs the managed webhooks automatically.
+Once OAuth completes, the plugin stores the selected ListingSource ID and access token locally, configures WooCommerce ingestion at Aura Historia, then syncs the managed webhooks.
 
 ## Configuration model
 
@@ -173,7 +172,7 @@ The distributed plugin defaults to the production Aura Historia API base URL:
 
 Merchants do **not** manually configure credentials in wp-admin. The OAuth flow sets and stores:
 
-- the Aura Historia Shop ID
+- the Aura Historia ListingSource ID
 - an Aura Historia access token
 
 Merchants also do **not** configure:
@@ -188,38 +187,35 @@ For staging, local development, or custom test environments, override the base U
 Using `wp-config.php`:
 
 ```php
-define( 'AHPC_BACKEND_BASE_URL', 'https://api.dev.aura-historia.com' );
+define( 'AHPC_BACKEND_BASE_URL', 'https://api.stage.aura-historia.com' );
 ```
 
 Using a server-level environment variable:
 
 ```sh
-AHPC_BACKEND_BASE_URL=https://api.dev.aura-historia.com
+AHPC_BACKEND_BASE_URL=https://api.stage.aura-historia.com
 ```
 
 Tests can also override the URL via the `ahpc_backend_base_url` filter.
 
-### Override OAuth client settings for non-production environments
+### Configure the OAuth client and broker
 
-The distributed plugin defaults to the production Aura Historia OAuth client and broker redirect URI:
+The plugin does **not** ship a production or stage OAuth client ID. Before connecting, register a WooCommerce OAuth client in each environment and configure its **actual** `oc_` TypeID as `AHPC_OAUTH_CLIENT_ID` in the plugin deployment. Configure the same client ID and its matching client secret in that environment's webapp OAuth redirect broker. Register the broker redirect URI and authorize exactly `product-listings:write listing-sources:write`. Ensure the broker selects a ListingSource and sends an `ls_` ID in its `partner_shop_id` callback field; an old Shop UUID is rejected. The broker redirect URI defaults to `https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce` for production; configure the stage URI separately.
 
-- client ID: `019eb0ab-c08d-7212-8169-312d465e4210`
-- broker redirect URI: `https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce`
-
-For staging, local development, or custom test environments, override these before the plugin runs.
+An absent or malformed client ID disables connection rather than sending a fabricated value.
 
 Using `wp-config.php`:
 
 ```php
-define( 'AHPC_OAUTH_CLIENT_ID', '01970f22-2bf0-7000-8000-000000000010' );
-define( 'AHPC_OAUTH_BROKER_REDIRECT_URI', 'https://app.dev.example/api/oauth/client/redirect-broker/woocommerce' );
+define( 'AHPC_OAUTH_CLIENT_ID', '<actual registered oc_ TypeID>' );
+define( 'AHPC_OAUTH_BROKER_REDIRECT_URI', 'https://your-broker.example/api/oauth/client/redirect-broker/woocommerce' );
 ```
 
 Using server-level environment variables:
 
 ```sh
-AHPC_OAUTH_CLIENT_ID=01970f22-2bf0-7000-8000-000000000010
-AHPC_OAUTH_BROKER_REDIRECT_URI=https://app.dev.example/api/oauth/client/redirect-broker/woocommerce
+AHPC_OAUTH_CLIENT_ID=<actual registered oc_ TypeID>
+AHPC_OAUTH_BROKER_REDIRECT_URI=https://your-broker.example/api/oauth/client/redirect-broker/woocommerce
 ```
 
 Tests can also override these values via the `ahpc_oauth_client_id` and `ahpc_oauth_broker_redirect_uri` filters.
@@ -253,7 +249,7 @@ The repository uses `@wordpress/env` and the checked-in `.wp-env.json`:
 - installs WordPress and WooCommerce locally
 - enables `WP_DEBUG`
 - enables `AHPC_FORCE_SYNC_DELIVERY=true` for synchronous local webhook delivery
-- overrides `AHPC_BACKEND_BASE_URL` to `https://api.dev.aura-historia.com` for local development safety
+- overrides `AHPC_BACKEND_BASE_URL` to `https://api.stage.aura-historia.com` for local development safety; set `AHPC_OAUTH_CLIENT_ID` to a real registered stage client before testing a connection
 
 If you need a different port, create a local `.wp-env.override.json` file.
 
@@ -276,13 +272,13 @@ The test suite runs inside `wp-env` and uses mocked outbound HTTP.
 Coverage focuses on the plugin's main contract, including:
 
 - managed webhook creation
-- backend secret registration
+- provider configuration before webhook activation
 - OAuth connection and callback handling
-- bearer `Authorization` and webhook access token header handling
+- bearer `Authorization` for API calls and signed managed webhook deliveries
 - idempotent updates without duplicates
 - pause/delete cleanup
 - drift recovery
-- product backfill behavior
+- async ProductListings admission, exact-batch idempotent retries, and backfill failure reporting
 
 Run the suite with:
 

@@ -19,7 +19,7 @@ if (!defined("ABSPATH")) {
 class Plugin
 {
     const PAGE_SLUG = "aura-historia-partner-connect";
-    const OAUTH_SCOPE = "products:write shops:manage";
+    const OAUTH_SCOPE = "product-listings:write listing-sources:write";
     const OAUTH_STATE_TRANSIENT_PREFIX = "ahpc_oauth_state_";
     const OAUTH_STATE_TTL = 600;
 
@@ -129,8 +129,8 @@ class Plugin
         ]);
         add_filter(
             "http_request_args",
-            [$this, "maybe_add_webhook_access_token_header"],
-            10,
+            [Webhook_Manager::class, "authorize_delivery"],
+            11,
             2,
         );
         add_action("woocommerce_loaded", [$this, "bootstrap_woocommerce"]);
@@ -189,8 +189,8 @@ class Plugin
         if (class_exists(Product_Backfill::class)) {
             add_action(
                 Product_Backfill::ACTION_HOOK,
-                static function ($shop_id, $page) {
-                    (new Product_Backfill())->process_batch($shop_id, $page);
+                static function ($listing_source_id, $page) {
+                    (new Product_Backfill())->process_batch($listing_source_id, $page);
                 },
                 10,
                 2,
@@ -289,13 +289,11 @@ class Plugin
         $current = wp_parse_args($current, Webhook_Manager::default_settings());
 
         $sanitized = [
-            "shop_id" => Webhook_Manager::normalize_shop_id(
-                $current["shop_id"],
+            "listing_source_id" => Webhook_Manager::normalize_listing_source_id(
+                $current["listing_source_id"],
             ),
             "access_token" => Webhook_Manager::normalize_access_token(
-                isset($current["access_token"])
-                    ? $current["access_token"]
-                    : (isset($current["api_key"]) ? $current["api_key"] : ""),
+                $current["access_token"],
             ),
             "secret" => !empty($current["secret"])
                 ? sanitize_text_field((string) $current["secret"])
@@ -303,34 +301,31 @@ class Plugin
         ];
 
         if (is_array($input)) {
-            if (array_key_exists("shop_id", $input)) {
-                $shop_id = Webhook_Manager::normalize_shop_id(
-                    wp_unslash($input["shop_id"]),
+            if (array_key_exists("listing_source_id", $input)) {
+                $listing_source_id = Webhook_Manager::normalize_listing_source_id(
+                    wp_unslash($input["listing_source_id"]),
                 );
 
                 if (
-                    "" === $shop_id ||
-                    Webhook_Manager::is_valid_shop_id($shop_id)
+                    "" === $listing_source_id ||
+                    Webhook_Manager::is_valid_listing_source_id($listing_source_id)
                 ) {
-                    $sanitized["shop_id"] = $shop_id;
+                    $sanitized["listing_source_id"] = $listing_source_id;
                 } else {
                     add_settings_error(
                         Webhook_Manager::OPTION_SETTINGS,
-                        "ahpc_invalid_shop_id",
+                        "ahpc_invalid_listing_source_id",
                         __(
-                            "The Shop ID doesn't look right. Copy it again from Aura Historia and try once more.",
+                            "The Listing Source ID doesn't look right. Reconnect this store and try once more.",
                             "aura-historia-partner-connect",
                         ),
                     );
                 }
             }
 
-            if (array_key_exists("access_token", $input) || array_key_exists("api_key", $input)) {
-                $raw_access_token = array_key_exists("access_token", $input)
-                    ? $input["access_token"]
-                    : $input["api_key"];
+            if (array_key_exists("access_token", $input)) {
                 $access_token = Webhook_Manager::normalize_access_token(
-                    wp_unslash($raw_access_token),
+                    wp_unslash($input["access_token"]),
                 );
 
                 if ("" === $access_token) {
@@ -359,90 +354,6 @@ class Plugin
         return $sanitized;
     }
 
-    /**
-     * Adds the Aura Historia access token to outgoing webhook requests.
-     *
-     * This intentionally uses the lower-level `http_request_args` filter instead of
-     * `woocommerce_webhook_http_args` so WooCommerce's own delivery logger does not
-     * capture the x-api-key value in webhook delivery logs.
-     *
-     * @param array  $args HTTP request arguments.
-     * @param string $url  Request URL.
-     * @return array
-     */
-    public function maybe_add_webhook_access_token_header($args, $url)
-    {
-        if (!$this->manager instanceof Webhook_Manager) {
-            return $args;
-        }
-
-        $settings = $this->manager->get_settings();
-
-        if (
-            !Webhook_Manager::is_valid_shop_id($settings["shop_id"]) ||
-            !Webhook_Manager::is_valid_access_token($settings["access_token"])
-        ) {
-            return $args;
-        }
-
-        $webhook_endpoint_url = Webhook_Manager::get_webhook_endpoint_url(
-            $settings["shop_id"],
-        );
-
-        if (
-            "" === $webhook_endpoint_url ||
-            untrailingslashit($url) !== untrailingslashit($webhook_endpoint_url)
-        ) {
-            return $args;
-        }
-
-        $is_webhook_delivery =
-            $this->has_request_header($args, "X-WC-Webhook-ID") ||
-            $this->has_request_header($args, "X-WC-Webhook-Topic") ||
-            $this->has_request_header($args, "X-WC-Webhook-Signature");
-
-        if (!$is_webhook_delivery) {
-            return $args;
-        }
-
-        if (!isset($args["headers"]) || !is_array($args["headers"])) {
-            $args["headers"] = [];
-        }
-
-        if (!$this->has_request_header($args, "x-api-key")) {
-            $args["headers"]["x-api-key"] = $settings["access_token"];
-        }
-
-        return $args;
-    }
-
-    /**
-     * Returns whether the request already contains a header, using
-     * case-insensitive matching.
-     *
-     * @param array  $args        HTTP request arguments.
-     * @param string $header_name Header name to check.
-     * @return bool
-     */
-    private function has_request_header($args, $header_name)
-    {
-        if (empty($args["headers"]) || !is_array($args["headers"])) {
-            return false;
-        }
-
-        $normalized_target = strtolower($header_name);
-
-        foreach ($args["headers"] as $key => $value) {
-            if (
-                strtolower((string) $key) === $normalized_target &&
-                !empty($value)
-            ) {
-                return true;
-            }
-        }
-
-        return false;
-    }
 
     /**
      * Handles the manual sync action.
@@ -564,7 +475,7 @@ class Plugin
         $third_party_exchange_code = $this->get_query_param(
             "third_party_exchange_code",
         );
-        $partner_shop_id = $this->get_query_param("partner_shop_id");
+        $listing_source_id = $this->get_query_param("partner_shop_id");
         $oauth_error = $this->get_query_param("error");
 
         if ("" === $third_party_exchange_code && "" === $oauth_error) {
@@ -589,7 +500,7 @@ class Plugin
             );
         } else {
             $result = $this->complete_oauth_connection(
-                $partner_shop_id,
+                $listing_source_id,
                 $third_party_exchange_code,
                 $this->get_query_param("state"),
             );
@@ -627,7 +538,7 @@ class Plugin
         $authorize_url = $this->get_oauth_authorize_url();
         $callback_url = $this->get_oauth_callback_url();
 
-        if (!Webhook_Manager::is_valid_shop_id($client_id)) {
+        if (!$this->is_valid_oauth_client_id($client_id)) {
             return new WP_Error(
                 "ahpc_oauth_invalid_client_id",
                 __(
@@ -702,13 +613,13 @@ class Plugin
      * Completes the OAuth callback by exchanging the broker code and storing
      * connection settings locally.
      *
-     * @param string $partner_shop_id            Partner shop UUID returned by Aura Historia.
+     * @param string $listing_source_id          Listing Source ID returned in the broker's partner_shop_id parameter.
      * @param string $third_party_exchange_code  Short-lived one-time exchange code.
      * @param string $client_state               CSRF state forwarded by the broker.
      * @return true|WP_Error
      */
     public function complete_oauth_connection(
-        $partner_shop_id,
+        $listing_source_id,
         $third_party_exchange_code,
         $client_state,
     ) {
@@ -728,30 +639,22 @@ class Plugin
             return $state_result;
         }
 
-        $shop_id = Webhook_Manager::normalize_shop_id($partner_shop_id);
-        $exchange_code = Webhook_Manager::normalize_shop_id(
-            $third_party_exchange_code,
+        $listing_source_id = Webhook_Manager::normalize_listing_source_id(
+            $listing_source_id,
         );
 
-        if (!Webhook_Manager::is_valid_shop_id($shop_id)) {
+        if (!Webhook_Manager::is_valid_listing_source_id($listing_source_id)) {
             return new WP_Error(
-                "ahpc_oauth_invalid_shop_id",
+                "ahpc_oauth_invalid_listing_source_id",
                 __(
-                    "Aura Historia did not return a valid partner Shop ID.",
+                    "Aura Historia did not return a valid Listing Source ID.",
                     "aura-historia-partner-connect",
                 ),
             );
         }
 
-        if (!Webhook_Manager::is_valid_shop_id($exchange_code)) {
-            return new WP_Error(
-                "ahpc_oauth_invalid_exchange_code",
-                __(
-                    "Aura Historia did not return a valid OAuth exchange code.",
-                    "aura-historia-partner-connect",
-                ),
-            );
-        }
+        // The exchange code is a UUID, validated independently by Backend_Api_Client.
+        $exchange_code = sanitize_text_field((string) $third_party_exchange_code);
 
         if ("" === Webhook_Manager::get_backend_base_url()) {
             return new WP_Error(
@@ -814,16 +717,15 @@ class Plugin
             return new WP_Error(
                 "ahpc_oauth_missing_scope",
                 __(
-                    "Aura Historia did not grant the permissions required to manage this shop and sync products.",
+                    "Aura Historia did not grant the permissions required to manage the listing source and sync product listings.",
                     "aura-historia-partner-connect",
                 ),
             );
         }
 
         $settings = $this->get_current_settings();
-        $settings["shop_id"] = $shop_id;
+        $settings["listing_source_id"] = $listing_source_id;
         $settings["access_token"] = $access_token;
-        unset($settings["api_key"]);
 
         if (empty($settings["secret"])) {
             $settings["secret"] = Webhook_Manager::generate_secret();
@@ -974,7 +876,7 @@ class Plugin
         $settings = $this->get_current_settings();
 
         if (
-            !Webhook_Manager::is_valid_shop_id($settings["shop_id"]) ||
+            !Webhook_Manager::is_valid_listing_source_id($settings["listing_source_id"]) ||
             !Webhook_Manager::is_valid_access_token($settings["access_token"])
         ) {
             return new WP_Error(
@@ -1002,7 +904,7 @@ class Plugin
             return $sync_result;
         }
 
-        if (!(new Product_Backfill())->schedule_backfill($settings["shop_id"])) {
+        if (!(new Product_Backfill())->schedule_backfill($settings["listing_source_id"])) {
             return new WP_Error(
                 "ahpc_backfill_failed",
                 __(
@@ -1106,7 +1008,7 @@ class Plugin
         $settings = $this->get_current_settings();
         $backend_base_url = Webhook_Manager::get_backend_base_url();
         $webhook_endpoint_url = Webhook_Manager::get_webhook_endpoint_url(
-            $settings["shop_id"],
+            $settings["listing_source_id"],
         );
         $sync_error =
             $this->manager instanceof Webhook_Manager
@@ -1137,14 +1039,15 @@ class Plugin
             "admin.php?page=wc-settings&tab=advanced&section=webhooks",
         );
         $is_connected =
-            Webhook_Manager::is_valid_shop_id($settings["shop_id"]) &&
+            Webhook_Manager::is_valid_listing_source_id($settings["listing_source_id"]) &&
             Webhook_Manager::is_valid_access_token($settings["access_token"]);
         $should_auto_start_oauth =
             $this->is_woocommerce_available() &&
             !$is_connected &&
             "failed" !== $oauth_status &&
             "" === $oauth_error &&
-            !empty($backend_base_url);
+            !empty($backend_base_url) &&
+            $this->is_valid_oauth_client_id($this->get_oauth_client_id());
         $connection_status = $this->get_connection_status(
             $settings,
             $sync_error,
@@ -1176,7 +1079,7 @@ class Plugin
 				<?php $this->render_inline_notice(
         "success",
         esc_html__(
-            "Managed WooCommerce webhooks synced successfully.",
+            "Managed WooCommerce webhooks synced. Backend ingestion may still be processing asynchronously.",
             "aura-historia-partner-connect",
         ),
     ); ?>
@@ -1186,7 +1089,7 @@ class Plugin
 				<?php $this->render_inline_notice(
         "success",
         esc_html__(
-            "A fresh product backfill was queued. Existing products will be re-sent in the background.",
+            "A fresh product backfill was queued. Existing listings will be submitted for asynchronous processing in the background.",
             "aura-historia-partner-connect",
         ),
     ); ?>
@@ -1220,7 +1123,7 @@ class Plugin
 				<?php $this->render_inline_notice(
         "success",
         esc_html__(
-            "Aura Historia connection completed and managed webhooks synced.",
+            "Aura Historia authorization completed and webhook sync submitted. Product listings are processed asynchronously.",
             "aura-historia-partner-connect",
         ),
     ); ?>
@@ -1238,11 +1141,19 @@ class Plugin
             "aura-historia-partner-connect",
         ),
     ); ?>
+			<?php elseif (!$this->is_valid_oauth_client_id($this->get_oauth_client_id()) && !$is_connected): ?>
+				<?php $this->render_inline_notice(
+        "warning",
+        esc_html__(
+            "Define a valid oc_ OAuth client ID with AHPC_OAUTH_CLIENT_ID before connecting this store.",
+            "aura-historia-partner-connect",
+        ),
+    ); ?>
 			<?php elseif (!$is_connected): ?>
 				<?php $this->render_inline_notice(
         "warning",
         esc_html__(
-            "Connect with Aura Historia to authorize this WooCommerce store. Product updates start automatically after the OAuth connection completes.",
+            "Connect with Aura Historia to authorize this WooCommerce store. Product listings are admitted for asynchronous processing after the connection completes.",
             "aura-historia-partner-connect",
         ),
     ); ?>
@@ -1266,7 +1177,7 @@ class Plugin
         "aura-historia-partner-connect",
     ); ?></h2>
 			<p><?php echo esc_html__(
-        "The plugin connects through Aura Historia OAuth. It stores the returned Shop ID and access token locally, but never displays the access token in wp-admin.",
+        "The plugin connects through Aura Historia OAuth. It stores the returned Listing Source ID and access token locally, but never displays the access token in wp-admin.",
         "aura-historia-partner-connect",
     ); ?></p>
 
@@ -1340,12 +1251,12 @@ class Plugin
 					</tr>
 					<tr>
 						<th scope="row"><?php echo esc_html__(
-          "Aura Historia Shop ID",
+          "Aura Historia Listing Source ID",
           "aura-historia-partner-connect",
       ); ?></th>
 						<td>
-							<?php if (Webhook_Manager::is_valid_shop_id($settings["shop_id"])): ?>
-								<code><?php echo esc_html($settings["shop_id"]); ?></code>
+							<?php if (Webhook_Manager::is_valid_listing_source_id($settings["listing_source_id"])): ?>
+								<code><?php echo esc_html($settings["listing_source_id"]); ?></code>
 							<?php else: ?>
 								&mdash;
 							<?php endif; ?>
@@ -1388,7 +1299,7 @@ class Plugin
        "aura-historia-partner-connect",
    ); ?></h2>
 			<p><?php echo esc_html__(
-       "Use this if the initial product backfill did not start, was interrupted, or you want to re-send the entire current catalog. It queues a fresh background backfill for the connected Aura Historia shop and replaces any pending backfill batches.",
+       "Use this if the initial product backfill did not start, was interrupted, or you want to re-send the entire current catalog. It queues a fresh background backfill for the connected Aura Historia listing source and replaces any pending backfill batches.",
        "aura-historia-partner-connect",
    ); ?></p>
 			<?php if ($this->is_woocommerce_available()): ?>
@@ -1420,7 +1331,7 @@ class Plugin
 			<p>
 				<?php
     echo esc_html__(
-        "The plugin owns exactly three WooCommerce webhooks and keeps them in sync with the built-in backend endpoint pattern and the OAuth connection above.",
+        "The plugin owns exactly three WooCommerce webhooks and keeps them in sync with the built-in backend endpoint pattern and the OAuth connection above. A successful sync means delivery was admitted, not that every listing has finished processing.",
         "aura-historia-partner-connect",
     );
     if ($last_sync_at) {
@@ -1573,25 +1484,14 @@ class Plugin
         }
 
         if (
-            !Webhook_Manager::is_valid_shop_id($settings["shop_id"]) ||
+            !Webhook_Manager::is_valid_listing_source_id($settings["listing_source_id"]) ||
             !Webhook_Manager::is_valid_access_token($settings["access_token"])
         ) {
             return [
                 "type" => "warning",
                 "label" => __("Not verified", "aura-historia-partner-connect"),
                 "message" => __(
-                    "Connect with Aura Historia to verify this store and receive an access token.",
-                    "aura-historia-partner-connect",
-                ),
-            ];
-        }
-
-        if ("yes" === get_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes")) {
-            return [
-                "type" => "warning",
-                "label" => __("Sync pending", "aura-historia-partner-connect"),
-                "message" => __(
-                    "The OAuth connection is waiting for the next webhook sync before Aura Historia can be verified.",
+                    "Connect with Aura Historia to authorize this store and receive an access token.",
                     "aura-historia-partner-connect",
                 ),
             ];
@@ -1604,10 +1504,21 @@ class Plugin
                 "message" => sprintf(
                     /* translators: %s: connection check error detail. */
                     __(
-                        "Aura Historia did not accept the saved OAuth connection: %s",
+                        "Aura Historia did not accept the listing source webhook registration: %s",
                         "aura-historia-partner-connect",
                     ),
                     $sync_error,
+                ),
+            ];
+        }
+
+        if ("yes" === get_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes")) {
+            return [
+                "type" => "warning",
+                "label" => __("Sync pending", "aura-historia-partner-connect"),
+                "message" => __(
+                    "The connection is waiting for webhook sync. Product listing ingestion has not been admitted yet.",
+                    "aura-historia-partner-connect",
                 ),
             ];
         }
@@ -1617,7 +1528,7 @@ class Plugin
                 "type" => "success",
                 "label" => __("Connected", "aura-historia-partner-connect"),
                 "message" => __(
-                    "Aura Historia accepted the stored Shop ID and access token during the most recent webhook sync.",
+                    "Aura Historia accepted the listing source webhook registration during the most recent sync. Product listings are processed asynchronously; this does not confirm their publication.",
                     "aura-historia-partner-connect",
                 ),
             ];
@@ -1627,7 +1538,7 @@ class Plugin
             "type" => "warning",
             "label" => __("Not verified", "aura-historia-partner-connect"),
             "message" => __(
-                "Run a webhook sync to verify the stored Aura Historia OAuth connection.",
+                "Run a webhook sync to submit the listing source registration. Product listings are processed asynchronously.",
                 "aura-historia-partner-connect",
             ),
         ];
@@ -1784,7 +1695,7 @@ class Plugin
                     ? sprintf(
                         /* translators: 1: formatted time, 2: Action Scheduler hook name. */
                         __(
-                            'The most recent product backfill completed successfully at %1$s using Action Scheduler hook "%2$s".',
+                            'The most recent product backfill finished submitting at %1$s using Action Scheduler hook "%2$s". Backend ingestion may still be processing.',
                             "aura-historia-partner-connect",
                         ),
                         $completed_at,
@@ -1793,7 +1704,7 @@ class Plugin
                     : sprintf(
                         /* translators: %s: Action Scheduler hook name. */
                         __(
-                            'The most recent product backfill completed successfully using Action Scheduler hook "%s".',
+                            'The most recent product backfill finished submitting using Action Scheduler hook "%s". Backend ingestion may still be processing.',
                             "aura-historia-partner-connect",
                         ),
                         $hook,
@@ -1859,7 +1770,7 @@ class Plugin
         }
 
         if (
-            !Webhook_Manager::is_valid_shop_id($settings["shop_id"]) ||
+            !Webhook_Manager::is_valid_listing_source_id($settings["listing_source_id"]) ||
             !Webhook_Manager::is_valid_access_token($settings["access_token"])
         ) {
             return [
@@ -1984,30 +1895,18 @@ class Plugin
             $settings,
             Webhook_Manager::default_settings(),
         );
-        $needs_migration = isset($settings["api_key"]);
 
-        if (empty($settings["secret"])) {
-            $settings["secret"] = Webhook_Manager::generate_secret();
-            $needs_migration = true;
-        }
-
-        $settings["shop_id"] = Webhook_Manager::normalize_shop_id(
-            $settings["shop_id"],
-        );
-        $legacy_access_token = isset($settings["api_key"])
-            ? Webhook_Manager::normalize_access_token($settings["api_key"])
-            : "";
-        $settings["access_token"] = isset($settings["access_token"])
-            ? Webhook_Manager::normalize_access_token($settings["access_token"])
-            : $legacy_access_token;
-
-        if ($needs_migration) {
-            unset($settings["api_key"]);
-            update_option(Webhook_Manager::OPTION_SETTINGS, $settings, false);
-        }
-        $settings["secret"] = sanitize_text_field((string) $settings["secret"]);
-
-        return $settings;
+        return [
+            "listing_source_id" => Webhook_Manager::normalize_listing_source_id(
+                $settings["listing_source_id"],
+            ),
+            "access_token" => Webhook_Manager::normalize_access_token(
+                $settings["access_token"],
+            ),
+            "secret" => !empty($settings["secret"])
+                ? sanitize_text_field((string) $settings["secret"])
+                : Webhook_Manager::generate_secret(),
+        ];
     }
 
     /**
@@ -2022,11 +1921,23 @@ class Plugin
         /**
          * Filters the OAuth client ID used for Aura Historia connection.
          *
-         * @param string $client_id OAuth client UUID.
+         * @param string $client_id OAuth client TypeID (oc_ prefix).
          */
         $client_id = apply_filters("ahpc_oauth_client_id", $client_id);
 
-        return Webhook_Manager::normalize_shop_id($client_id);
+        return is_string($client_id) ? trim($client_id) : "";
+    }
+
+    /**
+     * Checks the canonical oc_ TypeID format for an OAuth client.
+     *
+     * @param string $client_id OAuth client ID.
+     * @return bool
+     */
+    private function is_valid_oauth_client_id($client_id)
+    {
+        return is_string($client_id) &&
+            1 === preg_match('/\Aoc_[0-9a-hjkmnp-tv-z]{26}\z/', $client_id);
     }
 
     /**
@@ -2305,8 +2216,8 @@ class Plugin
             $granted_scopes = [];
         }
 
-        return in_array("products:write", $granted_scopes, true) &&
-            in_array("shops:manage", $granted_scopes, true);
+        return in_array("product-listings:write", $granted_scopes, true) &&
+            in_array("listing-sources:write", $granted_scopes, true);
     }
 
     /**
