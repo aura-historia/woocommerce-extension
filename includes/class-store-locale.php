@@ -27,7 +27,8 @@ class Store_Locale
      * Returns the WooCommerce store currency as an ISO 4217 code.
      *
      * Returns `null` when the store currency is not in the set of currencies
-     * supported by the Aura Historia backend.
+     * supported by the Aura Historia backend. Live delivery cannot be
+     * activated in that state; backfill omits its optional price.
      *
      * @return string|null ISO 4217 currency code, or null if not supported.
      */
@@ -37,7 +38,10 @@ class Store_Locale
             ? strtoupper((string) get_woocommerce_currency())
             : "";
 
-        if (in_array($currency, CurrencyData::getAllowableEnumValues(), true)) {
+        if (
+            1 === preg_match('/\A[A-Z]{3}\z/', $currency) &&
+            in_array($currency, CurrencyData::getAllowableEnumValues(), true)
+        ) {
             return $currency;
         }
 

@@ -753,6 +753,22 @@ class Plugin
                     return new WP_Error("ahpc_oauth_sync_failed", $sync_error);
                 }
             }
+
+            // CREATE backfill belongs to the initial connection, not to routine
+            // webhook repair. Reconnecting the same ListingSource must not replay it.
+            if (
+                $this->manager instanceof Webhook_Manager &&
+                class_exists(Product_Backfill::class) &&
+                $listing_source_id !== get_option("ahpc_initial_backfill_listing_source_id", "")
+            ) {
+                if (!(new Product_Backfill())->schedule_backfill($listing_source_id)) {
+                    return new WP_Error(
+                        "ahpc_backfill_failed",
+                        __("The initial product backfill could not be queued. Try again or queue a full backfill manually.", "aura-historia-partner-connect"),
+                    );
+                }
+                update_option("ahpc_initial_backfill_listing_source_id", $listing_source_id, false);
+            }
         }
 
         return true;

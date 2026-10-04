@@ -328,7 +328,7 @@ class Product_Backfill
             !is_array($snapshot["payloads"]) ||
             !is_string($snapshot["idempotency_key"])
         ) {
-            $product_ids = $this->get_product_ids($page);
+            $product_ids = $this->get_product_ids((int) $this->get_state()["last_product_id"]);
 
             if (empty($product_ids)) {
                 delete_option(self::OPTION_BATCH);
@@ -353,6 +353,7 @@ class Product_Backfill
                 "listing_source_id" => $listing_source_id,
                 "page" => $page,
                 "product_count" => count($product_ids),
+                "last_product_id" => max($product_ids),
                 "local_failures" => $local_failures,
                 "payloads" => $payloads,
                 "idempotency_key" => wp_generate_uuid4(),
@@ -594,6 +595,9 @@ class Product_Backfill
         $changes = [
             "last_counted_batch" => $batch_hash,
             "last_completed_page" => $page,
+            "last_product_id" => isset($snapshot["last_product_id"])
+                ? (int) $snapshot["last_product_id"]
+                : (int) $state["last_product_id"],
         ];
 
         if ($count > 0) {
@@ -661,29 +665,45 @@ class Product_Backfill
     }
 
     /**
-     * Returns the product IDs for a given page, ordered by ascending ID.
+     * Returns published product IDs strictly after the committed cursor.
      *
-     * Only public, published products may be admitted.
+     * Using a keyset avoids losing products when earlier posts are unpublished
+     * or deleted between batches. The cursor advances past all selected IDs,
+     * including products that disappear before their payload is built.
      *
-     * @param int $page One-based page number.
+     * @param int $after_id Last selected product ID from the previous batch.
      * @return int[]
      */
-    private function get_product_ids($page)
+    private function get_product_ids($after_id)
     {
-        if (!function_exists("wc_get_products")) {
+        if (!function_exists("wc_get_product")) {
             return [];
         }
 
-        $ids = wc_get_products([
-            "limit" => self::BATCH_SIZE,
-            "paged" => $page,
-            "status" => "publish",
-            "orderby" => "ID",
-            "order" => "ASC",
-            "return" => "ids",
-        ]);
+        global $wpdb;
+        $after_id = max(0, (int) $after_id);
+        $where_after_id = static function ($where) use ($wpdb, $after_id) {
+            return $where . $wpdb->prepare(" AND {$wpdb->posts}.ID > %d", $after_id);
+        };
 
-        return is_array($ids) ? array_map("intval", $ids) : [];
+        // Scope the keyset constraint to this query; get_posts() suppresses
+        // filters by default, so use WP_Query directly for the ID selection.
+        add_filter("posts_where", $where_after_id);
+        try {
+            $query = new \WP_Query([
+                "post_type" => "product",
+                "post_status" => "publish",
+                "posts_per_page" => self::BATCH_SIZE,
+                "orderby" => "ID",
+                "order" => "ASC",
+                "fields" => "ids",
+                "no_found_rows" => true,
+            ]);
+        } finally {
+            remove_filter("posts_where", $where_after_id);
+        }
+
+        return array_map("intval", $query->posts);
     }
 
     /**
@@ -768,7 +788,7 @@ class Product_Backfill
             return null;
         }
 
-        $amount = $this->convert_price_to_minor_units($raw_price);
+        $amount = $this->convert_price_to_minor_units($raw_price, $currency);
 
         if (null === $amount) {
             return null;
@@ -782,40 +802,39 @@ class Product_Backfill
     }
 
     /**
-     * Converts a WooCommerce decimal price string to minor currency units.
+     * Converts a decimal string exactly, without display rounding or floats.
+     * Supported currencies have two minor digits except JPY, which has none.
+     * Extra fractional digits are accepted only when they are all zero.
      *
      * @param string $price WooCommerce decimal price string.
+     * @param string $currency Supported ISO currency code.
      * @return int|null
      */
-    private function convert_price_to_minor_units($price)
+    private function convert_price_to_minor_units($price, $currency)
     {
         $price = trim((string) $price);
 
-        // wc_format_decimal strips non-numeric characters; reject them first
-        // rather than turning a malformed price into a different valid amount.
         if (1 !== preg_match('/\A[0-9]+(?:\.[0-9]+)?\z/D', $price)) {
             return null;
         }
 
-        $decimals = function_exists("wc_get_price_decimals")
-            ? max(0, (int) wc_get_price_decimals())
-            : 2;
-        $normalized = function_exists("wc_format_decimal")
-            ? (string) wc_format_decimal($price, $decimals, false)
-            : $price;
+        $decimals = "JPY" === $currency ? 0 : 2;
+        $parts = explode(".", $price, 2);
+        $fraction = isset($parts[1]) ? $parts[1] : "";
 
-        if (1 !== preg_match('/\A[0-9]+(?:\.[0-9]+)?\z/D', $normalized)) {
+        if (strlen($fraction) > $decimals &&
+            "" !== trim(substr($fraction, $decimals), "0")
+        ) {
             return null;
         }
 
-        $parts = explode(".", $normalized, 2);
-        $whole = $parts[0];
-        $fraction = isset($parts[1]) ? $parts[1] : "";
-        $fraction = substr(str_pad($fraction, $decimals, "0"), 0, $decimals);
+        $whole = ltrim($parts[0], "0");
+        $fraction = str_pad(substr($fraction, 0, $decimals), $decimals, "0");
         $amount = ltrim($whole . $fraction, "0");
+        $max = (string) PHP_INT_MAX;
 
-        if (strlen($amount) > strlen((string) PHP_INT_MAX) ||
-            (strlen($amount) === strlen((string) PHP_INT_MAX) && strcmp($amount, (string) PHP_INT_MAX) > 0)
+        if (strlen($amount) > strlen($max) ||
+            (strlen($amount) === strlen($max) && strcmp($amount, $max) > 0)
         ) {
             return null;
         }
@@ -1001,6 +1020,7 @@ class Product_Backfill
         return [
             "status" => self::STATUS_NOT_SCHEDULED,
             "last_completed_page" => "0",
+            "last_product_id" => "0",
             "accepted_count" => "",
             "failed_count" => "",
             "permanent_failure_count" => "0",
@@ -1040,6 +1060,7 @@ class Product_Backfill
     {
         $this->update_state([
             "last_completed_page" => "0",
+            "last_product_id" => "0",
             "accepted_count" => "",
             "failed_count" => "",
             "permanent_failure_count" => "0",
@@ -1131,6 +1152,7 @@ class Product_Backfill
         $this->update_state([
             "status" => self::STATUS_NOT_SCHEDULED,
             "last_completed_page" => "0",
+            "last_product_id" => "0",
             "scheduled_at" => "",
             "started_at" => "",
             "failed_at" => "",

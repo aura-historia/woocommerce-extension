@@ -386,6 +386,7 @@ class Webhook_Manager
             $has_access_token = "" !== $access_token;
 
             if (!$user_id) {
+                $this->pause_webhooks_best_effort();
                 return $this->record_sync_error(
                     new WP_Error(
                         "ahpc_missing_user",
@@ -432,27 +433,23 @@ class Webhook_Manager
                             "aura-historia-partner-connect",
                         ),
                     );
-                } else {
-                    $registration_result = $this->reconcile_ingestion_configuration(
-                        $listing_source_id,
-                        $access_token,
-                        $settings["secret"],
+                } elseif (null === Store_Locale::get_currency()) {
+                    $setup_error = new WP_Error(
+                        "ahpc_unsupported_currency",
+                        __(
+                            "The WooCommerce store currency is not supported by Aura Historia. Select a supported currency before connecting this store.",
+                            "aura-historia-partner-connect",
+                        ),
                     );
-
-                    if (is_wp_error($registration_result)) {
-                        $setup_error = $registration_result;
-                    }
                 }
             }
 
-            $desired_status = $this->get_desired_status(
-                $settings,
-                $endpoint_url,
-                $setup_error,
-            );
-
+            // Persist all local changes in a paused state before sending the
+            // signing secret to the backend. A failed PUT must never leave an
+            // old active webhook delivering with a new or unregistered secret.
             foreach (array_keys($this->get_managed_topics()) as $topic) {
                 if (!wc_is_webhook_valid_topic($topic)) {
+                    $this->pause_webhooks_best_effort();
                     return $this->record_sync_error(
                         new WP_Error(
                             "ahpc_invalid_topic",
@@ -473,35 +470,92 @@ class Webhook_Manager
                         $topic,
                         $webhook_ids,
                     );
-                } catch (\Exception $exception) {
+                } catch (\Throwable $exception) {
+                    $this->pause_webhooks_best_effort();
                     return $this->record_sync_error(
                         new WP_Error(
                             "ahpc_webhook_load_failed",
-                            $exception->getMessage(),
+                            __("A managed webhook could not be loaded. Retry the synchronization.", "aura-historia-partner-connect"),
                         ),
                     );
                 }
 
-                $save_result = $this->save_managed_webhook(
-                    $webhook,
-                    $topic,
-                    $desired_status,
-                    $endpoint_url,
-                    $settings["secret"],
-                    $user_id,
-                );
+                try {
+                    $save_result = $this->save_managed_webhook(
+                        $webhook,
+                        $topic,
+                        "paused",
+                        $endpoint_url,
+                        $settings["secret"],
+                        $user_id,
+                    );
+                } catch (\Throwable $exception) {
+                    $save_result = new WP_Error(
+                        "ahpc_webhook_save_failed",
+                        __("A managed webhook could not be saved. Retry the synchronization.", "aura-historia-partner-connect"),
+                    );
+                }
 
                 if (is_wp_error($save_result)) {
+                    $this->pause_webhooks_best_effort();
                     return $this->record_sync_error($save_result);
                 }
 
                 $webhook_ids[$topic] = absint($webhook->get_id());
+                // Preserve newly created IDs even if a later stage fails.
+                update_option(self::OPTION_WEBHOOK_IDS, $webhook_ids, false);
             }
 
-            update_option(self::OPTION_WEBHOOK_IDS, $webhook_ids, false);
+            if (!$setup_error && "" !== $listing_source_id && "" !== $access_token) {
+                $registration_result = $this->reconcile_ingestion_configuration(
+                    $listing_source_id,
+                    $access_token,
+                    $settings["secret"],
+                );
+                if (is_wp_error($registration_result)) {
+                    $setup_error = $registration_result;
+                } else {
+                    foreach (array_keys($this->get_managed_topics()) as $topic) {
+                        try {
+                            $webhook = $this->load_managed_webhook($topic, $webhook_ids);
+                            if (!$webhook) {
+                                throw new \RuntimeException("Missing managed webhook");
+                            }
+                        } catch (\Throwable $exception) {
+                            $setup_error = new WP_Error(
+                                "ahpc_webhook_load_failed",
+                                __("A managed webhook could not be loaded. Retry the synchronization.", "aura-historia-partner-connect"),
+                            );
+                            break;
+                        }
+
+                        try {
+                            $save_result = $this->save_managed_webhook(
+                                $webhook,
+                                $topic,
+                                "active",
+                                $endpoint_url,
+                                $settings["secret"],
+                                $user_id,
+                            );
+                        } catch (\Throwable $exception) {
+                            $save_result = new WP_Error(
+                                "ahpc_webhook_save_failed",
+                                __("A managed webhook could not be saved. Retry the synchronization.", "aura-historia-partner-connect"),
+                            );
+                        }
+                        if (is_wp_error($save_result)) {
+                            $setup_error = $save_result;
+                            break;
+                        }
+                    }
+                }
+            }
+
             update_option(self::OPTION_PLUGIN_VERSION, AHPC_VERSION, false);
 
             if ($setup_error) {
+                $this->pause_webhooks_best_effort();
                 // Webhooks are paused; leave sync required so a later attempt can
                 // register the secret before activating delivery.
                 return $this->record_sync_error($setup_error);
@@ -514,8 +568,6 @@ class Webhook_Manager
                 false,
             );
             delete_option(self::OPTION_LAST_SYNC_ERROR);
-
-            $this->maybe_schedule_backfill($settings, $desired_status);
 
             return true;
         } finally {
@@ -563,9 +615,8 @@ class Webhook_Manager
     private function translate_backend_configuration_error(WP_Error $error)
     {
         $error_code = $error->get_error_code();
-        $error_message = sanitize_text_field(
-            (string) $error->get_error_message(),
-        );
+        // Backend/transport messages can include URLs or credentials. Only
+        // expose the bounded HTTP status and our own fixed wording.
         $error_data = $error->get_error_data($error_code);
         $response_code =
             is_array($error_data) && isset($error_data["response_code"])
@@ -595,28 +646,14 @@ class Webhook_Manager
         if ("ahpc_backend_invalid_request" === $error_code) {
             return new WP_Error(
                 "ahpc_backend_configuration_failed",
-                sprintf(
-                    /* translators: %s: error detail. */
-                    __(
-                        "The backend request could not be prepared: %s",
-                        "aura-historia-partner-connect",
-                    ),
-                    $error_message,
-                ),
+                __("The backend request could not be prepared.", "aura-historia-partner-connect"),
             );
         }
 
         if ("ahpc_backend_request_failed" === $error_code) {
             return new WP_Error(
                 "ahpc_backend_configuration_failed",
-                sprintf(
-                    /* translators: %s: error detail. */
-                    __(
-                        "The backend rejected the ingestion configuration request: %s",
-                        "aura-historia-partner-connect",
-                    ),
-                    $error_message,
-                ),
+                __("The backend configuration request could not be confirmed. Try again.", "aura-historia-partner-connect"),
             );
         }
 
@@ -636,38 +673,32 @@ class Webhook_Manager
             );
         }
 
-        if ("" !== $error_message) {
-            $message .= " " . $error_message;
-        }
-
         return new WP_Error("ahpc_backend_configuration_failed", $message);
     }
 
     /**
-     * Schedules or cancels a product backfill depending on the desired status.
+     * Attempts to pause every managed webhook after an interrupted sync.
+     * Keep the original sync error; a failed pause will be retried next time.
      *
-     * Called at the end of a successful sync to align product backfill state.
-     *
-     * @param array<string,mixed> $settings       Current plugin settings.
-     * @param string              $desired_status Webhook status chosen by the sync.
      * @return void
      */
-    private function maybe_schedule_backfill($settings, $desired_status)
+    private function pause_webhooks_best_effort()
     {
-        if (!class_exists(Product_Backfill::class)) {
-            return;
-        }
+        $webhook_ids = $this->get_webhook_ids();
 
-        $backfill = new Product_Backfill();
-
-        if ("active" === $desired_status) {
-            $backfill->schedule_backfill(
-                isset($settings["listing_source_id"])
-                    ? (string) $settings["listing_source_id"]
-                    : "",
-            );
-        } else {
-            $backfill->cancel_backfill();
+        foreach (array_keys($this->get_managed_topics()) as $topic) {
+            try {
+                $webhook = $this->load_managed_webhook($topic, $webhook_ids);
+                if ($webhook && "paused" !== $webhook->get_status()) {
+                    $webhook->set_status("paused");
+                    if (method_exists($webhook, "set_pending_delivery")) {
+                        $webhook->set_pending_delivery(false);
+                    }
+                    $webhook->save();
+                }
+            } catch (\Throwable $exception) {
+                // Continue pausing the other topics; retry the failed one on sync.
+            }
         }
     }
 
@@ -753,6 +784,7 @@ class Webhook_Manager
         delete_option(self::OPTION_LAST_SYNC_ERROR);
         delete_option(self::OPTION_LAST_SYNC_AT);
         delete_option(self::OPTION_LAST_OAUTH_ERROR);
+        delete_option("ahpc_initial_backfill_listing_source_id");
 
         if (class_exists(Product_Backfill::class)) {
             (new Product_Backfill())->cancel_backfill();
@@ -814,26 +846,6 @@ class Webhook_Manager
         return (string) get_option(self::OPTION_LAST_SYNC_AT, "");
     }
 
-    /**
-     * Returns the desired webhook status for the current settings.
-     *
-     * @param array<string,mixed> $settings     Plugin settings.
-     * @param string              $endpoint_url Hardcoded delivery endpoint.
-     * @param WP_Error|null       $setup_error  Setup error, if any.
-     * @return string
-     */
-    private function get_desired_status(
-        $settings,
-        $endpoint_url,
-        $setup_error = null,
-    ) {
-        return !empty($settings["listing_source_id"]) &&
-            !empty($settings["access_token"]) &&
-            !$setup_error &&
-            !empty($endpoint_url)
-            ? "active"
-            : "paused";
-    }
 
     /**
      * Loads an existing managed webhook or creates a new one.
@@ -955,10 +967,10 @@ class Webhook_Manager
     {
         try {
             $webhook->save();
-        } catch (\Exception $exception) {
+        } catch (\Throwable $exception) {
             return new WP_Error(
                 "ahpc_webhook_save_failed",
-                $exception->getMessage(),
+                __("A managed webhook could not be saved. Retry the synchronization.", "aura-historia-partner-connect"),
             );
         }
 

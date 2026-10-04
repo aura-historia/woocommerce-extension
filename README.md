@@ -109,9 +109,9 @@ It is **not** a general-purpose WooCommerce webhook manager.
 3. Aura Historia redirects back to the plugin settings page with a selected `ls_` ListingSource ID and a short-lived third-party exchange code. The broker may use the external callback field `partner_shop_id`, but its value must be an `ls_` ID.
 4. The plugin exchanges that code for an Aura Historia access token and stores the ListingSource ID and token locally.
 5. The plugin generates a WooCommerce webhook signing secret and applies that exact secret, store currency, and language via `PUT /api/v1/listing-sources/{listingSourceId}/ingestion-configurations/woocommerce` before enabling delivery.
-6. The plugin creates or repairs the three managed WooCommerce webhooks only after provider configuration succeeds.
+6. The plugin stages the three managed WooCommerce webhooks paused with the desired signing secret before updating Aura Historia, then activates them only after provider configuration succeeds. Unsupported store currencies leave the webhooks paused until corrected.
 7. WooCommerce sends unchanged, signed live webhook bodies to `POST /api/v1/webhooks/woocommerce/{listingSourceId}` with bearer authorization injected late.
-8. The plugin can also submit published products to `POST /api/v1/listing-sources/{listingSourceId}/product-listings/async` in batches of up to 100. HTTP `202` reports queue admission, not completed creation; no `submissionId` polling occurs.
+8. On the first successful connection to a ListingSource, the plugin submits published products to `POST /api/v1/listing-sources/{listingSourceId}/product-listings/async` in batches of up to 100. HTTP `202` reports queue admission, not completed creation; no `submissionId` polling occurs. Routine webhook repairs do not restart CREATE backfill; merchants can explicitly queue a fresh full backfill from the settings page.
 
 ## External service behavior
 
@@ -126,14 +126,14 @@ Depending on the action, the plugin may send:
 - generated WooCommerce webhook signing secret for provider configuration (never as an Authorization header)
 - store language and currency
 - unchanged WooCommerce signed product webhook payloads, including any descriptions supplied by WooCommerce
-- published product listings during backfill: WooCommerce product ID as `sourceListingId`, canonical URL, image URL array, optional localized title, optional monetary price in integer minor units, and optional availability. Backfill does **not** send description/body (tracked in [#93](https://github.com/aura-historia/woocommerce-extension/issues/93)).
+- published product listings during backfill: WooCommerce product ID as `sourceListingId`, canonical URL, image URL array, optional localized title, optional monetary price in exact integer currency minor units (JPY: 0 digits; other supported currencies: 2; non-representable prices omitted), and optional availability. Backfill does **not** send description/body (tracked in [#93](https://github.com/aura-historia/woocommerce-extension/issues/93)).
 
 ### When it gets sent
 
 - when a merchant connects the store through Aura Historia OAuth
 - when a webhook sync registers the generated WooCommerce signing secret
 - when WooCommerce triggers one of the managed webhook events
-- when the plugin schedules or processes a product backfill
+- on the first successful connection to a ListingSource or when a merchant explicitly queues a full backfill, and while its batches run
 
 ### Service endpoints
 
@@ -278,7 +278,7 @@ Coverage focuses on the plugin's main contract, including:
 - idempotent updates without duplicates
 - pause/delete cleanup
 - drift recovery
-- async ProductListings admission, exact-batch idempotent retries, and backfill failure reporting
+- async ProductListings admission, exact-batch idempotent retries, stable product-ID cursor pagination, and backfill failure reporting
 
 Run the suite with:
 
@@ -301,7 +301,7 @@ npm run plugin:check
 | `aura-historia-partner-connect.php` | Plugin header, bootstrap, constants, hardcoded backend base URL |
 | `includes/class-plugin.php` | WordPress/WooCommerce bootstrap, admin UI, settings handling, manual actions |
 | `includes/class-webhook-manager.php` | Webhook ownership, idempotent sync, backend registration, cleanup, drift recovery |
-| `includes/class-product-backfill.php` | Background catalog resend via Action Scheduler |
+| `includes/class-product-backfill.php` | Background catalog CREATE admission via Action Scheduler |
 | `includes/class-backend-api-client.php` | Typed Aura Historia API integration |
 | `uninstall.php` | Uninstall cleanup |
 | `tests/` | WordPress integration tests |

@@ -26,7 +26,7 @@ After you connect the store through Aura Historia OAuth, the plugin automaticall
 * sends webhook deliveries to Aura Historia using the built-in endpoint pattern
 * pauses plugin-owned webhooks on deactivation
 * removes plugin-owned webhooks and plugin options on uninstall
-* can re-send the current catalog in the background after a successful connection
+* queues the first published-product CREATE backfill after a successful connection; routine webhook sync does not restart it
 
 The plugin keeps the settings surface intentionally small. Merchants do not manually enter Aura Historia credentials in wp-admin. The OAuth flow sets and stores:
 
@@ -60,7 +60,7 @@ Data sent to the service may include:
 * generated WooCommerce webhook secret
 * store language and currency
 * unchanged signed WooCommerce webhook payloads for `product.created`, `product.updated`, and `product.deleted`, including any WooCommerce descriptions
-* published products during backfill: WooCommerce product ID as `sourceListingId`, canonical URL, image URL array, optional localized title, optional tagged monetary price (integer minor units), and optional availability. Backfill does not send description/body yet (follow-up #93).
+* published products during backfill: WooCommerce product ID as `sourceListingId`, canonical URL, image URL array, optional localized title, optional tagged monetary price (exact integer currency minor units; non-representable prices omitted), and optional availability. Backfill does not send description/body yet (follow-up #93).
 
 Service endpoints:
 
@@ -108,11 +108,11 @@ No. The plugin keeps the Aura Historia delivery URL built in and generates the W
 
 = What happens if I edit or delete one of the managed webhooks? =
 
-The plugin first applies the exact WooCommerce signing secret, store currency, and language through the partner WooCommerce ingestion-configuration PUT; only after it succeeds does webhook sync activate or repair the managed webhooks.
+The plugin first stages all managed webhooks paused with the desired signing secret, then applies that secret, supported store currency, and language through the WooCommerce ingestion-configuration PUT. Only after it succeeds does sync activate the webhooks. Unsupported store currencies or configuration failures leave them paused for retry.
 
 = Does this plugin backfill existing products? =
 
-Yes. After a successful connection, the plugin submits published products in background batches of up to 100 to the async ProductListings API. A `202` confirms queue admission, not completed creation or immediate search visibility. Retries reuse the same ordered request and idempotency key. Merchants can manually restart from `WooCommerce > Aura Historia`.
+Yes. On the first successful connection to a ListingSource, the plugin submits published products in background batches of up to 100 to the async ProductListings API. A `202` confirms queue admission, not completed creation or immediate search visibility. Retries reuse the same ordered request and idempotency key; a product-ID cursor prevents skips when earlier products are removed. Routine webhook repairs never restart CREATE backfill. Merchants can intentionally start a fresh run from `WooCommerce > Aura Historia`.
 
 = What happens when the plugin is disabled? =
 

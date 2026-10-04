@@ -178,6 +178,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         $published->set_short_description("<p>Neither should this short description</p>");
         $published->set_regular_price("42.69");
         $published->save();
+        $published_id = (string) $published->get_id();
         $this->assertNotEmpty($published->get_description());
         $this->assertNotEmpty($published->get_short_description());
         $private = $this->add_product("Private", "private");
@@ -199,7 +200,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         $this->assertMatchesRegularExpression('/^[a-f0-9-]{36}$/', $request->getHeaderLine("Idempotency-Key"));
         $body = json_decode((string) $request->getBody(), true);
         $this->assertCount(1, $body);
-        $this->assertSame((string) $published->get_id(), $body[0]["sourceListingId"]);
+        $this->assertSame($published_id, $body[0]["sourceListingId"]);
         $this->assertSame(["text" => "Alpha & Beta", "language" => "en"], $body[0]["title"]);
         $this->assertArrayNotHasKey("description", $body[0]);
         $this->assertArrayNotHasKey("shopsProductId", $body[0]);
@@ -241,7 +242,14 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
 
     public function test_valid_decimal_prices_use_minor_units_and_invalid_prices_are_omitted()
     {
-        $prices = ["0.50", "12.30", "12abc", "1,234.56", "12.3.4", "1e3", "-12.34", "999999999999999999999999999999999999"];
+        $prices = [
+            "0.50", "12.30", "12abc", "1,234.56", "12.3.4", "1e3", "-12.34",
+            "999999999999999999999999999999999999", "12.345", "0.001",
+            "12.", ".12", "+12", "12 34", "12\n34", "12.3000",
+            "000.0100", "0.00",
+            substr((string) PHP_INT_MAX, 0, -2) . "." . substr((string) PHP_INT_MAX, -2),
+            (string) PHP_INT_MAX . ".01",
+        ];
         $products = [];
         $price_by_id = [];
         $this->mock_responses([$this->admission(count($prices))]);
@@ -264,11 +272,107 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             $this->assertCount(count($prices), $body);
             $this->assertSame(50, $body[0]["price"]["amount"]);
             $this->assertSame(1230, $body[1]["price"]["amount"]);
-            foreach (array_slice($body, 2) as $payload) {
+            foreach (array_slice($body, 2, 13) as $payload) {
+                $this->assertArrayNotHasKey("price", $payload);
+            }
+            $this->assertSame(1230, $body[15]["price"]["amount"]);
+            $this->assertSame(1, $body[16]["price"]["amount"]);
+            $this->assertSame(0, $body[17]["price"]["amount"]);
+            $this->assertSame(PHP_INT_MAX, $body[18]["price"]["amount"]);
+            $this->assertArrayNotHasKey("price", $body[19]);
+        } finally {
+            remove_filter("woocommerce_product_get_price", $price_filter, 10);
+            foreach ($products as $product) {
+                $product->delete(true);
+            }
+        }
+    }
+
+    public function test_eur_price_uses_exact_two_digit_minor_units()
+    {
+        update_option("woocommerce_currency", "EUR");
+        $prices = ["42.69", "42.690", "42.5", "0", "0.50", "42.001"];
+        $products = [];
+        $by_id = [];
+        $price_filter = static function ($price, $product) use (&$by_id) {
+            return isset($by_id[$product->get_id()]) ? $by_id[$product->get_id()] : $price;
+        };
+        $this->mock_responses([$this->admission(count($prices))]);
+        try {
+            foreach ($prices as $raw_price) {
+                $product = $this->add_product("Euro item");
+                $product->set_regular_price("9.99");
+                $product->save();
+                $products[] = $product;
+                $by_id[$product->get_id()] = $raw_price;
+            }
+            add_filter("woocommerce_product_get_price", $price_filter, 10, 2);
+            (new Product_Backfill())->process_batch(self::SOURCE_ID, 1);
+            $body = json_decode((string) $this->request()->getBody(), true);
+            foreach ([4269, 4269, 4250, 0, 50] as $index => $expected) {
+                $this->assertSame($expected, $body[$index]["price"]["amount"]);
+            }
+            $this->assertArrayNotHasKey("price", $body[5]);
+        } finally {
+            remove_filter("woocommerce_product_get_price", $price_filter, 10);
+            foreach ($products as $product) {
+                $product->delete(true);
+            }
+        }
+    }
+
+    public function test_price_minor_units_ignore_woocommerce_display_decimals()
+    {
+        $product = $this->add_product("Display precision");
+        $product->set_regular_price("9.99");
+        $product->save();
+        $price = static function () { return "12.34"; };
+        $decimals = static function () { return 0; };
+        add_filter("woocommerce_product_get_price", $price);
+        add_filter("wc_get_price_decimals", $decimals);
+        try {
+            (new Product_Backfill())->process_batch(self::SOURCE_ID, 1);
+            $body = json_decode((string) $this->request()->getBody(), true);
+            $this->assertSame(1234, $body[0]["price"]["amount"]);
+        } finally {
+            remove_filter("woocommerce_product_get_price", $price);
+            remove_filter("wc_get_price_decimals", $decimals);
+            $product->delete(true);
+        }
+    }
+
+    public function test_jpy_uses_zero_minor_digits_even_with_two_display_decimals()
+    {
+        update_option("woocommerce_currency", "JPY");
+        $products = [];
+        $prices = ["123", "123.00", "00012.000", "123.01", "12.5", "12abc"];
+        $by_id = [];
+        $price_filter = static function ($price, $product) use (&$by_id) {
+            return isset($by_id[$product->get_id()]) ? $by_id[$product->get_id()] : $price;
+        };
+        $display_decimals = static function () { return 2; };
+        $this->mock_responses([$this->admission(count($prices))]);
+        try {
+            foreach ($prices as $raw_price) {
+                $product = $this->add_product("Yen item");
+                $product->set_regular_price("9");
+                $product->save();
+                $products[] = $product;
+                $by_id[$product->get_id()] = $raw_price;
+            }
+            add_filter("woocommerce_product_get_price", $price_filter, 10, 2);
+            add_filter("wc_get_price_decimals", $display_decimals);
+            (new Product_Backfill())->process_batch(self::SOURCE_ID, 1);
+            $body = json_decode((string) $this->request()->getBody(), true);
+            $this->assertSame(["type" => "MONETARY", "currency" => "JPY", "amount" => 123], $body[0]["price"]);
+            $this->assertSame(123, $body[1]["price"]["amount"]);
+            $this->assertSame(12, $body[2]["price"]["amount"]);
+            foreach (array_slice($body, 3) as $payload) {
                 $this->assertArrayNotHasKey("price", $payload);
             }
         } finally {
             remove_filter("woocommerce_product_get_price", $price_filter, 10);
+            remove_filter("wc_get_price_decimals", $display_decimals);
             foreach ($products as $product) {
                 $product->delete(true);
             }
@@ -407,6 +511,8 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             }
             $snapshot = get_option(Product_Backfill::OPTION_BATCH);
             $this->assertSame("Before retry", $snapshot["payloads"][0]["title"]["text"]);
+            $this->assertSame($product->get_id(), $snapshot["last_product_id"]);
+            $this->assertSame("0", $backfill->get_status_details()["last_product_id"]);
             $this->assertSame((string) $this->request()->getHeaderLine("Idempotency-Key"), $snapshot["idempotency_key"]);
             $args = $this->pending_retry_args($snapshot);
             $product->set_name("After retry");
@@ -420,6 +526,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             $backfill->process_batch(self::SOURCE_ID, 1);
             $this->assertCount(2, $this->requests);
             $this->assertSame(Product_Backfill::STATUS_COMPLETE, $backfill->get_status_details()["status"]);
+            $this->assertSame((string) $product->get_id(), $backfill->get_status_details()["last_product_id"]);
             $this->assertFalse((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, $args, Product_Backfill::ACTION_GROUP));
         } finally {
             $product->delete(true);
@@ -634,6 +741,68 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             $this->assertSame((string) $products[0]->get_id(), $first[0]["sourceListingId"]);
             $this->assertSame((string) $products[Product_Backfill::BATCH_SIZE]->get_id(), $second[0]["sourceListingId"]);
             $this->assertNotSame($this->request()->getHeaderLine("Idempotency-Key"), $this->request(1)->getHeaderLine("Idempotency-Key"));
+        } finally {
+            foreach ($products as $product) {
+                $product->delete(true);
+            }
+        }
+    }
+
+    public function test_unpublishing_an_earlier_product_does_not_skip_the_next_batch()
+    {
+        $products = [];
+        $this->mock_responses([$this->admission(Product_Backfill::BATCH_SIZE), $this->admission(1)]);
+        try {
+            for ($i = 0; $i <= Product_Backfill::BATCH_SIZE; ++$i) {
+                $products[] = $this->add_product("Cursor item " . $i);
+            }
+            $backfill = new Product_Backfill();
+            $backfill->process_batch(self::SOURCE_ID, 1);
+            $this->assertSame((string) $products[99]->get_id(), $backfill->get_status_details()["last_product_id"]);
+            $products[0]->set_status("draft");
+            $products[0]->save();
+            as_unschedule_all_actions(Product_Backfill::ACTION_HOOK, [self::SOURCE_ID, 2], Product_Backfill::ACTION_GROUP);
+            $backfill->process_batch(self::SOURCE_ID, 2);
+            $body = json_decode((string) $this->request(1)->getBody(), true);
+            $this->assertCount(1, $body);
+            $this->assertSame((string) $products[100]->get_id(), $body[0]["sourceListingId"]);
+        } finally {
+            foreach ($products as $product) {
+                $product->delete(true);
+            }
+        }
+    }
+
+    public function test_cursor_advances_past_id_that_disappears_during_payload_build()
+    {
+        $products = [];
+        $this->mock_responses([$this->admission(Product_Backfill::BATCH_SIZE - 1), $this->admission(1)]);
+        try {
+            for ($i = 0; $i <= Product_Backfill::BATCH_SIZE; ++$i) {
+                $products[] = $this->add_product("Lifecycle item " . $i);
+            }
+            $last_on_first_page = $products[99];
+            $last_id = $last_on_first_page->get_id();
+            $preceding_id = $products[98]->get_id();
+            $remove_product = static function ($name, $product) use ($preceding_id, $last_on_first_page) {
+                if ($product->get_id() === $preceding_id) {
+                    $last_on_first_page->delete(true);
+                }
+                return $name;
+            };
+            add_filter("woocommerce_product_get_name", $remove_product, 10, 2);
+            try {
+                $backfill = new Product_Backfill();
+                $backfill->process_batch(self::SOURCE_ID, 1);
+            } finally {
+                remove_filter("woocommerce_product_get_name", $remove_product, 10);
+            }
+            $this->assertSame((string) $last_id, $backfill->get_status_details()["last_product_id"]);
+            as_unschedule_all_actions(Product_Backfill::ACTION_HOOK, [self::SOURCE_ID, 2], Product_Backfill::ACTION_GROUP);
+            $backfill->process_batch(self::SOURCE_ID, 2);
+            $body = json_decode((string) $this->request(1)->getBody(), true);
+            $this->assertCount(1, $body);
+            $this->assertSame((string) $products[100]->get_id(), $body[0]["sourceListingId"]);
         } finally {
             foreach ($products as $product) {
                 $product->delete(true);

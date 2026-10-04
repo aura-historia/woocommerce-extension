@@ -612,6 +612,11 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $this->assertSame($listing_source_id, $settings["listing_source_id"]);
         $this->assertSame($access_token, $settings["access_token"]);
         $this->assertSame("test-secret", $settings["secret"]);
+        $this->assertSame(
+            $listing_source_id,
+            get_option("ahpc_initial_backfill_listing_source_id"),
+        );
+        $this->assertTrue((new Product_Backfill())->is_backfill_scheduled());
 
         $oauth_requests = $this->get_backend_requests_for_url(
             "https://example.com/api/v1/oauth/tokens/by-third-party-code/" .
@@ -645,6 +650,24 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             $webhook = new WC_Webhook($webhook_id);
             $this->assertSame("active", $webhook->get_status());
         }
+
+        // Reauthorizing the same source must not replay already-created listings.
+        $snapshot = ["idempotency_key" => "original-key", "payloads" => [["sourceListingId" => "42"]]];
+        update_option(Product_Backfill::OPTION_BATCH, $snapshot, false);
+        $next_url = $plugin->create_oauth_authorization_url();
+        $next_parts = wp_parse_url($next_url);
+        parse_str($next_parts["query"], $next_query);
+        $next_state = json_decode($this->base64url_decode($next_query["state"]), true);
+        $this->set_backend_mock_responses([
+            $this->mock_oauth_token_response($access_token),
+            $this->mock_backend_registration_response(201),
+        ]);
+        $this->assertTrue($plugin->complete_oauth_connection(
+            $listing_source_id,
+            $exchange_code,
+            $next_state["client_state"],
+        ));
+        $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
     }
 
     /**
@@ -1297,7 +1320,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
                 "status" => 401,
                 "title" => "Unauthorized",
                 "error" => "UNAUTHORIZED",
-                "detail" => "Missing or empty Authorization header.",
+                "detail" => "Missing or empty Authorization header. " . $access_token . " test-secret",
             ]),
         ]);
 
@@ -1318,6 +1341,8 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             "Missing or empty Authorization header.",
             $result->get_error_message(),
         );
+        $this->assertStringNotContainsString($access_token, $result->get_error_message());
+        $this->assertStringNotContainsString("test-secret", $manager->get_last_sync_error());
         $this->assertCount(3, $ids);
 
         foreach ($ids as $webhook_id) {
@@ -1592,16 +1617,16 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
     }
 
     /**
-     * It clears unsupported currency in the PUT payload.
+     * It blocks unsupported WooCommerce currencies without calling the backend.
      *
      * @return void
      */
-    public function test_put_configuration_omits_unsupported_currency()
+    public function test_unsupported_currency_blocks_registration_and_delivery()
     {
         $listing_source_id = "ls_00000000000000000000000000";
         $access_token = "aurahistoria_abcdefghijk_verylongtokenvalue";
 
-        update_option("woocommerce_currency", "XYZ", false);
+        update_option("woocommerce_currency", "INR", false);
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
@@ -1613,16 +1638,22 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         );
 
         $manager = new Webhook_Manager();
-        $manager->sync_webhooks();
+        $result = $manager->sync_webhooks();
 
-        $registration_requests = $this->get_backend_requests_for_url(
-            "https://example.com/api/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
-        );
+        $this->assertInstanceOf(WP_Error::class, $result);
+        $this->assertSame("ahpc_unsupported_currency", $result->get_error_code());
+        $this->assertSame([], $this->backend_http_requests);
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        foreach ($manager->get_webhook_ids() as $webhook_id) {
+            $this->assertSame("paused", (new WC_Webhook($webhook_id))->get_status());
+        }
 
-        $this->assertCount(1, $registration_requests);
-        $this->assertNull(
-            json_decode((string) $registration_requests[0]["request"]->getBody(), true)["currency"],
-        );
+        update_option("woocommerce_currency", "EUR", false);
+        $this->assertTrue($manager->sync_webhooks());
+        $this->assertCount(1, $this->backend_http_requests);
+        foreach ($manager->get_webhook_ids() as $webhook_id) {
+            $this->assertSame("active", (new WC_Webhook($webhook_id))->get_status());
+        }
     }
 
     /**
@@ -1848,6 +1879,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             $this->assertSame("paused", (new WC_Webhook($webhook_id))->get_status());
         }
         $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        $this->assertSame("rotated-secret", (new WC_Webhook(reset($ids)))->get_secret());
 
         $this->set_backend_mock_responses([$this->mock_backend_registration_response(201)]);
         $this->assertTrue($manager->sync_webhooks());
@@ -1856,6 +1888,260 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             $webhook = new WC_Webhook($webhook_id);
             $this->assertSame("active", $webhook->get_status());
             $this->assertSame("rotated-secret", $webhook->get_secret());
+        }
+    }
+
+    /**
+     * A paused-stage persistence failure must not send a new secret to Aura.
+     *
+     * @return void
+     */
+    public function test_paused_stage_failure_does_not_update_backend()
+    {
+        $id = "ls_" . str_repeat("0", 26);
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "old-secret",
+        ]);
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+        $ids = $manager->get_webhook_ids();
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "new-secret",
+        ]);
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+        $failed_once = false;
+        $fail_stage = static function ($webhook_id) use (&$failed_once, $ids) {
+            if (!$failed_once && (int) $webhook_id === (int) $ids["product.updated"] &&
+                "paused" === (new WC_Webhook($webhook_id))->get_status()) {
+                $failed_once = true;
+                throw new \RuntimeException("sensitive test-token should not surface");
+            }
+        };
+        add_action("woocommerce_webhook_updated", $fail_stage, 20, 1);
+        try {
+            $result = $manager->sync_webhooks();
+        } finally {
+            remove_action("woocommerce_webhook_updated", $fail_stage, 20);
+        }
+        $this->assertTrue($failed_once);
+        $this->assertInstanceOf(WP_Error::class, $result);
+        $this->assertSame([], $this->backend_http_requests);
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        foreach ($ids as $webhook_id) {
+            $this->assertSame("paused", (new WC_Webhook($webhook_id))->get_status());
+        }
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+        $this->assertTrue($manager->sync_webhooks());
+    }
+
+    /**
+     * Failure activating one webhook after a successful secret rotation must
+     * pause the entire set; retry may safely activate the new secret.
+     *
+     * @return void
+     */
+    public function test_activation_failure_after_backend_put_pauses_rotated_webhooks()
+    {
+        $id = "ls_" . str_repeat("0", 26);
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "old-secret",
+        ]);
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+        $ids = $manager->get_webhook_ids();
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "new-secret",
+        ]);
+        update_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes", false);
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+        $failed_once = false;
+        $fail_activation = static function ($webhook_id) use (&$failed_once, $ids) {
+            if (!$failed_once && (int) $webhook_id === (int) $ids["product.updated"] &&
+                "active" === (new WC_Webhook($webhook_id))->get_status()) {
+                $failed_once = true;
+                throw new \RuntimeException("sensitive old-secret test-token should not surface");
+            }
+        };
+        add_action("woocommerce_webhook_updated", $fail_activation, 20, 1);
+        try {
+            $result = $manager->sync_webhooks();
+        } finally {
+            remove_action("woocommerce_webhook_updated", $fail_activation, 20);
+        }
+        $this->assertTrue($failed_once);
+        $this->assertInstanceOf(WP_Error::class, $result);
+        $this->assertCount(1, $this->backend_http_requests);
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        $this->assertStringNotContainsString("test-token", $result->get_error_message());
+        $this->assertStringNotContainsString("old-secret", $result->get_error_message());
+        foreach ($ids as $webhook_id) {
+            $webhook = new WC_Webhook($webhook_id);
+            $this->assertSame("paused", $webhook->get_status());
+            $this->assertSame("new-secret", $webhook->get_secret());
+        }
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+        $this->assertTrue($manager->sync_webhooks());
+        foreach ($ids as $webhook_id) {
+            $webhook = new WC_Webhook($webhook_id);
+            $this->assertSame("active", $webhook->get_status());
+            $this->assertSame("new-secret", $webhook->get_secret());
+        }
+    }
+
+    /**
+     * All three managed webhooks must exist in the paused state before the
+     * first backend registration request is sent.
+     *
+     * @return void
+     */
+    public function test_initial_registration_only_sees_paused_webhooks()
+    {
+        $id = "ls_" . str_repeat("0", 26);
+        update_option("woocommerce_currency", "EUR", false);
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "test-secret",
+        ]);
+
+        $observed = [];
+        $this->backend_guzzle_client = new Client([
+            "handler" => static function ($request, $options) use (&$observed) {
+                $manager = new Webhook_Manager();
+                foreach ($manager->get_webhook_ids() as $topic => $webhook_id) {
+                    $webhook = new WC_Webhook($webhook_id);
+                    $observed[$topic] = [$webhook->get_status(), $webhook->get_secret()];
+                }
+                return new \GuzzleHttp\Promise\FulfilledPromise(new Response(204));
+            },
+        ]);
+
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+        $this->assertCount(3, $observed);
+        foreach ($observed as $snapshot) {
+            $this->assertSame(["paused", "test-secret"], $snapshot);
+        }
+    }
+
+    /**
+     * The pause stage must persist a rotated secret before sending the PUT.
+     *
+     * @return void
+     */
+    public function test_all_local_webhooks_are_paused_and_saved_before_backend_put()
+    {
+        $id = "ls_" . str_repeat("0", 26);
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "original-token",
+            "secret" => "original-secret",
+        ]);
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+        $ids = $manager->get_webhook_ids();
+
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "rotated-token",
+            "secret" => "rotated-secret",
+        ]);
+        $observed = [];
+        $this->backend_guzzle_client = new Client([
+            "handler" => static function ($request, $options) use ($ids, &$observed) {
+                foreach ($ids as $topic => $webhook_id) {
+                    $webhook = new WC_Webhook($webhook_id);
+                    $observed[$topic] = [$webhook->get_status(), $webhook->get_secret()];
+                }
+                return new \GuzzleHttp\Promise\FulfilledPromise(new Response(204));
+            },
+        ]);
+
+        $this->assertTrue($manager->sync_webhooks());
+        $this->assertSame($ids, $manager->get_webhook_ids());
+        $this->assertCount(3, $observed);
+        foreach ($observed as $snapshot) {
+            $this->assertSame(["paused", "rotated-secret"], $snapshot);
+        }
+        foreach ($ids as $webhook_id) {
+            $this->assertSame("active", (new WC_Webhook($webhook_id))->get_status());
+        }
+    }
+
+    /**
+     * A currency change must pause existing deliveries until a valid retry.
+     *
+     * @return void
+     */
+    public function test_unsupported_currency_pauses_existing_webhooks_before_retry()
+    {
+        $id = "ls_" . str_repeat("0", 26);
+        update_option("woocommerce_currency", "EUR", false);
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "test-secret",
+        ]);
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+        $ids = $manager->get_webhook_ids();
+
+        update_option("woocommerce_currency", "INR", false);
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+        $result = $manager->sync_webhooks();
+        $this->assertSame("ahpc_unsupported_currency", $result->get_error_code());
+        $this->assertSame([], $this->backend_http_requests);
+        $this->assertSame($ids, $manager->get_webhook_ids());
+        foreach ($ids as $webhook_id) {
+            $this->assertSame("paused", (new WC_Webhook($webhook_id))->get_status());
+        }
+
+        update_option("woocommerce_currency", "EUR", false);
+        $this->assertTrue($manager->maybe_sync_webhooks());
+        $this->assertCount(1, $this->backend_http_requests);
+        foreach ($ids as $webhook_id) {
+            $this->assertSame("active", (new WC_Webhook($webhook_id))->get_status());
+        }
+    }
+
+    /**
+     * Webhook drift reconciliation must not reset product backfill progress.
+     *
+     * @return void
+     */
+    public function test_generic_sync_does_not_restart_in_flight_or_completed_backfill()
+    {
+        $id = "ls_" . str_repeat("0", 26);
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "test-secret",
+        ]);
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+
+        foreach ([Product_Backfill::STATUS_RUNNING, Product_Backfill::STATUS_COMPLETE] as $status) {
+            $state = [
+                "status" => $status,
+                "last_completed_page" => "3",
+                "accepted_count" => "25",
+                "completed_at" => "2026-01-01 12:00:00",
+            ];
+            $batch = ["page" => 4, "listing_source_id" => $id];
+            update_option(Product_Backfill::OPTION_STATE, $state, false);
+            update_option(Product_Backfill::OPTION_BATCH, $batch, false);
+
+            $this->assertTrue($manager->sync_webhooks());
+            $this->assertSame($state, get_option(Product_Backfill::OPTION_STATE));
+            $this->assertSame($batch, get_option(Product_Backfill::OPTION_BATCH));
         }
     }
 }

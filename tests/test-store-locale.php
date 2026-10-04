@@ -80,6 +80,30 @@ class Test_AHPC_Store_Locale extends WP_UnitTestCase
     }
 
     /**
+     * A real WooCommerce currency outside the backend enum must block delivery.
+     *
+     * @return void
+     */
+    public function test_get_currency_rejects_unsupported_woocommerce_currency()
+    {
+        update_option("woocommerce_currency", "INR", false);
+
+        $this->assertNull(Store_Locale::get_currency());
+    }
+
+    /**
+     * It rejects malformed currency codes, rather than sending them to the backend.
+     *
+     * @return void
+     */
+    public function test_get_currency_rejects_malformed_currency_code()
+    {
+        update_option("woocommerce_currency", "EUR<script>", false);
+
+        $this->assertNull(Store_Locale::get_currency());
+    }
+
+    /**
      * It returns null when the store currency option is empty.
      *
      * @return void
