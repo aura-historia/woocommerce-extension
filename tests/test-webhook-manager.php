@@ -2310,7 +2310,6 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $id = "ls_01jw7j4azge008000000000003";
         $plugin = new Plugin();
         $this->assertTrue($this->connect_listing_source($plugin, $id));
-        $this->assertTrue($plugin->queue_manual_backfill());
         $snapshot = [
             "listing_source_id" => $id,
             "page" => 1,

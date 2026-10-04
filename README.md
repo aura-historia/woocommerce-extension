@@ -300,7 +300,7 @@ npm run plugin:check
 | --- | --- |
 | `aura-historia-partner-connect.php` | Plugin header, bootstrap, constants, hardcoded backend base URL |
 | `includes/class-plugin.php` | WordPress/WooCommerce bootstrap, admin UI, settings handling, manual actions |
-- `includes/class-webhook-manager.php` | Webhook ownership, idempotent sync, backend registration, cleanup, drift recovery |
+| `includes/class-webhook-manager.php` | Webhook ownership, idempotent sync, backend registration, cleanup, drift recovery |
 | `includes/class-type-id-validator.php` | Strict canonical UUIDv7 `ls_` and `oc_` TypeID validation |
 | `includes/class-product-backfill.php` | Background catalog CREATE admission via Action Scheduler |
 | `includes/class-backend-api-client.php` | Typed Aura Historia API integration |
