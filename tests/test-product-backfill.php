@@ -5,6 +5,7 @@
  * @package AuraHistoria\PartnerConnect
  */
 
+use AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData;
 use AuraHistoria\PartnerConnect\Product_Backfill;
 use AuraHistoria\PartnerConnect\Webhook_Manager;
 use GuzzleHttp\Client;
@@ -16,8 +17,8 @@ use GuzzleHttp\Psr7\Response;
 
 class Test_AHPC_Product_Backfill extends WP_UnitTestCase
 {
-    const SOURCE_ID = "ls_01arz3ndektsv4rrffq69g5fav";
-    const OTHER_SOURCE_ID = "ls_01arz3ndektsv4rrffq69g5faw";
+    const SOURCE_ID = "ls_01jw7j4azge008000000000003";
+    const OTHER_SOURCE_ID = "ls_01jw7j4azge00800000000000g";
     const TOKEN = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
     const ENDPOINT = "https://example.com/api/v1/listing-sources/" . self::SOURCE_ID . "/product-listings/async";
 
@@ -135,12 +136,69 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
     {
         $backfill = new Product_Backfill();
         $this->assertFalse($backfill->schedule_backfill("not-a-listing-source"));
+        $this->assertFalse($backfill->schedule_backfill("oc_01jw7j4azge00800000000000g"));
+        $this->assertFalse($backfill->schedule_backfill("ls_" . str_repeat("i", 26)));
+        $this->assertFalse($backfill->is_backfill_scheduled());
         $this->assertTrue($backfill->schedule_backfill(self::SOURCE_ID));
         $this->assertTrue($backfill->is_backfill_scheduled());
         update_option(Product_Backfill::OPTION_BATCH, ["payloads" => ["temporary"]], false);
         $backfill->cancel_backfill();
         $this->assertFalse($backfill->is_backfill_scheduled());
         $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH));
+    }
+
+    public function test_start_or_resume_preserves_orphaned_request_and_reports_unsafe_snapshot()
+    {
+        $backfill = new Product_Backfill();
+        $snapshot = [
+            "listing_source_id" => self::SOURCE_ID,
+            "page" => 1,
+            "product_count" => 1,
+            "payloads" => [["sourceListingId" => "42", "url" => "https://example.com/42", "images" => []]],
+            "idempotency_key" => "saved-key",
+            "retry_attempt" => 1,
+        ];
+        update_option(Product_Backfill::OPTION_BATCH, $snapshot, false);
+        $this->assertTrue($backfill->start_or_resume_backfill(self::SOURCE_ID));
+        $args = [self::SOURCE_ID, 1, "retry-" . hash("sha256", "saved-key:1")];
+        $this->assertTrue((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, $args, Product_Backfill::ACTION_GROUP));
+        $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
+        $this->assertTrue($backfill->start_or_resume_backfill(self::SOURCE_ID));
+        $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
+
+        as_unschedule_all_actions(Product_Backfill::ACTION_HOOK, null, Product_Backfill::ACTION_GROUP);
+        $snapshot["listing_source_id"] = self::OTHER_SOURCE_ID;
+        update_option(Product_Backfill::OPTION_BATCH, $snapshot, false);
+        $this->assertFalse($backfill->start_or_resume_backfill(self::SOURCE_ID));
+        $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
+        $status = $backfill->get_status_details();
+        $this->assertSame(Product_Backfill::STATUS_FAILED, $status["status"]);
+        $this->assertNotSame("", $status["last_error"]);
+        $this->assertFalse($backfill->is_backfill_scheduled());
+    }
+
+    public function test_safe_manual_start_waits_for_terminal_run_then_uses_a_new_key()
+    {
+        $product = $this->add_product("New run");
+        $backfill = new Product_Backfill();
+        try {
+            $this->mock_responses([$this->admission(1), $this->admission(1)]);
+            $this->assertTrue($backfill->start_or_resume_backfill(self::SOURCE_ID));
+            $this->assertTrue($backfill->start_or_resume_backfill(self::SOURCE_ID));
+            $this->assertTrue((bool) as_has_scheduled_action(
+                Product_Backfill::ACTION_HOOK, [self::SOURCE_ID, 1], Product_Backfill::ACTION_GROUP,
+            ));
+            $backfill->process_batch(self::SOURCE_ID, 1);
+            $first_key = $this->request()->getHeaderLine("Idempotency-Key");
+            as_unschedule_all_actions(Product_Backfill::ACTION_HOOK, null, Product_Backfill::ACTION_GROUP);
+            $backfill->process_batch(self::SOURCE_ID, 2);
+            $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH, false));
+            $this->assertTrue($backfill->start_or_resume_backfill(self::SOURCE_ID));
+            $backfill->process_batch(self::SOURCE_ID, 1);
+            $this->assertNotSame($first_key, $this->request(1)->getHeaderLine("Idempotency-Key"));
+        } finally {
+            $product->delete(true);
+        }
     }
 
     public function test_webhook_deletion_cancels_backfill_and_pending_snapshot()
@@ -319,6 +377,30 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
                 $product->delete(true);
             }
         }
+    }
+
+    public function test_minor_unit_exponents_cover_the_entire_generated_currency_enum()
+    {
+        $expected = [
+            "EUR" => 2, "GBP" => 2, "USD" => 2, "AUD" => 2,
+            "CAD" => 2, "NZD" => 2, "CNY" => 2, "BRL" => 2,
+            "PLN" => 2, "TRY" => 2, "JPY" => 0, "CZK" => 2,
+            "RUB" => 2, "AED" => 2, "SAR" => 2, "HKD" => 2,
+            "SGD" => 2, "CHF" => 2,
+        ];
+        $this->assertEqualsCanonicalizing(array_keys($expected), CurrencyData::getAllowableEnumValues());
+
+        $constant = (new ReflectionClass(Product_Backfill::class))->getReflectionConstant("CURRENCY_MINOR_UNIT_EXPONENTS");
+        $this->assertSame($expected, $constant->getValue());
+
+        $convert = new ReflectionMethod(Product_Backfill::class, "convert_price_to_minor_units");
+        $convert->setAccessible(true);
+        $backfill = new Product_Backfill();
+        foreach ($expected as $currency => $exponent) {
+            $this->assertSame(0 === $exponent ? 12 : 1200, $convert->invoke($backfill, "12.00", $currency), $currency);
+            $this->assertSame(0 === $exponent ? null : 1234, $convert->invoke($backfill, "12.34", $currency), $currency);
+        }
+        $this->assertNull($convert->invoke($backfill, "12.34", "XYZ"));
     }
 
     public function test_price_minor_units_ignore_woocommerce_display_decimals()

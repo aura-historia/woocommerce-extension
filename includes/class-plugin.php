@@ -22,6 +22,9 @@ class Plugin
     const OAUTH_SCOPE = "product-listings:write listing-sources:write";
     const OAUTH_STATE_TRANSIENT_PREFIX = "ahpc_oauth_state_";
     const OAUTH_STATE_TTL = 600;
+    const OPTION_INITIAL_BACKFILL_PENDING_SOURCE = "ahpc_initial_backfill_pending_source";
+    const OPTION_INITIAL_BACKFILL_STARTED_SOURCES = "ahpc_initial_backfill_started_sources";
+    const OPTION_INITIAL_BACKFILL_ERROR = "ahpc_initial_backfill_error";
 
     /**
      * Plugin singleton.
@@ -134,6 +137,9 @@ class Plugin
             2,
         );
         add_action("woocommerce_loaded", [$this, "bootstrap_woocommerce"]);
+        add_action("update_option_woocommerce_currency", [$this, "on_store_locale_option_updated"], 10, 2);
+        add_action("update_option_WPLANG", [$this, "on_store_locale_option_updated"], 10, 2);
+        add_action("added_option", [$this, "on_store_locale_option_added"], 10, 2);
 
         if (is_admin()) {
             add_action("admin_menu", [$this, "register_admin_page"]);
@@ -217,7 +223,96 @@ class Plugin
             $this->manager->mark_sync_required();
         }
 
-        $this->manager->maybe_sync_webhooks();
+        if ($this->manager->maybe_sync_webhooks()) {
+            $this->maybe_schedule_pending_initial_backfill();
+        }
+    }
+
+    /**
+     * Pause deliveries immediately when the provider's currency or language changes.
+     * The next normal sync will register the new context before resuming delivery.
+     *
+     * @param mixed $old_value Previous option value.
+     * @param mixed $new_value New option value.
+     * @return void
+     */
+    public function on_store_locale_option_updated($old_value, $new_value)
+    {
+        if ($old_value === $new_value || !$this->is_woocommerce_available()) {
+            return;
+        }
+
+        $manager = $this->manager instanceof Webhook_Manager
+            ? $this->manager
+            : new Webhook_Manager();
+        $manager->mark_sync_required();
+        $manager->pause_webhooks();
+    }
+
+    /**
+     * Newly created locale options also change the context sent to Aura.
+     *
+     * @param string $option Option name.
+     * @param mixed  $value  New option value.
+     * @return void
+     */
+    public function on_store_locale_option_added($option, $value)
+    {
+        if ("WPLANG" === $option || "woocommerce_currency" === $option) {
+            $this->on_store_locale_option_updated(null, $value);
+        }
+    }
+
+    /**
+     * Queue a first CREATE run only after the current provider configuration is healthy.
+     * A failed queue attempt retains the pending source for a later bootstrap.
+     *
+     * @return true|WP_Error
+     */
+    public function maybe_schedule_pending_initial_backfill()
+    {
+        $pending = get_option(self::OPTION_INITIAL_BACKFILL_PENDING_SOURCE, "");
+        if ("" === $pending) {
+            return true;
+        }
+
+        $settings = $this->get_current_settings();
+        if (
+            $pending !== $settings["listing_source_id"] ||
+            !Webhook_Manager::is_valid_listing_source_id($pending) ||
+            !Webhook_Manager::is_valid_access_token($settings["access_token"]) ||
+            "no" !== get_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes") ||
+            !class_exists(Product_Backfill::class)
+        ) {
+            return true;
+        }
+
+        $started = get_option(self::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []);
+        $started = is_array($started) ? $started : [];
+        if (isset($started[$pending])) {
+            delete_option(self::OPTION_INITIAL_BACKFILL_PENDING_SOURCE);
+            delete_option(self::OPTION_INITIAL_BACKFILL_ERROR);
+            return true;
+        }
+
+        // Do not claim that the run was scheduled until Action Scheduler has
+        // actually accepted it; deferring the attempt also preserves failures.
+        if (!did_action("action_scheduler_init")) {
+            add_action("action_scheduler_init", [$this, "maybe_schedule_pending_initial_backfill"]);
+            return true;
+        }
+
+        if (!(new Product_Backfill())->start_or_resume_backfill($pending)) {
+            $message = __("The initial product backfill could not be queued. It will be retried on a later request.", "aura-historia-partner-connect");
+            update_option(self::OPTION_INITIAL_BACKFILL_ERROR, $message, false);
+            return new WP_Error("ahpc_backfill_failed", $message);
+        }
+
+        $started[$pending] = true;
+        update_option(self::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, $started, false);
+        delete_option(self::OPTION_INITIAL_BACKFILL_PENDING_SOURCE);
+        delete_option(self::OPTION_INITIAL_BACKFILL_ERROR);
+        return true;
     }
 
     /**
@@ -724,6 +819,17 @@ class Plugin
         }
 
         $settings = $this->get_current_settings();
+        if ($settings["listing_source_id"] !== $listing_source_id) {
+            if (class_exists(Product_Backfill::class)) {
+                (new Product_Backfill())->cancel_backfill();
+            }
+            delete_option(self::OPTION_INITIAL_BACKFILL_PENDING_SOURCE);
+        }
+        $started = get_option(self::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []);
+        if (!is_array($started) || !isset($started[$listing_source_id])) {
+            update_option(self::OPTION_INITIAL_BACKFILL_PENDING_SOURCE, $listing_source_id, false);
+        }
+
         $settings["listing_source_id"] = $listing_source_id;
         $settings["access_token"] = $access_token;
 
@@ -735,6 +841,7 @@ class Plugin
         update_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes", false);
         delete_option(Webhook_Manager::OPTION_LAST_SYNC_ERROR);
         delete_option(Webhook_Manager::OPTION_LAST_OAUTH_ERROR);
+        delete_option(self::OPTION_INITIAL_BACKFILL_ERROR);
 
         if ($this->is_woocommerce_available()) {
             $was_bootstrapped = $this->woocommerce_bootstrapped;
@@ -754,20 +861,16 @@ class Plugin
                 }
             }
 
-            // CREATE backfill belongs to the initial connection, not to routine
-            // webhook repair. Reconnecting the same ListingSource must not replay it.
-            if (
-                $this->manager instanceof Webhook_Manager &&
-                class_exists(Product_Backfill::class) &&
-                $listing_source_id !== get_option("ahpc_initial_backfill_listing_source_id", "")
-            ) {
-                if (!(new Product_Backfill())->schedule_backfill($listing_source_id)) {
-                    return new WP_Error(
-                        "ahpc_backfill_failed",
-                        __("The initial product backfill could not be queued. Try again or queue a full backfill manually.", "aura-historia-partner-connect"),
-                    );
+            if (!$was_bootstrapped) {
+                $backfill_error = (string) get_option(self::OPTION_INITIAL_BACKFILL_ERROR, "");
+                if ("" !== $backfill_error) {
+                    return new WP_Error("ahpc_backfill_failed", $backfill_error);
                 }
-                update_option("ahpc_initial_backfill_listing_source_id", $listing_source_id, false);
+            } else {
+                $backfill_result = $this->maybe_schedule_pending_initial_backfill();
+                if (is_wp_error($backfill_result)) {
+                    return $backfill_result;
+                }
             }
         }
 
@@ -861,7 +964,7 @@ class Plugin
     }
 
     /**
-     * Queues a fresh full product backfill using the currently saved settings.
+     * Resumes pending work, or queues a fresh full run only when idle.
      *
      * @return true|WP_Error
      */
@@ -920,7 +1023,7 @@ class Plugin
             return $sync_result;
         }
 
-        if (!(new Product_Backfill())->schedule_backfill($settings["listing_source_id"])) {
+        if (!(new Product_Backfill())->start_or_resume_backfill($settings["listing_source_id"])) {
             return new WP_Error(
                 "ahpc_backfill_failed",
                 __(
@@ -930,6 +1033,11 @@ class Plugin
             );
         }
 
+        // A manual start also satisfies a still-pending initial run.
+        $backfill_result = $this->maybe_schedule_pending_initial_backfill();
+        if (is_wp_error($backfill_result)) {
+            return $backfill_result;
+        }
         return true;
     }
 
@@ -1050,6 +1158,7 @@ class Plugin
             Webhook_Manager::OPTION_LAST_OAUTH_ERROR,
             "",
         );
+        $initial_backfill_error = (string) get_option(self::OPTION_INITIAL_BACKFILL_ERROR, "");
         $logs_url = admin_url("admin.php?page=wc-status&tab=logs");
         $webhooks_url = admin_url(
             "admin.php?page=wc-settings&tab=advanced&section=webhooks",
@@ -1310,12 +1419,16 @@ class Plugin
 				</tbody>
 			</table>
 
+			<?php if ("" !== $initial_backfill_error): ?>
+				<?php $this->render_inline_notice("error", esc_html($initial_backfill_error)); ?>
+			<?php endif; ?>
+
 			<h2><?php echo esc_html__(
        "Existing product backfill",
        "aura-historia-partner-connect",
    ); ?></h2>
 			<p><?php echo esc_html__(
-       "Use this if the initial product backfill did not start, was interrupted, or you want to re-send the entire current catalog. It queues a fresh background backfill for the connected Aura Historia listing source and replaces any pending backfill batches.",
+       "Use this to resume an interrupted backfill or, once the previous run has finished, start a fresh full catalog run. Pending batches and their retry keys are never replaced.",
        "aura-historia-partner-connect",
    ); ?></p>
 			<?php if ($this->is_woocommerce_available()): ?>
@@ -1335,7 +1448,7 @@ class Plugin
      ); ?>
 				</form>
 				<p class="description"><?php echo esc_html__(
-        "The backfill runs in the background via Action Scheduler. On large catalogs it may take some time, and queueing it again restarts the pending backfill from the beginning.",
+        "Backfill runs in the background via Action Scheduler. While a run is active, this action resumes missing work or leaves already queued work unchanged.",
         "aura-historia-partner-connect",
     ); ?></p>
 			<?php endif; ?>
@@ -1941,7 +2054,7 @@ class Plugin
          */
         $client_id = apply_filters("ahpc_oauth_client_id", $client_id);
 
-        return is_string($client_id) ? trim($client_id) : "";
+        return is_string($client_id) ? $client_id : "";
     }
 
     /**
@@ -1952,8 +2065,7 @@ class Plugin
      */
     private function is_valid_oauth_client_id($client_id)
     {
-        return is_string($client_id) &&
-            1 === preg_match('/\Aoc_[0-9a-hjkmnp-tv-z]{26}\z/', $client_id);
+        return Type_ID_Validator::is_valid($client_id, "oc_");
     }
 
     /**

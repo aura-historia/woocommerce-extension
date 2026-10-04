@@ -76,6 +76,28 @@ class Product_Backfill
     /** Seconds between attempts to replay an unchanged batch. */
     const RETRY_DELAY = 60;
 
+    /** Minor-unit exponents for every currently supported backend currency. */
+    private const CURRENCY_MINOR_UNIT_EXPONENTS = [
+        "EUR" => 2,
+        "GBP" => 2,
+        "USD" => 2,
+        "AUD" => 2,
+        "CAD" => 2,
+        "NZD" => 2,
+        "CNY" => 2,
+        "BRL" => 2,
+        "PLN" => 2,
+        "TRY" => 2,
+        "JPY" => 0,
+        "CZK" => 2,
+        "RUB" => 2,
+        "AED" => 2,
+        "SAR" => 2,
+        "HKD" => 2,
+        "SGD" => 2,
+        "CHF" => 2,
+    ];
+
     /**
      * Plugin text domain.
      */
@@ -149,6 +171,63 @@ class Product_Backfill
         }
 
         return $this->schedule_backfill_now($listing_source_id);
+    }
+
+    /**
+     * Starts an idle backfill or resumes an orphaned batch for this source.
+     *
+     * Unlike schedule_backfill(), this never cancels scheduled work or discards
+     * a saved request snapshot. A saved batch is only resumed for the exact
+     * requested source; an unknown snapshot must be investigated, not reset.
+     * Callers can use this for both initial connection and manual starts.
+     * Requires Action Scheduler to be initialized; false means nothing was
+     * started, so the caller may retry after action_scheduler_init.
+     *
+     * @param string $listing_source_id Listing source TypeID.
+     * @return bool Whether work is already queued or was successfully queued.
+     */
+    public function start_or_resume_backfill($listing_source_id)
+    {
+        $listing_source_id = Webhook_Manager::normalize_listing_source_id($listing_source_id);
+
+        if (!Webhook_Manager::is_valid_listing_source_id($listing_source_id)) {
+            return false;
+        }
+
+        $settings = get_option(Webhook_Manager::OPTION_SETTINGS, []);
+        if (
+            !is_array($settings) ||
+            Webhook_Manager::normalize_listing_source_id(
+                isset($settings["listing_source_id"]) ? (string) $settings["listing_source_id"] : "",
+            ) !== $listing_source_id
+        ) {
+            return false;
+        }
+
+        if (
+            !function_exists("as_schedule_single_action") ||
+            !function_exists("as_has_scheduled_action")
+        ) {
+            $this->record_failed(__(
+                "Action Scheduler is not available, so the product backfill could not be queued.",
+                "aura-historia-partner-connect",
+            ));
+            return false;
+        }
+
+        if (!$this->is_action_scheduler_ready()) {
+            $this->record_failed(__(
+                "Action Scheduler is not ready, so the product backfill could not be queued.",
+                "aura-historia-partner-connect",
+            ));
+            return false;
+        }
+
+        if (is_array(self::$deferred_operation)) {
+            return false;
+        }
+
+        return $this->start_or_resume_backfill_now($listing_source_id);
     }
 
     /**
@@ -652,6 +731,7 @@ class Product_Backfill
 
         $backfill = new self();
 
+
         if ("schedule" === $operation["type"]) {
             $backfill->schedule_backfill(
                 isset($operation["listing_source_id"])
@@ -803,7 +883,8 @@ class Product_Backfill
 
     /**
      * Converts a decimal string exactly, without display rounding or floats.
-     * Supported currencies have two minor digits except JPY, which has none.
+     * Only explicitly mapped currencies can be sent; unknown enum additions
+     * omit optional price rather than assuming a minor-unit exponent.
      * Extra fractional digits are accepted only when they are all zero.
      *
      * @param string $price WooCommerce decimal price string.
@@ -818,7 +899,11 @@ class Product_Backfill
             return null;
         }
 
-        $decimals = "JPY" === $currency ? 0 : 2;
+        if (!array_key_exists($currency, self::CURRENCY_MINOR_UNIT_EXPONENTS)) {
+            return null;
+        }
+
+        $decimals = self::CURRENCY_MINOR_UNIT_EXPONENTS[$currency];
         $parts = explode(".", $price, 2);
         $fraction = isset($parts[1]) ? $parts[1] : "";
 
@@ -946,6 +1031,78 @@ class Product_Backfill
     private function is_action_scheduler_ready()
     {
         return did_action("action_scheduler_init") > 0;
+    }
+
+    /**
+     * Queues only missing work, retaining any uncertain or in-flight snapshot.
+     *
+     * @param string $listing_source_id Listing source TypeID.
+     * @return bool Whether work is queued.
+     */
+    private function start_or_resume_backfill_now($listing_source_id)
+    {
+        if (as_has_scheduled_action(self::ACTION_HOOK, null, self::ACTION_GROUP)) {
+            return true;
+        }
+
+        $snapshot = get_option(self::OPTION_BATCH, false);
+
+        if (false !== $snapshot) {
+            if (
+                !is_array($snapshot) ||
+                !isset($snapshot["listing_source_id"], $snapshot["page"], $snapshot["payloads"], $snapshot["product_count"], $snapshot["idempotency_key"]) ||
+                $snapshot["listing_source_id"] !== $listing_source_id ||
+                !(is_int($snapshot["page"]) || (is_string($snapshot["page"]) && ctype_digit($snapshot["page"]))) ||
+                (int) $snapshot["page"] < 1 ||
+                !is_array($snapshot["payloads"]) ||
+                !(is_int($snapshot["product_count"]) || (is_string($snapshot["product_count"]) && ctype_digit($snapshot["product_count"]))) ||
+                (int) $snapshot["product_count"] < 1 ||
+                !is_string($snapshot["idempotency_key"]) ||
+                "" === $snapshot["idempotency_key"]
+            ) {
+                $this->record_failed(__(
+                    "A saved product backfill batch could not be safely resumed.",
+                    "aura-historia-partner-connect",
+                ));
+                return false;
+            }
+
+            $page = (int) $snapshot["page"];
+            if ($page <= (int) $this->get_state()["last_completed_page"] && empty($snapshot["handoff_pending"])) {
+                $this->record_failed(__(
+                    "A saved product backfill batch could not be safely resumed.",
+                    "aura-historia-partner-connect",
+                ));
+                return false;
+            }
+
+            $attempt = isset($snapshot["retry_attempt"]) ? (int) $snapshot["retry_attempt"] : 0;
+            $args = [$listing_source_id, $page];
+            if ($attempt > 0) {
+                $args[] = $this->retry_token($snapshot["idempotency_key"], $attempt);
+            }
+        } else {
+            $args = [$listing_source_id, 1];
+        }
+
+        $action_id = as_schedule_single_action(time(), self::ACTION_HOOK, $args, self::ACTION_GROUP, true);
+
+        if (!$action_id && !as_has_scheduled_action(self::ACTION_HOOK, null, self::ACTION_GROUP)) {
+            $this->record_failed(__(
+                "The product backfill batch could not be scheduled.",
+                "aura-historia-partner-connect",
+            ));
+            return false;
+        }
+
+        if (false === $snapshot && $action_id) {
+            $this->reset_admission_status();
+        }
+        if ($action_id) {
+            $this->record_scheduled();
+        }
+
+        return true;
     }
 
     /**

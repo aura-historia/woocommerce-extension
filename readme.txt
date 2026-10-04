@@ -26,7 +26,7 @@ After you connect the store through Aura Historia OAuth, the plugin automaticall
 * sends webhook deliveries to Aura Historia using the built-in endpoint pattern
 * pauses plugin-owned webhooks on deactivation
 * removes plugin-owned webhooks and plugin options on uninstall
-* queues the first published-product CREATE backfill after a successful connection; routine webhook sync does not restart it
+* queues the first published-product CREATE backfill once per ListingSource after successful configuration; failed setup/queueing leaves that first run pending for later retry, while ordinary repairs never start a fresh run
 
 The plugin keeps the settings surface intentionally small. Merchants do not manually enter Aura Historia credentials in wp-admin. The OAuth flow sets and stores:
 
@@ -86,7 +86,7 @@ Service provider and policies:
 4. Go to `WooCommerce > Aura Historia`.
 5. Approve the Aura Historia OAuth connection when prompted.
 
-A real registered `oc_` OAuth client ID must be supplied via `AHPC_OAUTH_CLIENT_ID` (constant or environment variable); none is bundled. Configure the same client ID and its matching secret in the webapp redirect broker, register the broker redirect URI, and grant exactly `product-listings:write listing-sources:write`. The broker must return an `ls_` ListingSource ID in its external `partner_shop_id` callback field; UUID Shop IDs are rejected. The API uses `https://api.aura-historia.com` in production and `https://api.stage.aura-historia.com` for stage. After OAuth completes, the plugin configures WooCommerce ingestion and syncs the managed webhooks.
+A real registered canonical UUIDv7 `oc_` OAuth client ID must be supplied via `AHPC_OAUTH_CLIENT_ID` (constant or environment variable); none is bundled. Configure the same client ID and its matching secret in the webapp redirect broker, register the broker redirect URI, and grant exactly `product-listings:write listing-sources:write`. The broker must return an `ls_` ListingSource ID in its external `partner_shop_id` callback field; UUID Shop IDs are rejected. The API uses `https://api.aura-historia.com` in production and `https://api.stage.aura-historia.com` for stage. After OAuth completes, the plugin configures WooCommerce ingestion and syncs the managed webhooks.
 
 == Frequently Asked Questions ==
 
@@ -108,11 +108,11 @@ No. The plugin keeps the Aura Historia delivery URL built in and generates the W
 
 = What happens if I edit or delete one of the managed webhooks? =
 
-The plugin first stages all managed webhooks paused with the desired signing secret, then applies that secret, supported store currency, and language through the WooCommerce ingestion-configuration PUT. Only after it succeeds does sync activate the webhooks. Unsupported store currencies or configuration failures leave them paused for retry.
+The plugin first stages all managed webhooks paused with the desired signing secret, then applies that secret, supported store currency, and language through the WooCommerce ingestion-configuration PUT. Only after it succeeds does sync activate the webhooks. Changing WooCommerce currency or WordPress site language pauses delivery immediately until the new configuration is registered. Unsupported store currencies or configuration failures leave them paused for retry.
 
 = Does this plugin backfill existing products? =
 
-Yes. On the first successful connection to a ListingSource, the plugin submits published products in background batches of up to 100 to the async ProductListings API. A `202` confirms queue admission, not completed creation or immediate search visibility. Retries reuse the same ordered request and idempotency key; a product-ID cursor prevents skips when earlier products are removed. Routine webhook repairs never restart CREATE backfill. Merchants can intentionally start a fresh run from `WooCommerce > Aura Historia`.
+Yes. Once configuration succeeds, the plugin schedules an initial backfill once per canonical lowercase UUIDv7 `ls_` ListingSource ID. If setup or queueing fails, it keeps that first run pending for a later healthy request. It submits published products in background batches of up to 100 to the async ProductListings API. A `202` confirms queue admission, not completed creation or immediate search visibility. Retries reuse the same ordered request and idempotency key; a product-ID cursor prevents skips when earlier products are removed. Routine webhook repairs never start a fresh CREATE run. The manual action safely resumes pending work without changing its snapshot/key, leaves already queued work alone, or starts a new full run only when idle.
 
 = What happens when the plugin is disabled? =
 

@@ -109,9 +109,9 @@ It is **not** a general-purpose WooCommerce webhook manager.
 3. Aura Historia redirects back to the plugin settings page with a selected `ls_` ListingSource ID and a short-lived third-party exchange code. The broker may use the external callback field `partner_shop_id`, but its value must be an `ls_` ID.
 4. The plugin exchanges that code for an Aura Historia access token and stores the ListingSource ID and token locally.
 5. The plugin generates a WooCommerce webhook signing secret and applies that exact secret, store currency, and language via `PUT /api/v1/listing-sources/{listingSourceId}/ingestion-configurations/woocommerce` before enabling delivery.
-6. The plugin stages the three managed WooCommerce webhooks paused with the desired signing secret before updating Aura Historia, then activates them only after provider configuration succeeds. Unsupported store currencies leave the webhooks paused until corrected.
+6. The plugin stages the three managed WooCommerce webhooks paused with the desired signing secret before updating Aura Historia, then activates them only after provider configuration succeeds. Changes to WooCommerce currency or WordPress site language pause delivery immediately and require another provider sync. Unsupported store currencies leave the webhooks paused until corrected.
 7. WooCommerce sends unchanged, signed live webhook bodies to `POST /api/v1/webhooks/woocommerce/{listingSourceId}` with bearer authorization injected late.
-8. On the first successful connection to a ListingSource, the plugin submits published products to `POST /api/v1/listing-sources/{listingSourceId}/product-listings/async` in batches of up to 100. HTTP `202` reports queue admission, not completed creation; no `submissionId` polling occurs. Routine webhook repairs do not restart CREATE backfill; merchants can explicitly queue a fresh full backfill from the settings page.
+8. After provider/webhook configuration succeeds, the plugin schedules an initial full CREATE backfill once per ListingSource. If setup or queueing fails, the initial run remains pending and retries on a later healthy bootstrap. Returning to a previously started source does not replay it automatically. Batches of up to 100 go to `POST /api/v1/listing-sources/{listingSourceId}/product-listings/async`; HTTP `202` means admission, not completed creation. Routine webhook repairs never start a new CREATE run unless that source's first run is still pending. The manual action resumes a pending batch with its original payload and idempotency key, leaves queued work alone, and starts a fresh run only when idle.
 
 ## External service behavior
 
@@ -126,7 +126,7 @@ Depending on the action, the plugin may send:
 - generated WooCommerce webhook signing secret for provider configuration (never as an Authorization header)
 - store language and currency
 - unchanged WooCommerce signed product webhook payloads, including any descriptions supplied by WooCommerce
-- published product listings during backfill: WooCommerce product ID as `sourceListingId`, canonical URL, image URL array, optional localized title, optional monetary price in exact integer currency minor units (JPY: 0 digits; other supported currencies: 2; non-representable prices omitted), and optional availability. Backfill does **not** send description/body (tracked in [#93](https://github.com/aura-historia/woocommerce-extension/issues/93)).
+- published product listings during backfill: WooCommerce product ID as `sourceListingId`, canonical URL, image URL array, optional localized title, optional monetary price in exact integer currency minor units (JPY: 0 digits; explicitly mapped two-decimal currencies: 2; unknown or non-representable prices omitted), and optional availability. Backfill does **not** send description/body (tracked in [#93](https://github.com/aura-historia/woocommerce-extension/issues/93)).
 
 ### When it gets sent
 
@@ -202,7 +202,7 @@ Tests can also override the URL via the `ahpc_backend_base_url` filter.
 
 The plugin does **not** ship a production or stage OAuth client ID. Before connecting, register a WooCommerce OAuth client in each environment and configure its **actual** `oc_` TypeID as `AHPC_OAUTH_CLIENT_ID` in the plugin deployment. Configure the same client ID and its matching client secret in that environment's webapp OAuth redirect broker. Register the broker redirect URI and authorize exactly `product-listings:write listing-sources:write`. Ensure the broker selects a ListingSource and sends an `ls_` ID in its `partner_shop_id` callback field; an old Shop UUID is rejected. The broker redirect URI defaults to `https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce` for production; configure the stage URI separately.
 
-An absent or malformed client ID disables connection rather than sending a fabricated value.
+An absent or malformed client ID disables connection rather than sending a fabricated value. Both `oc_` OAuth client IDs and `ls_` ListingSource IDs must be canonical lowercase UUIDv7 TypeIDs (including the RFC UUID variant); neither old UUID Shop IDs nor noncanonical uppercase IDs are accepted.
 
 Using `wp-config.php`:
 
@@ -300,7 +300,8 @@ npm run plugin:check
 | --- | --- |
 | `aura-historia-partner-connect.php` | Plugin header, bootstrap, constants, hardcoded backend base URL |
 | `includes/class-plugin.php` | WordPress/WooCommerce bootstrap, admin UI, settings handling, manual actions |
-| `includes/class-webhook-manager.php` | Webhook ownership, idempotent sync, backend registration, cleanup, drift recovery |
+- `includes/class-webhook-manager.php` | Webhook ownership, idempotent sync, backend registration, cleanup, drift recovery |
+| `includes/class-type-id-validator.php` | Strict canonical UUIDv7 `ls_` and `oc_` TypeID validation |
 | `includes/class-product-backfill.php` | Background catalog CREATE admission via Action Scheduler |
 | `includes/class-backend-api-client.php` | Typed Aura Historia API integration |
 | `uninstall.php` | Uninstall cleanup |

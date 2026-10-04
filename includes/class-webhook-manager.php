@@ -15,6 +15,8 @@ if (!defined("ABSPATH")) {
     exit();
 }
 
+require_once __DIR__ . "/class-type-id-validator.php";
+
 /**
  * Manages the WooCommerce webhooks owned by this plugin.
  */
@@ -71,22 +73,18 @@ class Webhook_Manager
      */
     public static function normalize_listing_source_id($listing_source_id)
     {
-        return strtolower(trim(sanitize_text_field((string) $listing_source_id)));
+        return is_string($listing_source_id) ? $listing_source_id : "";
     }
 
     /**
-     * Checks the exact ls_ TypeID format (26 lowercase base32 characters).
+     * Checks the canonical ls_ TypeID format and UUIDv7 payload.
      *
      * @param string $listing_source_id Listing source TypeID.
      * @return bool
      */
     public static function is_valid_listing_source_id($listing_source_id)
     {
-        return is_string($listing_source_id) &&
-            1 === preg_match(
-                "/\Als_[0-9a-hjkmnp-tv-z]{26}\z/",
-                $listing_source_id,
-            );
+        return Type_ID_Validator::is_valid($listing_source_id, "ls_");
     }
 
     /**
@@ -784,7 +782,9 @@ class Webhook_Manager
         delete_option(self::OPTION_LAST_SYNC_ERROR);
         delete_option(self::OPTION_LAST_SYNC_AT);
         delete_option(self::OPTION_LAST_OAUTH_ERROR);
-        delete_option("ahpc_initial_backfill_listing_source_id");
+        delete_option("ahpc_initial_backfill_pending_source");
+        delete_option("ahpc_initial_backfill_started_sources");
+        delete_option("ahpc_initial_backfill_error");
 
         if (class_exists(Product_Backfill::class)) {
             (new Product_Backfill())->cancel_backfill();
