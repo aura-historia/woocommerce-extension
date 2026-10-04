@@ -1,6 +1,6 @@
 <?php
 /**
- * GeoAddressData
+ * PutWoocommerceListingSourceIngestionConfigurationData
  *
  * PHP version 8.1
  *
@@ -13,7 +13,7 @@
 /**
  * Aura Historia API Reference
  *
- * ## Overview  The Aura Historia API powers the Aura Historia antiques platform and its partner-facing integrations. It exposes product discovery, shop discovery, personalization, partner onboarding, and integration workflows on top of Aura Historia's serverless AWS platform.  This reference is designed for two audiences: - **Internal developers** building Aura Historia products, operational tooling, and backoffice workflows - **External partners and integrators** synchronizing inventory, consuming platform data, or   integrating with delegated access  ## Core API domains  - **Products and shops** — search, retrieve, and explore products, related products, product   history, and shop data - **Personalization** — manage watchlists, saved search filters, and user notifications - **Partner workflows** — submit partner applications, maintain partner shops, ingest catalog data   in batches, and receive WooCommerce webhooks - **Identity and access** — manage user accounts, Aura Historia access tokens, and OAuth 2.0   clients and token flows - **Billing** — create Stripe checkout, billing-portal, and subscription-management sessions  ## Authentication model  The API uses more than one authentication scheme depending on the route:  - **`BearerAuth`** — Cognito JWT bearer tokens for authenticated user, admin, and partner-user   workflows - **`AccessTokenAuth`** — Aura Historia opaque bearer access tokens created via   `/api/v1/me/access-tokens` or OAuth 2.0, primarily intended for partner automations and server-to-server   ingestion scenarios.  When a route lists multiple security schemes, any one of the listed schemes may be accepted. Some read endpoints can also be called without authentication, while a valid user token may enrich the response with personalized state such as watchlist, notification, or search-filter metadata.  ## Data and response conventions  - Localized resources frequently require **`language`** and **`currency`** parameters so the backend   can return localized text and normalized pricing - Errors are returned as **`application/problem+json`** using a consistent RFC 9457-style structure   with `status`, `title`, `error`, optional `source`, and optional `detail` - Many list and search endpoints use **cursor-based pagination** via `searchAfter` - Several partner ingestion endpoints are **asynchronous** and respond with **`202 Accepted`** after   work has been queued rather than fully processed  ## Environment endpoints  - **Development:** `https://api.dev.aura-historia.com` - **Production:** `https://api.aura-historia.com`  ## Notes for integrators  - Treat Aura Historia identifiers such as `shopId`, `productId`, `eventId`, `userSearchFilterId`,   and `partnerApplicationId` as opaque values - For partner product ingestion, `shopsProductId` is the partner-controlled identifier and should   remain stable within a shop - Endpoints marked `deprecated` or `x-disabled` are retained for reference only and should not be   used for new integrations
+ * ## Overview  The Aura Historia API powers the Aura Historia antiques platform and its partner-facing integrations. It exposes product discovery, listing source discovery, personalization, partner onboarding, and integration workflows on top of Aura Historia's serverless AWS platform.  This reference is designed for two audiences: - **Internal developers** building Aura Historia product-listings, operational tooling, and backoffice workflows - **External partners and integrators** synchronizing inventory, consuming platform data, or   integrating with delegated access  ## Core API domains  - **ProductListings and listing-sources** — search, retrieve, and explore product-listings, related product-listings, product   history, and listing source data - **Personalization** — manage watchlists, saved search filters, and user notifications - **Partner workflows** — submit partnership applications, maintain partnerships, ingest catalog data   in batches, and receive WooCommerce webhooks - **Identity and access** — manage user accounts, Aura Historia access tokens, and OAuth 2.0   clients and token flows - **Billing** — create Stripe checkout, billing-portal, and subscription-management sessions  ## Authentication model  The API uses more than one authentication scheme depending on the route:  - **`BearerAuth`** — Cognito **access** JWT bearer tokens for authenticated user, admin, and   partner-user workflows. Cognito ID tokens are not accepted as API credentials. - **`AccessTokenAuth`** — Aura Historia opaque bearer access tokens created via   `/api/v1/me/access-tokens` or OAuth 2.0, primarily intended for partner automations and server-to-server   ingestion scenarios.  When a route lists multiple security schemes, any one of the listed schemes may be accepted. Some read endpoints can also be called without authentication, while a valid user token may enrich the response with personalized state such as watchlist, notification, or search-filter metadata.  ## Data and response conventions  - **PATCH:** an omitted request member remains unchanged. A documented nullable PATCH member   accepts `null` to clear its value; `null` for any other member returns `400 BAD_BODY_VALUE`.   Use `[]`, not `null`, to replace a non-null collection with an empty collection. Empty HTTP   bodies are invalid, `{}` is a valid object-PATCH no-op, and the partner-product PATCH `[]`   remains a valid empty batch. Responses may omit absent optional values. - Product detail, watchlist, and saved-search match reads accept optional **`language`** and   **`currency`** parameters. Currency defaults to `EUR`. Detail pricing contains the seller's source   amounts, converted display amounts, and FX valuation metadata. Active product-listings use the latest persisted   snapshot; sold product-listings use their immutable sale snapshot. Product history remains immutable, source-only,   and is not localized. - Request-wide errors are returned as **`application/problem+json`** using a consistent RFC 9457-style structure   with `status`, `title`, `error`, optional `source`, and optional `detail` - Many list and search endpoints use **cursor-based pagination** via `searchAfter` - Origin API responses include server-generated `X-Request-Id` and `X-Correlation-Id` headers. Clients may send `X-Correlation-Id` to preserve a trace only when it is a 1–128-character ASCII value containing letters, digits, `.`, `_`, or `-`; invalid values are replaced. Both headers are CORS-exposed; CloudFront removes them from viewer responses on the six cache-enabled discovery behaviors so shared cache hits cannot replay origin IDs. - Requests are limited to 1 MiB and time out after 30 seconds. - `GET /api/v1/health` is a process liveness check. `GET /api/v1/ready` returns `204` only when the configured PostgreSQL and OpenSearch dependencies are reachable; it otherwise returns `503`. - WooCommerce webhook ingestion responds with **`204 No Content`** after signed validation. A mapped raw-capture command receives `204` only after confirmed shared FIFO admission; authorized ignored create/update status events are no-op `204`. Queue admission is not raw capture, provider receipt persistence, canonical normalization, or search visibility. Capture conflicts are handled by the consumer, not returned synchronously; existing partner Product batch writes remain synchronous.  ## Environment endpoints  - **Development:** `https://api.stage.aura-historia.com` - **Production:** `https://api.aura-historia.com`  ## Notes for integrators  - Treat Aura Historia identifiers such as `listingSourceId`, `productListingId`, `eventId`, `userSearchFilterId`,   and `partnershipApplicationId` as opaque values - For partner product ingestion, `sourceListingId` is the partner-controlled identifier and should   remain stable within a listing source - Endpoints marked `deprecated` or `x-disabled` are retained for reference only and should not be   used for new integrations
  *
  * The version of the OpenAPI document: 1.0.0
  * Generated by: https://openapi-generator.tech
@@ -34,16 +34,15 @@ use \ArrayAccess;
 use \AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
 
 /**
- * GeoAddressData Class Doc Comment
+ * PutWoocommerceListingSourceIngestionConfigurationData Class Doc Comment
  *
  * @category Class
- * @description Latitude/longitude coordinates derived by the backend from &#x60;structuredAddress&#x60;.
  * @package  AuraHistoria\PartnerConnect\InternalApi
  * @author   OpenAPI Generator team
  * @link     https://openapi-generator.tech
  * @implements \ArrayAccess<string, mixed>
  */
-class GeoAddressData implements ModelInterface, ArrayAccess, \JsonSerializable
+class PutWoocommerceListingSourceIngestionConfigurationData implements ModelInterface, ArrayAccess, \JsonSerializable
 {
     public const DISCRIMINATOR = null;
 
@@ -52,7 +51,7 @@ class GeoAddressData implements ModelInterface, ArrayAccess, \JsonSerializable
      *
      * @var string
      */
-    protected static $openAPIModelName = 'GeoAddressData';
+    protected static $openAPIModelName = 'PutWoocommerceListingSourceIngestionConfigurationData';
 
     /**
      * Array of property to type mappings. Used for (de)serialization
@@ -60,8 +59,9 @@ class GeoAddressData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $openAPITypes = [
-        'lat' => 'float',
-        'lon' => 'float'
+        'webhook_secret' => 'string',
+        'currency' => '\AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData',
+        'language' => '\AuraHistoria\PartnerConnect\InternalApi\Model\LanguageData'
     ];
 
     /**
@@ -72,8 +72,9 @@ class GeoAddressData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @psalm-var array<string, string|null>
      */
     protected static $openAPIFormats = [
-        'lat' => 'double',
-        'lon' => 'double'
+        'webhook_secret' => null,
+        'currency' => null,
+        'language' => null
     ];
 
     /**
@@ -82,8 +83,9 @@ class GeoAddressData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var boolean[]
      */
     protected static array $openAPINullables = [
-        'lat' => false,
-        'lon' => false
+        'webhook_secret' => false,
+        'currency' => true,
+        'language' => true
     ];
 
     /**
@@ -172,8 +174,9 @@ class GeoAddressData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $attributeMap = [
-        'lat' => 'lat',
-        'lon' => 'lon'
+        'webhook_secret' => 'webhookSecret',
+        'currency' => 'currency',
+        'language' => 'language'
     ];
 
     /**
@@ -182,8 +185,9 @@ class GeoAddressData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $setters = [
-        'lat' => 'setLat',
-        'lon' => 'setLon'
+        'webhook_secret' => 'setWebhookSecret',
+        'currency' => 'setCurrency',
+        'language' => 'setLanguage'
     ];
 
     /**
@@ -192,8 +196,9 @@ class GeoAddressData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $getters = [
-        'lat' => 'getLat',
-        'lon' => 'getLon'
+        'webhook_secret' => 'getWebhookSecret',
+        'currency' => 'getCurrency',
+        'language' => 'getLanguage'
     ];
 
     /**
@@ -253,8 +258,9 @@ class GeoAddressData implements ModelInterface, ArrayAccess, \JsonSerializable
      */
     public function __construct(?array $data = null)
     {
-        $this->setIfExists('lat', $data ?? [], null);
-        $this->setIfExists('lon', $data ?? [], null);
+        $this->setIfExists('webhook_secret', $data ?? [], null);
+        $this->setIfExists('currency', $data ?? [], null);
+        $this->setIfExists('language', $data ?? [], null);
     }
 
     /**
@@ -284,11 +290,8 @@ class GeoAddressData implements ModelInterface, ArrayAccess, \JsonSerializable
     {
         $invalidProperties = [];
 
-        if ($this->container['lat'] === null) {
-            $invalidProperties[] = "'lat' can't be null";
-        }
-        if ($this->container['lon'] === null) {
-            $invalidProperties[] = "'lon' can't be null";
+        if ($this->container['webhook_secret'] === null) {
+            $invalidProperties[] = "'webhook_secret' can't be null";
         }
         return $invalidProperties;
     }
@@ -306,55 +309,96 @@ class GeoAddressData implements ModelInterface, ArrayAccess, \JsonSerializable
 
 
     /**
-     * Gets lat
+     * Gets webhook_secret
      *
-     * @return float
+     * @return string
      */
-    public function getLat()
+    public function getWebhookSecret()
     {
-        return $this->container['lat'];
+        return $this->container['webhook_secret'];
     }
 
     /**
-     * Sets lat
+     * Sets webhook_secret
      *
-     * @param float $lat Latitude in decimal degrees.
+     * @param string $webhook_secret Required nonblank provider secret. Preserved exactly for HMAC verification and never returned.
      *
      * @return self
      */
-    public function setLat($lat)
+    public function setWebhookSecret($webhook_secret)
     {
-        if (is_null($lat)) {
-            throw new \InvalidArgumentException('non-nullable lat cannot be null');
+        if (is_null($webhook_secret)) {
+            throw new \InvalidArgumentException('non-nullable webhook_secret cannot be null');
         }
-        $this->container['lat'] = $lat;
+        $this->container['webhook_secret'] = $webhook_secret;
 
         return $this;
     }
 
     /**
-     * Gets lon
+     * Gets currency
      *
-     * @return float
+     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData|null
      */
-    public function getLon()
+    public function getCurrency()
     {
-        return $this->container['lon'];
+        return $this->container['currency'];
     }
 
     /**
-     * Sets lon
+     * Sets currency
      *
-     * @param float $lon Longitude in decimal degrees.
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData|null $currency currency
      *
      * @return self
      */
-    public function setLon($lon)
+    public function setCurrency($currency)
     {
-        if (is_null($lon)) {
-            throw new \InvalidArgumentException('non-nullable lon cannot be null');
+        if (is_null($currency)) {
+            array_push($this->openAPINullablesSetToNull, 'currency');
+        } else {
+            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
+            $index = array_search('currency', $nullablesSetToNull);
+            if ($index !== FALSE) {
+                unset($nullablesSetToNull[$index]);
+                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
+            }
         }
-        $this->container['lon'] = $lon;
+        $this->container['currency'] = $currency;
+
+        return $this;
+    }
+
+    /**
+     * Gets language
+     *
+     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\LanguageData|null
+     */
+    public function getLanguage()
+    {
+        return $this->container['language'];
+    }
+
+    /**
+     * Sets language
+     *
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\LanguageData|null $language language
+     *
+     * @return self
+     */
+    public function setLanguage($language)
+    {
+        if (is_null($language)) {
+            array_push($this->openAPINullablesSetToNull, 'language');
+        } else {
+            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
+            $index = array_search('language', $nullablesSetToNull);
+            if ($index !== FALSE) {
+                unset($nullablesSetToNull[$index]);
+                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
+            }
+        }
+        $this->container['language'] = $language;
 
         return $this;
     }

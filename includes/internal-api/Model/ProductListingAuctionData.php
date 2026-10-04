@@ -1,6 +1,6 @@
 <?php
 /**
- * PriceData
+ * ProductListingAuctionData
  *
  * PHP version 8.1
  *
@@ -34,16 +34,16 @@ use \ArrayAccess;
 use \AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
 
 /**
- * PriceData Class Doc Comment
+ * ProductListingAuctionData Class Doc Comment
  *
  * @category Class
- * @description Price information with currency
+ * @description Partner ProductListing nested write patch. &#x60;auctionId&#x60; must identify an existing Auction for the same ListingSource. Omit it to preserve membership, send null to clear membership, or send a value to set it. Omit a lot/timing leaf to preserve it, send null to clear a clearable leaf, or send a value to set it.
  * @package  AuraHistoria\PartnerConnect\InternalApi
  * @author   OpenAPI Generator team
  * @link     https://openapi-generator.tech
  * @implements \ArrayAccess<string, mixed>
  */
-class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
+class ProductListingAuctionData implements ModelInterface, ArrayAccess, \JsonSerializable
 {
     public const DISCRIMINATOR = null;
 
@@ -52,7 +52,7 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      *
      * @var string
      */
-    protected static $openAPIModelName = 'PriceData';
+    protected static $openAPIModelName = 'ProductListingAuctionData';
 
     /**
      * Array of property to type mappings. Used for (de)serialization
@@ -60,8 +60,10 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $openAPITypes = [
-        'currency' => '\AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData',
-        'amount' => 'int'
+        'auction_id' => 'string',
+        'lot_number' => 'string',
+        'catalogue_position' => 'int',
+        'timing' => '\AuraHistoria\PartnerConnect\InternalApi\Model\ProductListingAuctionTimesData'
     ];
 
     /**
@@ -72,8 +74,10 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @psalm-var array<string, string|null>
      */
     protected static $openAPIFormats = [
-        'currency' => null,
-        'amount' => null
+        'auction_id' => null,
+        'lot_number' => null,
+        'catalogue_position' => 'int64',
+        'timing' => null
     ];
 
     /**
@@ -82,8 +86,10 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var boolean[]
      */
     protected static array $openAPINullables = [
-        'currency' => false,
-        'amount' => false
+        'auction_id' => true,
+        'lot_number' => true,
+        'catalogue_position' => true,
+        'timing' => true
     ];
 
     /**
@@ -172,8 +178,10 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $attributeMap = [
-        'currency' => 'currency',
-        'amount' => 'amount'
+        'auction_id' => 'auctionId',
+        'lot_number' => 'lotNumber',
+        'catalogue_position' => 'cataloguePosition',
+        'timing' => 'timing'
     ];
 
     /**
@@ -182,8 +190,10 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $setters = [
-        'currency' => 'setCurrency',
-        'amount' => 'setAmount'
+        'auction_id' => 'setAuctionId',
+        'lot_number' => 'setLotNumber',
+        'catalogue_position' => 'setCataloguePosition',
+        'timing' => 'setTiming'
     ];
 
     /**
@@ -192,8 +202,10 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $getters = [
-        'currency' => 'getCurrency',
-        'amount' => 'getAmount'
+        'auction_id' => 'getAuctionId',
+        'lot_number' => 'getLotNumber',
+        'catalogue_position' => 'getCataloguePosition',
+        'timing' => 'getTiming'
     ];
 
     /**
@@ -253,8 +265,10 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      */
     public function __construct(?array $data = null)
     {
-        $this->setIfExists('currency', $data ?? [], null);
-        $this->setIfExists('amount', $data ?? [], null);
+        $this->setIfExists('auction_id', $data ?? [], null);
+        $this->setIfExists('lot_number', $data ?? [], null);
+        $this->setIfExists('catalogue_position', $data ?? [], null);
+        $this->setIfExists('timing', $data ?? [], null);
     }
 
     /**
@@ -284,14 +298,16 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
     {
         $invalidProperties = [];
 
-        if ($this->container['currency'] === null) {
-            $invalidProperties[] = "'currency' can't be null";
+        if (!is_null($this->container['lot_number']) && (mb_strlen($this->container['lot_number']) > 128)) {
+            $invalidProperties[] = "invalid value for 'lot_number', the character length must be smaller than or equal to 128.";
         }
-        if ($this->container['amount'] === null) {
-            $invalidProperties[] = "'amount' can't be null";
+
+        if (!is_null($this->container['catalogue_position']) && ($this->container['catalogue_position'] > 4294967295)) {
+            $invalidProperties[] = "invalid value for 'catalogue_position', must be smaller than or equal to 4294967295.";
         }
-        if (($this->container['amount'] < 0)) {
-            $invalidProperties[] = "invalid value for 'amount', must be bigger than or equal to 0.";
+
+        if (!is_null($this->container['catalogue_position']) && ($this->container['catalogue_position'] < 1)) {
+            $invalidProperties[] = "invalid value for 'catalogue_position', must be bigger than or equal to 1.";
         }
 
         return $invalidProperties;
@@ -310,60 +326,149 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
 
 
     /**
-     * Gets currency
+     * Gets auction_id
      *
-     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData
+     * @return string|null
      */
-    public function getCurrency()
+    public function getAuctionId()
     {
-        return $this->container['currency'];
+        return $this->container['auction_id'];
     }
 
     /**
-     * Sets currency
+     * Sets auction_id
      *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData $currency currency
+     * @param string|null $auction_id Existing same-ListingSource Aura Auction TypeID. Omit to preserve membership; send null to clear it.
      *
      * @return self
      */
-    public function setCurrency($currency)
+    public function setAuctionId($auction_id)
     {
-        if (is_null($currency)) {
-            throw new \InvalidArgumentException('non-nullable currency cannot be null');
+        if (is_null($auction_id)) {
+            array_push($this->openAPINullablesSetToNull, 'auction_id');
+        } else {
+            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
+            $index = array_search('auction_id', $nullablesSetToNull);
+            if ($index !== FALSE) {
+                unset($nullablesSetToNull[$index]);
+                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
+            }
         }
-        $this->container['currency'] = $currency;
+        $this->container['auction_id'] = $auction_id;
 
         return $this;
     }
 
     /**
-     * Gets amount
+     * Gets lot_number
      *
-     * @return int
+     * @return string|null
      */
-    public function getAmount()
+    public function getLotNumber()
     {
-        return $this->container['amount'];
+        return $this->container['lot_number'];
     }
 
     /**
-     * Sets amount
+     * Sets lot_number
      *
-     * @param int $amount Price amount in minor currency units (e.g., cents for most supported currencies, whole yen for JPY)
+     * @param string|null $lot_number Omit to preserve the lot label; send null to clear it; send a value to set it.
      *
      * @return self
      */
-    public function setAmount($amount)
+    public function setLotNumber($lot_number)
     {
-        if (is_null($amount)) {
-            throw new \InvalidArgumentException('non-nullable amount cannot be null');
+        if (is_null($lot_number)) {
+            array_push($this->openAPINullablesSetToNull, 'lot_number');
+        } else {
+            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
+            $index = array_search('lot_number', $nullablesSetToNull);
+            if ($index !== FALSE) {
+                unset($nullablesSetToNull[$index]);
+                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
+            }
+        }
+        if (!is_null($lot_number) && (mb_strlen($lot_number) > 128)) {
+            throw new \InvalidArgumentException('invalid length for $lot_number when calling ProductListingAuctionData., must be smaller than or equal to 128.');
         }
 
-        if (($amount < 0)) {
-            throw new \InvalidArgumentException('invalid value for $amount when calling PriceData., must be bigger than or equal to 0.');
+        $this->container['lot_number'] = $lot_number;
+
+        return $this;
+    }
+
+    /**
+     * Gets catalogue_position
+     *
+     * @return int|null
+     */
+    public function getCataloguePosition()
+    {
+        return $this->container['catalogue_position'];
+    }
+
+    /**
+     * Sets catalogue_position
+     *
+     * @param int|null $catalogue_position Omit to preserve the catalogue position; send null to clear it; send a value to set it.
+     *
+     * @return self
+     */
+    public function setCataloguePosition($catalogue_position)
+    {
+        if (is_null($catalogue_position)) {
+            array_push($this->openAPINullablesSetToNull, 'catalogue_position');
+        } else {
+            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
+            $index = array_search('catalogue_position', $nullablesSetToNull);
+            if ($index !== FALSE) {
+                unset($nullablesSetToNull[$index]);
+                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
+            }
         }
 
-        $this->container['amount'] = $amount;
+        if (!is_null($catalogue_position) && ($catalogue_position > 4294967295)) {
+            throw new \InvalidArgumentException('invalid value for $catalogue_position when calling ProductListingAuctionData., must be smaller than or equal to 4294967295.');
+        }
+        if (!is_null($catalogue_position) && ($catalogue_position < 1)) {
+            throw new \InvalidArgumentException('invalid value for $catalogue_position when calling ProductListingAuctionData., must be bigger than or equal to 1.');
+        }
+
+        $this->container['catalogue_position'] = $catalogue_position;
+
+        return $this;
+    }
+
+    /**
+     * Gets timing
+     *
+     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\ProductListingAuctionTimesData|null
+     */
+    public function getTiming()
+    {
+        return $this->container['timing'];
+    }
+
+    /**
+     * Sets timing
+     *
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\ProductListingAuctionTimesData|null $timing timing
+     *
+     * @return self
+     */
+    public function setTiming($timing)
+    {
+        if (is_null($timing)) {
+            array_push($this->openAPINullablesSetToNull, 'timing');
+        } else {
+            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
+            $index = array_search('timing', $nullablesSetToNull);
+            if ($index !== FALSE) {
+                unset($nullablesSetToNull[$index]);
+                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
+            }
+        }
+        $this->container['timing'] = $timing;
 
         return $this;
     }

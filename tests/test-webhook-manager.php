@@ -82,7 +82,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
      *
      * @var string
      */
-    protected $oauth_client_id = "019eb0ab-c08d-7212-8169-312d465e4210";
+    protected $oauth_client_id = "oc_01jw7j4azge00800000000000g";
 
     /**
      * Ensures WooCommerce is installed for the test suite.
@@ -292,22 +292,11 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
      * @return Response
      */
     protected function mock_backend_registration_response(
-        $status_code = 200,
+        $status_code = 204,
         $body = null,
     ) {
         if (null === $body) {
-            $body = [
-                "shopId" => "123e4567-e89b-12d3-a456-426614174000",
-                "shopSlugId" => "test-shop",
-                "name" => "Test Shop",
-                "shopType" => "COMMERCIAL_DEALER",
-                "domains" => ["example.com"],
-                "partnerStatus" => "PARTNERED",
-                "createdBy" => "SYSTEM",
-                "updatedBy" => "SYSTEM",
-                "created" => "2024-01-01T10:00:00Z",
-                "updated" => "2024-01-01T12:00:00Z",
-            ];
+            $body = "";
         }
 
         return new Response(
@@ -327,7 +316,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
      */
     protected function mock_oauth_token_response(
         $access_token,
-        $scope = "products:write shops:manage",
+        $scope = "product-listings:write listing-sources:write",
         $token_type = "BEARER",
     ) {
         return new Response(
@@ -492,7 +481,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => "",
+                "listing_source_id" => "",
                 "access_token" => "",
                 "secret" => "test-secret",
             ],
@@ -505,7 +494,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $this->assertStringContainsString("ahpc-oauth-start-form", $output);
         $this->assertStringContainsString("ahpc_start_oauth", $output);
         $this->assertStringContainsString("form.submit", $output);
-        $this->assertStringNotContainsString("id=\"ahpc-shop-id\"", $output);
+        $this->assertStringNotContainsString("id=\"ahpc-listing-source-id\"", $output);
         $this->assertStringNotContainsString("id=\"ahpc-access-token\"", $output);
     }
 
@@ -536,7 +525,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         );
         $this->assertSame("code", $query["response_type"]);
         $this->assertSame("S256", $query["code_challenge_method"]);
-        $this->assertSame("products:write shops:manage", $query["scope"]);
+        $this->assertSame("product-listings:write listing-sources:write", $query["scope"]);
         $this->assertSame("true", $query["requires_partner_shop_id"]);
         $this->assertNotEmpty($query["code_challenge"]);
         $this->assertNotEmpty($query["state"]);
@@ -582,15 +571,15 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
      */
     public function test_complete_oauth_connection_stores_token_and_syncs_webhooks()
     {
-        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+        $listing_source_id = "ls_01jw7j4azge00800000000000g";
         $exchange_code = "01970f22-2bf0-7000-8000-000000000099";
         $access_token =
-            "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+            "aurahistoria_abcdefghijk_verylongtokenvalue";
 
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => "",
+                "listing_source_id" => "",
                 "access_token" => "",
                 "secret" => "test-secret",
             ],
@@ -608,22 +597,11 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
 
         $this->set_backend_mock_responses([
             $this->mock_oauth_token_response($access_token),
-            $this->mock_backend_registration_response(200, [
-                "shopId" => $shop_id,
-                "shopSlugId" => "test-shop",
-                "name" => "Test Shop",
-                "shopType" => "COMMERCIAL_DEALER",
-                "domains" => ["example.com"],
-                "partnerStatus" => "PARTNERED",
-                "createdBy" => "SYSTEM",
-                "updatedBy" => "SYSTEM",
-                "created" => "2024-01-01T10:00:00Z",
-                "updated" => "2024-01-01T12:00:00Z",
-            ]),
+            $this->mock_backend_registration_response(201),
         ]);
 
         $result = $plugin->complete_oauth_connection(
-            $shop_id,
+            $listing_source_id,
             $exchange_code,
             $broker_state["client_state"],
         );
@@ -631,9 +609,15 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $this->assertTrue($result);
 
         $settings = get_option(Webhook_Manager::OPTION_SETTINGS, []);
-        $this->assertSame($shop_id, $settings["shop_id"]);
+        $this->assertSame($listing_source_id, $settings["listing_source_id"]);
         $this->assertSame($access_token, $settings["access_token"]);
         $this->assertSame("test-secret", $settings["secret"]);
+        $this->assertSame(
+            [$listing_source_id => true],
+            get_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []),
+        );
+        $this->assertFalse(get_option(Plugin::OPTION_INITIAL_BACKFILL_PENDING_SOURCE, false));
+        $this->assertTrue((new Product_Backfill())->is_backfill_scheduled());
 
         $oauth_requests = $this->get_backend_requests_for_url(
             "https://example.com/api/v1/oauth/tokens/by-third-party-code/" .
@@ -650,7 +634,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         );
 
         $registration_requests = $this->get_backend_requests_for_url(
-            "https://example.com/api/v1/shops/" . $shop_id,
+            "https://example.com/api/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
         );
         $this->assertCount(1, $registration_requests);
         $this->assertSame(
@@ -667,6 +651,24 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             $webhook = new WC_Webhook($webhook_id);
             $this->assertSame("active", $webhook->get_status());
         }
+
+        // Reauthorizing while the first batch is pending must preserve its snapshot.
+        $snapshot = ["idempotency_key" => "original-key", "payloads" => [["sourceListingId" => "42"]]];
+        update_option(Product_Backfill::OPTION_BATCH, $snapshot, false);
+        $next_url = $plugin->create_oauth_authorization_url();
+        $next_parts = wp_parse_url($next_url);
+        parse_str($next_parts["query"], $next_query);
+        $next_state = json_decode($this->base64url_decode($next_query["state"]), true);
+        $this->set_backend_mock_responses([
+            $this->mock_oauth_token_response($access_token),
+            $this->mock_backend_registration_response(201),
+        ]);
+        $this->assertTrue($plugin->complete_oauth_connection(
+            $listing_source_id,
+            $exchange_code,
+            $next_state["client_state"],
+        ));
+        $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
     }
 
     /**
@@ -678,7 +680,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
     {
         $plugin = new Plugin();
         $result = $plugin->complete_oauth_connection(
-            "123e4567-e89b-12d3-a456-426614174000",
+            "ls_01jw7j4azge00800000000000g",
             "01970f22-2bf0-7000-8000-000000000099",
             "invalid-state",
         );
@@ -695,10 +697,10 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
      */
     public function test_complete_oauth_connection_rejects_invalid_token_type()
     {
-        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+        $listing_source_id = "ls_01jw7j4azge00800000000000g";
         $exchange_code = "01970f22-2bf0-7000-8000-000000000099";
         $access_token =
-            "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+            "aurahistoria_abcdefghijk_verylongtokenvalue";
 
         $plugin = new Plugin();
         $authorization_url = $plugin->create_oauth_authorization_url();
@@ -712,13 +714,13 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $this->set_backend_mock_responses([
             $this->mock_oauth_token_response(
                 $access_token,
-                "products:write shops:manage",
+                "product-listings:write listing-sources:write",
                 "MAC",
             ),
         ]);
 
         $result = $plugin->complete_oauth_connection(
-            $shop_id,
+            $listing_source_id,
             $exchange_code,
             $broker_state["client_state"],
         );
@@ -742,10 +744,10 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
      */
     public function test_complete_oauth_connection_rejects_missing_scope()
     {
-        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+        $listing_source_id = "ls_01jw7j4azge00800000000000g";
         $exchange_code = "01970f22-2bf0-7000-8000-000000000099";
         $access_token =
-            "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+            "aurahistoria_abcdefghijk_verylongtokenvalue";
 
         $plugin = new Plugin();
         $authorization_url = $plugin->create_oauth_authorization_url();
@@ -757,11 +759,11 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         );
 
         $this->set_backend_mock_responses([
-            $this->mock_oauth_token_response($access_token, "products:write"),
+            $this->mock_oauth_token_response($access_token, "product-listings:write"),
         ]);
 
         $result = $plugin->complete_oauth_connection(
-            $shop_id,
+            $listing_source_id,
             $exchange_code,
             $broker_state["client_state"],
         );
@@ -782,13 +784,13 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
      */
     public function test_sync_webhooks_creates_three_active_webhooks()
     {
-        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
-        $access_token = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+        $listing_source_id = "ls_01jw7j4azge00800000000000g";
+        $access_token = "aurahistoria_abcdefghijk_verylongtokenvalue";
 
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => $shop_id,
+                "listing_source_id" => $listing_source_id,
                 "access_token" => $access_token,
                 "secret" => "test-secret",
             ],
@@ -814,7 +816,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             $this->assertSame($topic, $webhook->get_topic());
             $this->assertSame("active", $webhook->get_status());
             $this->assertSame(
-                "https://example.com/api/v1/webhooks/woocommerce/" . $shop_id,
+                "https://example.com/api/v1/webhooks/woocommerce/" . $listing_source_id,
                 $webhook->get_delivery_url(),
             );
             $this->assertSame("test-secret", $webhook->get_secret());
@@ -823,12 +825,12 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         }
 
         $registration_requests = $this->get_backend_requests_for_url(
-            "https://example.com/api/v1/shops/" . $shop_id,
+            "https://example.com/api/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
         );
 
         $this->assertCount(1, $registration_requests);
         $this->assertSame(
-            "PATCH",
+            "PUT",
             strtoupper($registration_requests[0]["request"]->getMethod()),
         );
         $this->assertSame(
@@ -836,20 +838,20 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             $registration_requests[0]["request"]->getHeaderLine("Authorization"),
         );
         $this->assertStringContainsString(
-            '"woocommerceWebhookSecret":"test-secret"',
+            '"webhookSecret":"test-secret"',
             (string) $registration_requests[0]["request"]->getBody(),
         );
         $this->assertStringContainsString(
-            '"woocommerceLanguage":"en"',
+            '"language":"en"',
             (string) $registration_requests[0]["request"]->getBody(),
         );
 
         $delivery_requests = array_values(
             array_filter($this->http_requests, static function ($request) use (
-                $shop_id,
+                $listing_source_id,
             ) {
                 return "https://example.com/api/v1/webhooks/woocommerce/" .
-                    $shop_id ===
+                    $listing_source_id ===
                     $request["url"];
             }),
         );
@@ -858,19 +860,19 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
     }
 
     /**
-     * It adds the Aura Historia access token to real webhook deliveries as x-api-key.
+     * It adds bearer auth only to signed deliveries of managed webhooks.
      *
      * @return void
      */
     public function test_plugin_adds_access_token_to_real_webhook_deliveries()
     {
-        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
-        $access_token = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+        $listing_source_id = "ls_01jw7j4azge00800000000000g";
+        $access_token = "aurahistoria_abcdefghijk_verylongtokenvalue";
 
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => $shop_id,
+                "listing_source_id" => $listing_source_id,
                 "access_token" => $access_token,
                 "secret" => "test-secret",
             ],
@@ -883,40 +885,127 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         );
         update_option(Webhook_Manager::OPTION_NEEDS_SYNC, "no", false);
 
-        $plugin = new Plugin();
-        $plugin->bootstrap_woocommerce();
-
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+        $id = $manager->get_webhook_ids()["product.created"];
+        $body = '{"id":30}';
         $args = [
             "headers" => [
-                "x-wc-webhook-id" => "20",
+                "x-wc-webhook-id" => (string) $id,
                 "x-wc-webhook-topic" => "product.created",
-                "x-wc-webhook-signature" => "test-signature",
+                "x-wc-webhook-signature" => base64_encode(hash_hmac("sha256", $body, "test-secret", true)),
             ],
-            "body" => '{"id":30}',
+            "body" => $body,
         ];
+        $url = Webhook_Manager::get_webhook_endpoint_url($listing_source_id);
+        $filtered_args = apply_filters("http_request_args", $args, $url);
 
-        $filtered_args = $plugin->maybe_add_webhook_access_token_header(
-            $args,
-            "https://example.com/api/v1/webhooks/woocommerce/" . $shop_id,
-        );
+        $this->assertSame("Bearer " . $access_token, $filtered_args["headers"]["Authorization"]);
+        $this->assertSame($body, $filtered_args["body"]);
+        $this->assertArrayNotHasKey("x-api-key", $filtered_args["headers"]);
 
-        $this->assertSame($access_token, $filtered_args["headers"]["x-api-key"]);
+        foreach ([
+            ["url" => $url . "/other", "args" => $args],
+            ["url" => $url, "args" => array_merge($args, ["body" => "changed"])],
+            ["url" => $url, "args" => array_replace_recursive($args, ["headers" => ["x-wc-webhook-id" => "999999"]])],
+            ["url" => $url, "args" => ["headers" => [], "body" => "ping"]],
+        ] as $case) {
+            $this->assertSame($case["args"], apply_filters("http_request_args", $case["args"], $case["url"]));
+        }
+        $args["headers"]["aUtHoRiZaTiOn"] = "Other credential";
+        $this->assertSame($args, apply_filters("http_request_args", $args, $url));
     }
 
     /**
-     * It does not add the Aura Historia access token to webhook ping requests.
+     * WooCommerce's signed product payload receives bearer auth only after its
+     * own HTTP arguments have been built, without changing the signed body.
+     *
+     * @return void
+     */
+    public function test_real_woocommerce_delivery_receives_late_bearer_auth()
+    {
+        $listing_source_id = "ls_01jw7j4azge00800000000000g";
+        $access_token = "aurahistoria_abcdefghijk_verylongtokenvalue";
+        $product = new WC_Product_Simple();
+        $product->set_name("Webhook delivery fixture");
+        $product->set_status("publish");
+        $product->save();
+
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $listing_source_id,
+            "access_token" => $access_token,
+            "secret" => "test-secret",
+        ]);
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+        $webhook = new WC_Webhook($manager->get_webhook_ids()["product.created"]);
+        $this->http_requests = [];
+        $woocommerce_args = [];
+        $capture_args = static function ($args) use (&$woocommerce_args) {
+            $woocommerce_args[] = $args;
+            return $args;
+        };
+        add_filter("woocommerce_webhook_http_args", $capture_args);
+        try {
+            $webhook->deliver($product->get_id());
+        } finally {
+            remove_filter("woocommerce_webhook_http_args", $capture_args);
+            $product->delete(true);
+        }
+
+        $delivery_url = Webhook_Manager::get_webhook_endpoint_url($listing_source_id);
+        $requests = array_values(array_filter($this->http_requests, static function ($request) use ($delivery_url) {
+            return $request["url"] === $delivery_url;
+        }));
+        $this->assertNotEmpty($woocommerce_args);
+        $this->assertNotEmpty($requests);
+        $args = $requests[0]["args"];
+        $wc_args = $woocommerce_args[0];
+        $headers = array_change_key_case($args["headers"], CASE_LOWER);
+        $this->assertSame($wc_args["body"], $args["body"]);
+        $this->assertArrayNotHasKey(
+            "authorization",
+            array_change_key_case($wc_args["headers"], CASE_LOWER),
+        );
+        $this->assertSame("Bearer " . $access_token, $headers["authorization"]);
+        $this->assertSame((string) $webhook->get_id(), (string) $headers["x-wc-webhook-id"]);
+        $this->assertSame("product.created", $headers["x-wc-webhook-topic"]);
+        $this->assertSame(
+            base64_encode(hash_hmac("sha256", $args["body"], "test-secret", true)),
+            $headers["x-wc-webhook-signature"],
+        );
+        $this->assertArrayNotHasKey("x-api-key", $headers);
+    }
+
+    /**
+     * The plugin, not option initialization, registers the late HTTP filter.
+     *
+     * @return void
+     */
+    public function test_plugin_owns_delivery_filter_registration()
+    {
+        Plugin::instance()->boot();
+        $callback = [Webhook_Manager::class, "authorize_delivery"];
+        $this->assertSame(11, has_filter("http_request_args", $callback));
+
+        (new Webhook_Manager())->initialize_options();
+        $this->assertSame(11, has_filter("http_request_args", $callback));
+    }
+
+    /**
+     * It does not authorize webhook ping requests, even when signed.
      *
      * @return void
      */
     public function test_plugin_does_not_add_access_token_to_webhook_pings()
     {
-        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
-        $access_token = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+        $listing_source_id = "ls_01jw7j4azge00800000000000g";
+        $access_token = "aurahistoria_abcdefghijk_verylongtokenvalue";
 
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => $shop_id,
+                "listing_source_id" => $listing_source_id,
                 "access_token" => $access_token,
                 "secret" => "test-secret",
             ],
@@ -929,20 +1018,22 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         );
         update_option(Webhook_Manager::OPTION_NEEDS_SYNC, "no", false);
 
-        $plugin = new Plugin();
-        $plugin->bootstrap_woocommerce();
-
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+        $id = $manager->get_webhook_ids()["product.created"];
+        $body = "webhook_id=" . $id;
         $args = [
-            "headers" => [],
-            "body" => "webhook_id=20",
+            "headers" => [
+                "X-WC-Webhook-ID" => (string) $id,
+                "X-WC-Webhook-Topic" => "product.created",
+                "X-WC-Webhook-Signature" => base64_encode(hash_hmac("sha256", $body, "test-secret", true)),
+            ],
+            "body" => $body,
         ];
-
-        $filtered_args = $plugin->maybe_add_webhook_access_token_header(
+        $this->assertSame(
             $args,
-            "https://example.com/api/v1/webhooks/woocommerce/" . $shop_id,
+            apply_filters("http_request_args", $args, Webhook_Manager::get_webhook_endpoint_url($listing_source_id)),
         );
-
-        $this->assertArrayNotHasKey("x-api-key", $filtered_args["headers"]);
     }
 
     /**
@@ -953,13 +1044,13 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
      */
     public function test_sync_webhooks_does_not_emit_ping_requests_when_activating_existing_webhooks()
     {
-        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
-        $access_token = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+        $listing_source_id = "ls_01jw7j4azge00800000000000g";
+        $access_token = "aurahistoria_abcdefghijk_verylongtokenvalue";
 
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => "",
+                "listing_source_id" => "",
                 "access_token" => "",
                 "secret" => "test-secret",
             ],
@@ -981,7 +1072,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => $shop_id,
+                "listing_source_id" => $listing_source_id,
                 "access_token" => $access_token,
                 "secret" => "test-secret",
             ],
@@ -992,10 +1083,10 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $second_ids = $manager->get_webhook_ids();
         $delivery_requests = array_values(
             array_filter($this->http_requests, static function ($request) use (
-                $shop_id,
+                $listing_source_id,
             ) {
                 return "https://example.com/api/v1/webhooks/woocommerce/" .
-                    $shop_id ===
+                    $listing_source_id ===
                     $request["url"];
             }),
         );
@@ -1013,16 +1104,16 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
     public function test_sync_webhooks_reuses_existing_webhooks()
     {
         $manager = new Webhook_Manager();
-        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+        $listing_source_id = "ls_01jw7j4azge00800000000000g";
         $original_access_token =
-            "aurahistoria_accesstoken_originaltoken_abcdefghijklmnopqrstuvwxyz1234567";
+            "aurahistoria_fixture_originaltokenvalue";
         $updated_access_token =
-            "aurahistoria_accesstoken_updatedtoken_abcdefghijklmnopqrstuvwxyz7654321";
+            "aurahistoria_fixture_updatedtokenvalue";
 
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => $shop_id,
+                "listing_source_id" => $listing_source_id,
                 "access_token" => $original_access_token,
                 "secret" => "original-secret",
             ],
@@ -1035,7 +1126,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => $shop_id,
+                "listing_source_id" => $listing_source_id,
                 "access_token" => $updated_access_token,
                 "secret" => "updated-secret",
             ],
@@ -1053,14 +1144,14 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
 
             $this->assertSame("active", $webhook->get_status());
             $this->assertSame(
-                "https://example.com/api/v1/webhooks/woocommerce/" . $shop_id,
+                "https://example.com/api/v1/webhooks/woocommerce/" . $listing_source_id,
                 $webhook->get_delivery_url(),
             );
             $this->assertSame("updated-secret", $webhook->get_secret());
         }
 
         $registration_requests = $this->get_backend_requests_for_url(
-            "https://example.com/api/v1/shops/" . $shop_id,
+            "https://example.com/api/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
         );
 
         $this->assertCount(2, $registration_requests);
@@ -1077,12 +1168,12 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
      */
     public function test_sync_webhooks_pauses_delivery_until_connection_is_complete()
     {
-        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
+        $listing_source_id = "ls_01jw7j4azge00800000000000g";
 
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => $shop_id,
+                "listing_source_id" => $listing_source_id,
                 "access_token" => "",
                 "secret" => "test-secret",
             ],
@@ -1100,13 +1191,13 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             $webhook = new WC_Webhook($webhook_id);
             $this->assertSame("paused", $webhook->get_status());
             $this->assertSame(
-                "https://example.com/api/v1/webhooks/woocommerce/" . $shop_id,
+                "https://example.com/api/v1/webhooks/woocommerce/" . $listing_source_id,
                 $webhook->get_delivery_url(),
             );
         }
 
         $registration_requests = $this->get_backend_requests_for_url(
-            "https://example.com/api/v1/shops/" . $shop_id,
+            "https://example.com/api/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
         );
 
         $this->assertSame([], $registration_requests);
@@ -1122,9 +1213,9 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => "123e4567-e89b-12d3-a456-426614174000",
+                "listing_source_id" => "ls_01jw7j4azge00800000000000g",
                 "access_token" =>
-                    "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
+                    "aurahistoria_abcdefghijk_verylongtokenvalue",
                 "secret" => "test-secret",
             ],
             false,
@@ -1157,9 +1248,9 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => "123e4567-e89b-12d3-a456-426614174000",
+                "listing_source_id" => "ls_01jw7j4azge00800000000000g",
                 "access_token" =>
-                    "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
+                    "aurahistoria_abcdefghijk_verylongtokenvalue",
                 "secret" => "test-secret",
             ],
             false,
@@ -1185,8 +1276,8 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => "not-a-uuid",
-                "access_token" => "invalid-key",
+                "listing_source_id" => "not-a-typeid",
+                "access_token" => "invalid key",
                 "secret" => "test-secret",
             ],
             false,
@@ -1206,19 +1297,19 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
     }
 
     /**
-     * It surfaces typed backend error details from the OpenAPI response body.
+     * It reports backend status without displaying potentially sensitive details.
      *
      * @return void
      */
     public function test_sync_webhooks_surfaces_backend_api_error_details()
     {
-        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
-        $access_token = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+        $listing_source_id = "ls_01jw7j4azge00800000000000g";
+        $access_token = "aurahistoria_abcdefghijk_verylongtokenvalue";
 
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => $shop_id,
+                "listing_source_id" => $listing_source_id,
                 "access_token" => $access_token,
                 "secret" => "test-secret",
             ],
@@ -1230,7 +1321,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
                 "status" => 401,
                 "title" => "Unauthorized",
                 "error" => "UNAUTHORIZED",
-                "detail" => "Missing or empty Authorization header.",
+                "detail" => "Missing or empty Authorization header. " . $access_token . " test-secret",
             ]),
         ]);
 
@@ -1240,17 +1331,19 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
 
         $this->assertInstanceOf(WP_Error::class, $result);
         $this->assertSame(
-            "ahpc_backend_registration_failed",
+            "ahpc_backend_configuration_failed",
             $result->get_error_code(),
         );
         $this->assertStringContainsString(
             "HTTP 401",
             $result->get_error_message(),
         );
-        $this->assertStringContainsString(
+        $this->assertStringNotContainsString(
             "Missing or empty Authorization header.",
             $result->get_error_message(),
         );
+        $this->assertStringNotContainsString($access_token, $result->get_error_message());
+        $this->assertStringNotContainsString("test-secret", $manager->get_last_sync_error());
         $this->assertCount(3, $ids);
 
         foreach ($ids as $webhook_id) {
@@ -1267,13 +1360,13 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
      */
     public function test_render_settings_page_shows_connected_status()
     {
-        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
-        $access_token = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+        $listing_source_id = "ls_01jw7j4azge00800000000000g";
+        $access_token = "aurahistoria_abcdefghijk_verylongtokenvalue";
 
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => $shop_id,
+                "listing_source_id" => $listing_source_id,
                 "access_token" => $access_token,
                 "secret" => "test-secret",
             ],
@@ -1288,7 +1381,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
 
         $this->assertStringContainsString("Connection status", $output);
         $this->assertStringContainsString("Connected", $output);
-        $this->assertStringContainsString("most recent webhook sync", $output);
+        $this->assertStringContainsString("most recent sync", $output);
         $this->assertCount($request_count, $this->backend_http_requests);
     }
 
@@ -1303,13 +1396,13 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             $this->markTestSkipped("Action Scheduler is not available.");
         }
 
-        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
-        $access_token = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+        $listing_source_id = "ls_01jw7j4azge00800000000000g";
+        $access_token = "aurahistoria_abcdefghijk_verylongtokenvalue";
 
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => $shop_id,
+                "listing_source_id" => $listing_source_id,
                 "access_token" => $access_token,
                 "secret" => "test-secret",
             ],
@@ -1318,7 +1411,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
 
         $backfill = new Product_Backfill();
         $backfill->cancel_backfill();
-        $this->assertTrue($backfill->schedule_backfill($shop_id));
+        $this->assertTrue($backfill->schedule_backfill($listing_source_id));
 
         $output = $this->render_plugin_settings_page();
 
@@ -1340,9 +1433,9 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => "123e4567-e89b-12d3-a456-426614174000",
+                "listing_source_id" => "ls_01jw7j4azge00800000000000g",
                 "access_token" =>
-                    "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
+                    "aurahistoria_abcdefghijk_verylongtokenvalue",
                 "secret" => "test-secret",
             ],
             false,
@@ -1360,7 +1453,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             $output,
         );
         $this->assertStringContainsString(
-            "initial product backfill did not start",
+            "Pending batches and their retry keys are never replaced",
             $output,
         );
     }
@@ -1376,13 +1469,13 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             $this->markTestSkipped("Action Scheduler is not available.");
         }
 
-        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
-        $access_token = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+        $listing_source_id = "ls_01jw7j4azge00800000000000g";
+        $access_token = "aurahistoria_abcdefghijk_verylongtokenvalue";
 
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => $shop_id,
+                "listing_source_id" => $listing_source_id,
                 "access_token" => $access_token,
                 "secret" => "test-secret",
             ],
@@ -1406,13 +1499,13 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
      */
     public function test_render_settings_page_shows_completed_backfill_status()
     {
-        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
-        $access_token = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+        $listing_source_id = "ls_01jw7j4azge00800000000000g";
+        $access_token = "aurahistoria_abcdefghijk_verylongtokenvalue";
 
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => $shop_id,
+                "listing_source_id" => $listing_source_id,
                 "access_token" => $access_token,
                 "secret" => "test-secret",
             ],
@@ -1425,17 +1518,29 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $product->save();
 
         $this->set_backend_mock_responses([
-            new Response(202, ["Content-Type" => "application/json"], "[]"),
+            new Response(
+                202,
+                ["Content-Type" => "application/json"],
+                wp_json_encode([
+                    "submissionId" => "submission-status-test",
+                    "acceptedCount" => 1,
+                    "failures" => [],
+                ]),
+            ),
         ]);
 
         $backfill = new Product_Backfill();
-        $backfill->process_batch($shop_id, 1);
+        $backfill->process_batch($listing_source_id, 1);
 
         $output = $this->render_plugin_settings_page();
 
         $this->assertStringContainsString("Product backfill", $output);
         $this->assertStringContainsString("Completed", $output);
-        $this->assertStringContainsString("completed successfully", $output);
+        $this->assertStringContainsString("finished submitting", $output);
+        $this->assertStringContainsString(
+            "Backend ingestion may still be processing",
+            $output,
+        );
         $this->assertStringContainsString(
             Product_Backfill::ACTION_HOOK,
             $output,
@@ -1454,9 +1559,9 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => "123e4567-e89b-12d3-a456-426614174000",
+                "listing_source_id" => "ls_01jw7j4azge00800000000000g",
                 "access_token" =>
-                    "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567",
+                    "aurahistoria_abcdefghijk_verylongtokenvalue",
                 "secret" => "test-secret",
             ],
             false,
@@ -1471,27 +1576,27 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         ]);
 
         $this->assertStringContainsString(
-            "Aura Historia connection completed and managed webhooks synced.",
+            "Aura Historia authorization completed and webhook sync submitted. Product listings are processed asynchronously.",
             $output,
         );
         $this->assertCount($request_count, $this->backend_http_requests);
     }
 
     /**
-     * It includes the store currency in the PATCH registration payload.
+     * It includes the store currency in the PUT configuration payload.
      *
      * @return void
      */
-    public function test_patch_registration_includes_supported_currency()
+    public function test_put_configuration_includes_supported_currency()
     {
-        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
-        $access_token = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+        $listing_source_id = "ls_01jw7j4azge00800000000000g";
+        $access_token = "aurahistoria_abcdefghijk_verylongtokenvalue";
 
         update_option("woocommerce_currency", "EUR", false);
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => $shop_id,
+                "listing_source_id" => $listing_source_id,
                 "access_token" => $access_token,
                 "secret" => "test-secret",
             ],
@@ -1502,32 +1607,31 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $manager->sync_webhooks();
 
         $registration_requests = $this->get_backend_requests_for_url(
-            "https://example.com/api/v1/shops/" . $shop_id,
+            "https://example.com/api/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
         );
 
         $this->assertCount(1, $registration_requests);
         $this->assertStringContainsString(
-            '"woocommerceCurrency":"EUR"',
+            '"currency":"EUR"',
             (string) $registration_requests[0]["request"]->getBody(),
         );
     }
 
     /**
-     * It omits the currency from the PATCH payload when the store currency is
-     * not supported by the backend.
+     * It blocks unsupported WooCommerce currencies without calling the backend.
      *
      * @return void
      */
-    public function test_patch_registration_omits_unsupported_currency()
+    public function test_unsupported_currency_blocks_registration_and_delivery()
     {
-        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
-        $access_token = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+        $listing_source_id = "ls_01jw7j4azge00800000000000g";
+        $access_token = "aurahistoria_abcdefghijk_verylongtokenvalue";
 
-        update_option("woocommerce_currency", "XYZ", false);
+        update_option("woocommerce_currency", "INR", false);
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => $shop_id,
+                "listing_source_id" => $listing_source_id,
                 "access_token" => $access_token,
                 "secret" => "test-secret",
             ],
@@ -1535,29 +1639,34 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         );
 
         $manager = new Webhook_Manager();
-        $manager->sync_webhooks();
+        $result = $manager->sync_webhooks();
 
-        $registration_requests = $this->get_backend_requests_for_url(
-            "https://example.com/api/v1/shops/" . $shop_id,
-        );
+        $this->assertInstanceOf(WP_Error::class, $result);
+        $this->assertSame("ahpc_unsupported_currency", $result->get_error_code());
+        $this->assertSame([], $this->backend_http_requests);
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        foreach ($manager->get_webhook_ids() as $webhook_id) {
+            $this->assertSame("paused", (new WC_Webhook($webhook_id))->get_status());
+        }
 
-        $this->assertCount(1, $registration_requests);
-        $this->assertStringNotContainsString(
-            "woocommerceCurrency",
-            (string) $registration_requests[0]["request"]->getBody(),
-        );
+        update_option("woocommerce_currency", "EUR", false);
+        $this->assertTrue($manager->sync_webhooks());
+        $this->assertCount(1, $this->backend_http_requests);
+        foreach ($manager->get_webhook_ids() as $webhook_id) {
+            $this->assertSame("active", (new WC_Webhook($webhook_id))->get_status());
+        }
     }
 
     /**
-     * It includes the store language in the PATCH registration payload derived
+     * It includes the store language in the PUT configuration payload derived
      * from the WordPress locale.
      *
      * @return void
      */
-    public function test_patch_registration_includes_locale_derived_language()
+    public function test_put_configuration_includes_locale_derived_language()
     {
-        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
-        $access_token = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+        $listing_source_id = "ls_01jw7j4azge00800000000000g";
+        $access_token = "aurahistoria_abcdefghijk_verylongtokenvalue";
 
         add_filter("locale", static function () {
             return "de_DE";
@@ -1566,7 +1675,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => $shop_id,
+                "listing_source_id" => $listing_source_id,
                 "access_token" => $access_token,
                 "secret" => "test-secret",
             ],
@@ -1579,12 +1688,12 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         remove_all_filters("locale");
 
         $registration_requests = $this->get_backend_requests_for_url(
-            "https://example.com/api/v1/shops/" . $shop_id,
+            "https://example.com/api/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
         );
 
         $this->assertCount(1, $registration_requests);
         $this->assertStringContainsString(
-            '"woocommerceLanguage":"de"',
+            '"language":"de"',
             (string) $registration_requests[0]["request"]->getBody(),
         );
     }
@@ -1595,10 +1704,10 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
      *
      * @return void
      */
-    public function test_patch_registration_uses_en_fallback_for_unsupported_locale()
+    public function test_put_configuration_uses_en_fallback_for_unsupported_locale()
     {
-        $shop_id = "123e4567-e89b-12d3-a456-426614174000";
-        $access_token = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+        $listing_source_id = "ls_01jw7j4azge00800000000000g";
+        $access_token = "aurahistoria_abcdefghijk_verylongtokenvalue";
 
         add_filter("locale", static function () {
             return "xx_XX";
@@ -1607,7 +1716,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
-                "shop_id" => $shop_id,
+                "listing_source_id" => $listing_source_id,
                 "access_token" => $access_token,
                 "secret" => "test-secret",
             ],
@@ -1620,13 +1729,751 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         remove_all_filters("locale");
 
         $registration_requests = $this->get_backend_requests_for_url(
-            "https://example.com/api/v1/shops/" . $shop_id,
+            "https://example.com/api/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
         );
 
         $this->assertCount(1, $registration_requests);
         $this->assertStringContainsString(
-            '"woocommerceLanguage":"en"',
+            '"language":"en"',
             (string) $registration_requests[0]["request"]->getBody(),
         );
+    }
+
+    /**
+     * Opaque tokens are not tied to a historical prefix, but must be safe in
+     * an Authorization bearer header without changing their bytes.
+     *
+     * @return void
+     */
+    public function test_access_token_accepts_opaque_bearer_values_and_rejects_whitespace()
+    {
+        foreach (
+            [
+                "aurahistoria_abcdefghijk_verylongtokenvalue",
+                "opaque-token.v1+with/symbols~and_padding==",
+                "a",
+            ] as $valid
+        ) {
+            $this->assertSame($valid, Webhook_Manager::normalize_access_token($valid));
+            $this->assertTrue(Webhook_Manager::is_valid_access_token($valid));
+        }
+
+        foreach (
+            [
+                "",
+                " ",
+                "token with space",
+                " token",
+                "token ",
+                "token\tvalue",
+                "token\nvalue",
+                "token\r\nX-Injected: yes",
+                "token\0value",
+                "token\x7fvalue",
+                "token=value",
+                "token:value",
+            ] as $invalid
+        ) {
+            $this->assertSame($invalid, Webhook_Manager::normalize_access_token($invalid));
+            $this->assertFalse(Webhook_Manager::is_valid_access_token($invalid));
+        }
+        $this->assertFalse(Webhook_Manager::is_valid_access_token(null));
+        $this->assertSame("", Webhook_Manager::normalize_access_token(null));
+    }
+
+    /**
+     * Invalid saved credentials must not be sent to the backend or used in
+     * webhook Authorization headers.
+     *
+     * @return void
+     */
+    public function test_sync_rejects_unsafe_bearer_token_without_backend_request()
+    {
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => "ls_01jw7j4azge00800000000000g",
+            "access_token" => "aurahistoria_abcdefghijk_verylongtokenvalue\r\nX-Injected: yes",
+            "secret" => "test-secret",
+        ]);
+
+        $manager = new Webhook_Manager();
+        $result = $manager->sync_webhooks();
+        $this->assertInstanceOf(WP_Error::class, $result);
+        $this->assertSame("ahpc_invalid_access_token", $result->get_error_code());
+        $this->assertSame([], $this->backend_http_requests);
+        foreach ($manager->get_webhook_ids() as $id) {
+            $this->assertSame("paused", (new WC_Webhook($id))->get_status());
+        }
+    }
+
+    public function test_oauth_client_typeid_rejects_wrong_prefix_length_case_and_alphabet()
+    {
+        $plugin = new Plugin();
+        $valid = "oc_01jw7j4azge00800000000000g";
+        $this->oauth_client_id = $valid;
+        $this->assertIsString($plugin->create_oauth_authorization_url());
+
+        foreach ([
+            "ls_01jw7j4azge008000000000003",
+            "oc_" . str_repeat("0", 25),
+            "oc_" . str_repeat("0", 26),
+            "oc_01jw7j4azge00000000000000g",
+            "oc_8jw7j4azge00800000000000g",
+            strtoupper($valid),
+            "oc_" . str_repeat("0", 27),
+            "OC_" . str_repeat("0", 26),
+            "oc_" . str_repeat("i", 26),
+            "oc_" . str_repeat("l", 26),
+            "oc_" . str_repeat("o", 26),
+            "oc_" . str_repeat("u", 26),
+            "oc_" . str_repeat("0", 25) . "!",
+            "123e4567-e89b-12d3-a456-426614174000",
+        ] as $invalid) {
+            $this->oauth_client_id = $invalid;
+            $result = $plugin->create_oauth_authorization_url();
+            $this->assertInstanceOf(WP_Error::class, $result, $invalid);
+            $this->assertSame("ahpc_oauth_invalid_client_id", $result->get_error_code(), $invalid);
+        }
+    }
+
+    public function test_listing_source_id_is_strict_and_does_not_migrate_legacy_id()
+    {
+        $valid = "ls_01jw7j4azge00800000000000g";
+        $this->assertTrue(Webhook_Manager::is_valid_listing_source_id($valid));
+        $this->assertTrue(Webhook_Manager::is_valid_listing_source_id("ls_01jw7j4azge008000000000003"));
+        $this->assertFalse(Webhook_Manager::is_valid_listing_source_id("oc_01jw7j4azge00800000000000g"));
+        $this->assertSame($valid, Webhook_Manager::normalize_listing_source_id($valid));
+        $this->assertFalse(Webhook_Manager::is_valid_listing_source_id(
+            Webhook_Manager::normalize_listing_source_id("  LS_01jw7j4azge00800000000000g  "),
+        ));
+        foreach ([
+            "ls_" . str_repeat("0", 25),
+            "ls_" . str_repeat("0", 26),
+            "ls_2n1t201rmv87aae5j4csam8000",
+            "ls_01jw7j4azge00000000000000g",
+            "ls_8jw7j4azge00800000000000g",
+            strtoupper($valid),
+            "ls_" . str_repeat("0", 27),
+            "LS_" . str_repeat("0", 26),
+            "ls_" . str_repeat("i", 26),
+            "ls_" . str_repeat("l", 26),
+            "ls_" . str_repeat("o", 26),
+            "ls_" . str_repeat("u", 26),
+            "ls_" . str_repeat("0", 25) . "!",
+            "ls_" . str_repeat("0", 26) . "extra",
+            "123e4567-e89b-12d3-a456-426614174000",
+        ] as $invalid) {
+            $this->assertFalse(Webhook_Manager::is_valid_listing_source_id($invalid));
+            $this->assertSame("", Webhook_Manager::get_webhook_endpoint_url($invalid));
+        }
+        $legacy_settings = [
+            "shop_id" => "123e4567-e89b-12d3-a456-426614174000",
+            "api_key" => "aurahistoria_abcdefghijk_verylongtokenvalue",
+            "secret" => "test-secret",
+        ];
+        update_option(Webhook_Manager::OPTION_SETTINGS, $legacy_settings);
+        $settings = (new Webhook_Manager())->get_settings();
+        $this->assertSame(Webhook_Manager::default_settings()["listing_source_id"], $settings["listing_source_id"]);
+        $this->assertSame("", $settings["access_token"]);
+        $this->assertSame("test-secret", $settings["secret"]);
+        $this->assertCount(3, $settings);
+        $this->assertSame($legacy_settings, get_option(Webhook_Manager::OPTION_SETTINGS));
+    }
+
+    public function test_put_requires_documented_success_status()
+    {
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => "ls_01jw7j4azge00800000000000g",
+            "access_token" => "aurahistoria_abcdefghijk_verylongtokenvalue",
+            "secret" => "test-secret",
+        ]);
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response(200)]);
+        $manager = new Webhook_Manager();
+        $this->assertInstanceOf(WP_Error::class, $manager->sync_webhooks());
+        foreach ($manager->get_webhook_ids() as $id) {
+            $this->assertSame("paused", (new WC_Webhook($id))->get_status());
+        }
+    }
+
+    public function test_failed_put_pauses_previously_active_webhooks_and_retries()
+    {
+        $id = "ls_01jw7j4azge00800000000000g";
+        $token = "aurahistoria_abcdefghijk_verylongtokenvalue";
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => $token,
+            "secret" => "initial-secret",
+        ]);
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+        $ids = $manager->get_webhook_ids();
+
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => $token,
+            "secret" => "rotated-secret",
+        ]);
+        $this->set_backend_mock_responses([
+            $this->mock_backend_registration_response(503, ["detail" => "Try again later"]),
+        ]);
+        $result = $manager->sync_webhooks();
+        $this->assertInstanceOf(WP_Error::class, $result);
+        $this->assertSame($ids, $manager->get_webhook_ids());
+        foreach ($ids as $webhook_id) {
+            $this->assertSame("paused", (new WC_Webhook($webhook_id))->get_status());
+        }
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        $this->assertSame("rotated-secret", (new WC_Webhook(reset($ids)))->get_secret());
+
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response(201)]);
+        $this->assertTrue($manager->sync_webhooks());
+        $this->assertSame($ids, $manager->get_webhook_ids());
+        foreach ($ids as $webhook_id) {
+            $webhook = new WC_Webhook($webhook_id);
+            $this->assertSame("active", $webhook->get_status());
+            $this->assertSame("rotated-secret", $webhook->get_secret());
+        }
+    }
+
+    /**
+     * A paused-stage persistence failure must not send a new secret to Aura.
+     *
+     * @return void
+     */
+    public function test_paused_stage_failure_does_not_update_backend()
+    {
+        $id = "ls_01jw7j4azge00800000000000g";
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "old-secret",
+        ]);
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+        $ids = $manager->get_webhook_ids();
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "new-secret",
+        ]);
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+        $failed_once = false;
+        $fail_stage = static function ($webhook_id) use (&$failed_once, $ids) {
+            if (!$failed_once && (int) $webhook_id === (int) $ids["product.updated"] &&
+                "paused" === (new WC_Webhook($webhook_id))->get_status()) {
+                $failed_once = true;
+                throw new \RuntimeException("sensitive test-token should not surface");
+            }
+        };
+        add_action("woocommerce_webhook_updated", $fail_stage, 20, 1);
+        try {
+            $result = $manager->sync_webhooks();
+        } finally {
+            remove_action("woocommerce_webhook_updated", $fail_stage, 20);
+        }
+        $this->assertTrue($failed_once);
+        $this->assertInstanceOf(WP_Error::class, $result);
+        $this->assertSame([], $this->backend_http_requests);
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        foreach ($ids as $webhook_id) {
+            $this->assertSame("paused", (new WC_Webhook($webhook_id))->get_status());
+        }
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+        $this->assertTrue($manager->sync_webhooks());
+    }
+
+    /**
+     * Failure activating one webhook after a successful secret rotation must
+     * pause the entire set; retry may safely activate the new secret.
+     *
+     * @return void
+     */
+    public function test_activation_failure_after_backend_put_pauses_rotated_webhooks()
+    {
+        $id = "ls_01jw7j4azge00800000000000g";
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "old-secret",
+        ]);
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+        $ids = $manager->get_webhook_ids();
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "new-secret",
+        ]);
+        update_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes", false);
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+        $failed_once = false;
+        $fail_activation = static function ($webhook_id) use (&$failed_once, $ids) {
+            if (!$failed_once && (int) $webhook_id === (int) $ids["product.updated"] &&
+                "active" === (new WC_Webhook($webhook_id))->get_status()) {
+                $failed_once = true;
+                throw new \RuntimeException("sensitive old-secret test-token should not surface");
+            }
+        };
+        add_action("woocommerce_webhook_updated", $fail_activation, 20, 1);
+        try {
+            $result = $manager->sync_webhooks();
+        } finally {
+            remove_action("woocommerce_webhook_updated", $fail_activation, 20);
+        }
+        $this->assertTrue($failed_once);
+        $this->assertInstanceOf(WP_Error::class, $result);
+        $this->assertCount(1, $this->backend_http_requests);
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        $this->assertStringNotContainsString("test-token", $result->get_error_message());
+        $this->assertStringNotContainsString("old-secret", $result->get_error_message());
+        foreach ($ids as $webhook_id) {
+            $webhook = new WC_Webhook($webhook_id);
+            $this->assertSame("paused", $webhook->get_status());
+            $this->assertSame("new-secret", $webhook->get_secret());
+        }
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+        $this->assertTrue($manager->sync_webhooks());
+        foreach ($ids as $webhook_id) {
+            $webhook = new WC_Webhook($webhook_id);
+            $this->assertSame("active", $webhook->get_status());
+            $this->assertSame("new-secret", $webhook->get_secret());
+        }
+    }
+
+    /**
+     * All three managed webhooks must exist in the paused state before the
+     * first backend registration request is sent.
+     *
+     * @return void
+     */
+    public function test_initial_registration_only_sees_paused_webhooks()
+    {
+        $id = "ls_01jw7j4azge00800000000000g";
+        update_option("woocommerce_currency", "EUR", false);
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "test-secret",
+        ]);
+
+        $observed = [];
+        $this->backend_guzzle_client = new Client([
+            "handler" => static function ($request, $options) use (&$observed) {
+                $manager = new Webhook_Manager();
+                foreach ($manager->get_webhook_ids() as $topic => $webhook_id) {
+                    $webhook = new WC_Webhook($webhook_id);
+                    $observed[$topic] = [$webhook->get_status(), $webhook->get_secret()];
+                }
+                return new \GuzzleHttp\Promise\FulfilledPromise(new Response(204));
+            },
+        ]);
+
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+        $this->assertCount(3, $observed);
+        foreach ($observed as $snapshot) {
+            $this->assertSame(["paused", "test-secret"], $snapshot);
+        }
+    }
+
+    /**
+     * The pause stage must persist a rotated secret before sending the PUT.
+     *
+     * @return void
+     */
+    public function test_all_local_webhooks_are_paused_and_saved_before_backend_put()
+    {
+        $id = "ls_01jw7j4azge00800000000000g";
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "original-token",
+            "secret" => "original-secret",
+        ]);
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+        $ids = $manager->get_webhook_ids();
+
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "rotated-token",
+            "secret" => "rotated-secret",
+        ]);
+        $observed = [];
+        $this->backend_guzzle_client = new Client([
+            "handler" => static function ($request, $options) use ($ids, &$observed) {
+                foreach ($ids as $topic => $webhook_id) {
+                    $webhook = new WC_Webhook($webhook_id);
+                    $observed[$topic] = [$webhook->get_status(), $webhook->get_secret()];
+                }
+                return new \GuzzleHttp\Promise\FulfilledPromise(new Response(204));
+            },
+        ]);
+
+        $this->assertTrue($manager->sync_webhooks());
+        $this->assertSame($ids, $manager->get_webhook_ids());
+        $this->assertCount(3, $observed);
+        foreach ($observed as $snapshot) {
+            $this->assertSame(["paused", "rotated-secret"], $snapshot);
+        }
+        foreach ($ids as $webhook_id) {
+            $this->assertSame("active", (new WC_Webhook($webhook_id))->get_status());
+        }
+    }
+
+    /**
+     * A currency change must pause existing deliveries until a valid retry.
+     *
+     * @return void
+     */
+    public function test_unsupported_currency_pauses_existing_webhooks_before_retry()
+    {
+        $id = "ls_01jw7j4azge00800000000000g";
+        update_option("woocommerce_currency", "EUR", false);
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "test-secret",
+        ]);
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+        $ids = $manager->get_webhook_ids();
+
+        update_option("woocommerce_currency", "INR", false);
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+        $result = $manager->sync_webhooks();
+        $this->assertSame("ahpc_unsupported_currency", $result->get_error_code());
+        $this->assertSame([], $this->backend_http_requests);
+        $this->assertSame($ids, $manager->get_webhook_ids());
+        foreach ($ids as $webhook_id) {
+            $this->assertSame("paused", (new WC_Webhook($webhook_id))->get_status());
+        }
+
+        update_option("woocommerce_currency", "EUR", false);
+        $this->assertTrue($manager->maybe_sync_webhooks());
+        $this->assertCount(1, $this->backend_http_requests);
+        foreach ($ids as $webhook_id) {
+            $this->assertSame("active", (new WC_Webhook($webhook_id))->get_status());
+        }
+    }
+
+    /**
+     * Webhook drift reconciliation must not reset product backfill progress.
+     *
+     * @return void
+     */
+    public function test_generic_sync_does_not_restart_in_flight_or_completed_backfill()
+    {
+        $id = "ls_01jw7j4azge00800000000000g";
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "test-secret",
+        ]);
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+
+        foreach ([Product_Backfill::STATUS_RUNNING, Product_Backfill::STATUS_COMPLETE] as $status) {
+            $state = [
+                "status" => $status,
+                "last_completed_page" => "3",
+                "accepted_count" => "25",
+                "completed_at" => "2026-01-01 12:00:00",
+            ];
+            $batch = ["page" => 4, "listing_source_id" => $id];
+            update_option(Product_Backfill::OPTION_STATE, $state, false);
+            update_option(Product_Backfill::OPTION_BATCH, $batch, false);
+
+            $this->assertTrue($manager->sync_webhooks());
+            $this->assertSame($state, get_option(Product_Backfill::OPTION_STATE));
+            $this->assertSame($batch, get_option(Product_Backfill::OPTION_BATCH));
+        }
+    }
+
+    private function connect_listing_source(Plugin $plugin, $listing_source_id, array $responses = [])
+    {
+        $url = $plugin->create_oauth_authorization_url();
+        $this->assertIsString($url);
+        parse_str(wp_parse_url($url, PHP_URL_QUERY), $query);
+        $state = json_decode($this->base64url_decode($query["state"]), true);
+        $this->set_backend_mock_responses(array_merge(
+            [$this->mock_oauth_token_response("test-token")],
+            $responses ?: [$this->mock_backend_registration_response()],
+        ));
+        return $plugin->complete_oauth_connection(
+            $listing_source_id,
+            "01970f22-2bf0-7000-8000-000000000099",
+            $state["client_state"],
+        );
+    }
+
+    public function test_first_backfill_scheduled_a_b_a_never_auto_replays_a()
+    {
+        $a = "ls_01jw7j4azge008000000000003";
+        $b = "ls_01jw7j4azge00800000000000g";
+        $plugin = new Plugin();
+        $this->assertTrue($this->connect_listing_source($plugin, $a));
+        $this->assertTrue((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, [$a, 1], Product_Backfill::ACTION_GROUP));
+        $this->assertSame([$a => true], get_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []));
+        $this->assertTrue($this->connect_listing_source($plugin, $b));
+        $this->assertFalse((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, [$a, 1], Product_Backfill::ACTION_GROUP));
+        $this->assertTrue((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, [$b, 1], Product_Backfill::ACTION_GROUP));
+        $this->assertSame([$a => true, $b => true], get_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []));
+        $this->assertTrue($this->connect_listing_source($plugin, $a));
+        $this->assertFalse((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, [$a, 1], Product_Backfill::ACTION_GROUP));
+        $this->assertFalse((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, [$b, 1], Product_Backfill::ACTION_GROUP));
+        $this->assertFalse(get_option(Plugin::OPTION_INITIAL_BACKFILL_PENDING_SOURCE, false));
+        $this->assertSame([$a => true, $b => true], get_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []));
+    }
+
+    public function test_first_backfill_started_a_b_a_does_not_replay_a()
+    {
+        $a = "ls_01jw7j4azge008000000000003";
+        $b = "ls_01jw7j4azge00800000000000g";
+        $plugin = new Plugin();
+        $this->assertTrue($this->connect_listing_source($plugin, $a));
+        $this->assertSame([$a => true], get_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []));
+        $product = new WC_Product_Simple();
+        $product->set_name("Started first backfill");
+        $product->set_status("publish");
+        $product->save();
+        try {
+            $this->set_backend_mock_responses([new Response(503, ["Content-Type" => "application/problem+json"], "{}")]);
+            try {
+                (new Product_Backfill())->process_batch($a, 1);
+                $this->fail("Expected the first backfill to queue a retry");
+            } catch (RuntimeException $exception) {
+                $this->assertNotFalse(get_option(Product_Backfill::OPTION_BATCH, false));
+            }
+            $this->assertArrayHasKey($a, get_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []));
+            $this->assertTrue($this->connect_listing_source($plugin, $b));
+            $this->assertTrue($this->connect_listing_source($plugin, $a));
+            $this->assertFalse((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, [$a, 1], Product_Backfill::ACTION_GROUP));
+        } finally {
+            $product->delete(true);
+        }
+    }
+
+    public function test_oauth_sync_failure_can_retry_initial_backfill_without_duplication()
+    {
+        $id = "ls_01jw7j4azge008000000000003";
+        $plugin = new Plugin();
+        $result = $this->connect_listing_source($plugin, $id, [
+            $this->mock_backend_registration_response(503),
+        ]);
+        $this->assertInstanceOf(WP_Error::class, $result);
+        $this->assertSame($id, get_option(Plugin::OPTION_INITIAL_BACKFILL_PENDING_SOURCE));
+        $this->assertSame([], get_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []));
+        $this->assertFalse((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, [$id, 1], Product_Backfill::ACTION_GROUP));
+
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+        (new Plugin())->bootstrap_woocommerce();
+        $this->assertSame("no", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        $this->assertTrue((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, [$id, 1], Product_Backfill::ACTION_GROUP));
+        $this->assertSame([$id => true], get_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []));
+        $this->assertFalse(get_option(Plugin::OPTION_INITIAL_BACKFILL_PENDING_SOURCE, false));
+        $state = get_option(Product_Backfill::OPTION_STATE);
+        (new Plugin())->bootstrap_woocommerce();
+        $this->assertSame($state, get_option(Product_Backfill::OPTION_STATE));
+    }
+
+    public function test_failed_initial_queue_keeps_pending_source_for_later_bootstrap()
+    {
+        $id = "ls_01jw7j4azge008000000000003";
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "test-secret",
+        ], false);
+        // A malformed saved batch makes start_or_resume_backfill reject the queue
+        // without losing the pending source or pretending a first run started.
+        $snapshot = ["listing_source_id" => $id, "page" => 1];
+        update_option(Product_Backfill::OPTION_BATCH, $snapshot, false);
+        $plugin = new Plugin();
+        $result = $this->connect_listing_source($plugin, $id);
+        $this->assertInstanceOf(WP_Error::class, $result);
+        $this->assertSame("ahpc_backfill_failed", $result->get_error_code());
+        $this->assertSame($id, get_option(Plugin::OPTION_INITIAL_BACKFILL_PENDING_SOURCE));
+        $this->assertSame([], get_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []));
+        $this->assertNotEmpty(get_option(Plugin::OPTION_INITIAL_BACKFILL_ERROR));
+        $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
+        $this->assertFalse((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, null, Product_Backfill::ACTION_GROUP));
+
+        delete_option(Product_Backfill::OPTION_BATCH);
+        (new Plugin())->bootstrap_woocommerce();
+        $this->assertTrue((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, [$id, 1], Product_Backfill::ACTION_GROUP));
+        $this->assertSame([$id => true], get_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []));
+        $this->assertFalse(get_option(Plugin::OPTION_INITIAL_BACKFILL_PENDING_SOURCE, false));
+        $this->assertFalse(get_option(Plugin::OPTION_INITIAL_BACKFILL_ERROR, false));
+    }
+
+    public function test_manual_backfill_keeps_retry_snapshot_on_same_source_reconnect()
+    {
+        $id = "ls_01jw7j4azge008000000000003";
+        $plugin = new Plugin();
+        $this->assertTrue($this->connect_listing_source($plugin, $id));
+        $snapshot = [
+            "listing_source_id" => $id,
+            "page" => 1,
+            "product_count" => 1,
+            "payloads" => [["sourceListingId" => "123", "url" => "https://example.com/product", "images" => []]],
+            "idempotency_key" => "manual-retry-key",
+            "retry_attempt" => 1,
+        ];
+        update_option(Product_Backfill::OPTION_BATCH, $snapshot, false);
+        $state = get_option(Product_Backfill::OPTION_STATE);
+        $this->assertTrue($this->connect_listing_source($plugin, $id));
+        $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
+        $this->assertSame($state, get_option(Product_Backfill::OPTION_STATE));
+
+        as_unschedule_all_actions(Product_Backfill::ACTION_HOOK, null, Product_Backfill::ACTION_GROUP);
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+        $this->assertTrue($plugin->queue_manual_backfill());
+        $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
+        $this->assertTrue((bool) as_has_scheduled_action(
+            Product_Backfill::ACTION_HOOK,
+            [$id, 1, "retry-" . hash("sha256", "manual-retry-key:1")],
+            Product_Backfill::ACTION_GROUP,
+        ));
+
+        $this->set_backend_mock_responses([new Response(202, ["Content-Type" => "application/json"], wp_json_encode([
+            "submissionId" => "manual-resume",
+            "acceptedCount" => 1,
+            "failures" => [],
+        ]))]);
+        (new Product_Backfill())->process_batch($id, 1);
+        $requests = $this->get_backend_requests_for_url(
+            "https://example.com/api/v1/listing-sources/" . $id . "/product-listings/async",
+        );
+        $this->assertCount(1, $requests);
+        $this->assertSame("manual-retry-key", $requests[0]["request"]->getHeaderLine("Idempotency-Key"));
+        $this->assertSame($snapshot["payloads"], json_decode((string) $requests[0]["request"]->getBody(), true));
+        $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH));
+    }
+
+    public function test_currency_and_wplang_changes_pause_then_reconcile_without_resetting_backfill()
+    {
+        $id = "ls_01jw7j4azge008000000000003";
+        update_option("woocommerce_currency", "EUR", false);
+        update_option("WPLANG", "en_US", false);
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "test-secret",
+        ], false);
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+        $ids = $manager->get_webhook_ids();
+        $plugin = new Plugin();
+        $plugin->boot();
+        $this->assertTrue((new Product_Backfill())->schedule_backfill($id));
+        $state = get_option(Product_Backfill::OPTION_STATE);
+        $batch = ["listing_source_id" => $id, "idempotency_key" => "existing-retry"];
+        update_option(Product_Backfill::OPTION_BATCH, $batch, false);
+
+        $assert_paused = function () use ($manager, $ids) {
+            $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+            $this->assertSame($ids, $manager->get_webhook_ids());
+            foreach ($ids as $webhook_id) {
+                $this->assertSame("paused", (new WC_Webhook($webhook_id))->get_status());
+            }
+        };
+        // get_locale() may be cached in the same PHP request; model the next
+        // request's locale while still changing the actual WPLANG option.
+        $locale = static function () { return "de_DE"; };
+        try {
+            update_option("woocommerce_currency", "GBP", false);
+            $assert_paused();
+            update_option("WPLANG", "de_DE", false);
+            $assert_paused();
+            add_filter("locale", $locale);
+            $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+            $this->assertTrue($manager->maybe_sync_webhooks());
+            $requests = $this->get_backend_requests_for_url(
+                "https://example.com/api/v1/listing-sources/" . $id . "/ingestion-configurations/woocommerce",
+            );
+            $this->assertCount(1, $requests);
+            $body = json_decode((string) $requests[0]["request"]->getBody(), true);
+            $this->assertSame("GBP", $body["currency"]);
+            $this->assertSame("de", $body["language"]);
+            foreach ($ids as $webhook_id) {
+                $this->assertSame("active", (new WC_Webhook($webhook_id))->get_status());
+            }
+
+            update_option("woocommerce_currency", "INR", false);
+            $assert_paused();
+            $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+            $this->assertFalse($manager->maybe_sync_webhooks());
+            $this->assertSame([], $this->backend_http_requests);
+            $assert_paused();
+
+            update_option("woocommerce_currency", "EUR", false);
+            $assert_paused();
+            $this->assertTrue($manager->maybe_sync_webhooks());
+            $this->assertCount(1, $this->backend_http_requests);
+            foreach ($ids as $webhook_id) {
+                $this->assertSame("active", (new WC_Webhook($webhook_id))->get_status());
+            }
+            $this->assertSame($state, get_option(Product_Backfill::OPTION_STATE));
+            $this->assertSame($batch, get_option(Product_Backfill::OPTION_BATCH));
+        } finally {
+            remove_filter("locale", $locale);
+        }
+    }
+
+    public function test_adding_first_site_language_option_pauses_active_webhooks()
+    {
+        $id = "ls_01jw7j4azge008000000000003";
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "test-secret",
+        ], false);
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+        (new Plugin())->boot();
+
+        delete_option("WPLANG");
+        $this->assertTrue(add_option("WPLANG", "de_DE", "", false));
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        foreach ($manager->get_webhook_ids() as $webhook_id) {
+            $this->assertSame("paused", (new WC_Webhook($webhook_id))->get_status());
+        }
+    }
+
+    public function test_uninstall_cleans_connection_markers_snapshot_actions_and_managed_webhooks()
+    {
+        $id = "ls_01jw7j4azge008000000000003";
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "test-secret",
+        ], false);
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+        $ids = $manager->get_webhook_ids();
+        $this->assertTrue((new Product_Backfill())->schedule_backfill($id));
+        update_option(Product_Backfill::OPTION_BATCH, ["idempotency_key" => "pending"], false);
+        update_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, [$id => true], false);
+        update_option(Plugin::OPTION_INITIAL_BACKFILL_PENDING_SOURCE, $id, false);
+        update_option(Plugin::OPTION_INITIAL_BACKFILL_ERROR, "Retry later", false);
+        if (!defined("WP_UNINSTALL_PLUGIN")) {
+            define("WP_UNINSTALL_PLUGIN", "aura-historia-partner-connect.php");
+        }
+        require dirname(__DIR__) . "/uninstall.php";
+        foreach ([
+            Webhook_Manager::OPTION_SETTINGS,
+            Webhook_Manager::OPTION_WEBHOOK_IDS,
+            Webhook_Manager::OPTION_NEEDS_SYNC,
+            Product_Backfill::OPTION_BATCH,
+            Product_Backfill::OPTION_STATE,
+            Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES,
+            Plugin::OPTION_INITIAL_BACKFILL_PENDING_SOURCE,
+            Plugin::OPTION_INITIAL_BACKFILL_ERROR,
+        ] as $option) {
+            $this->assertFalse(get_option($option, false), $option);
+        }
+        $this->assertFalse((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, null, Product_Backfill::ACTION_GROUP));
+        foreach ($ids as $webhook_id) {
+            $this->assertSame(0, (new WC_Webhook($webhook_id))->get_id());
+        }
     }
 }

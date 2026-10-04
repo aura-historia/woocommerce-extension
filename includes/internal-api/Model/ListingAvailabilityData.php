@@ -1,11 +1,11 @@
 <?php
 /**
- * ModelInterface
+ * ListingAvailabilityData
  *
  * PHP version 8.1
  *
  * @category Class
- * @package  AuraHistoria\PartnerConnect\InternalApi\Model
+ * @package  AuraHistoria\PartnerConnect\InternalApi
  * @author   OpenAPI Generator team
  * @link     https://openapi-generator.tech
  */
@@ -29,85 +29,62 @@
 
 
 namespace AuraHistoria\PartnerConnect\InternalApi\Model;
+use \AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
 
 /**
- * Interface abstracting model access.
+ * ListingAvailabilityData Class Doc Comment
  *
- * @package AuraHistoria\PartnerConnect\InternalApi\Model
- * @author  OpenAPI Generator team
+ * @category Class
+ * @description Current reliable source assertion of listing purchase availability. Omitted or &#x60;null&#x60; means Aura has no reliable current assertion.
+ * @package  AuraHistoria\PartnerConnect\InternalApi
+ * @author   OpenAPI Generator team
+ * @link     https://openapi-generator.tech
  */
-interface ModelInterface
+class ListingAvailabilityData
 {
     /**
-     * The original name of the model.
-     *
-     * @return string
+     * Possible values of this enum
      */
-    public function getModelName();
+    public const AVAILABLE = 'AVAILABLE';
+
+    public const IN_STOCK = 'IN_STOCK';
+
+    public const LIMITED_AVAILABILITY = 'LIMITED_AVAILABILITY';
+
+    public const BACK_ORDER = 'BACK_ORDER';
+
+    public const MADE_TO_ORDER = 'MADE_TO_ORDER';
+
+    public const PRE_ORDER = 'PRE_ORDER';
+
+    public const PRE_SALE = 'PRE_SALE';
+
+    public const UNAVAILABLE = 'UNAVAILABLE';
+
+    public const RESERVED = 'RESERVED';
+
+    public const OUT_OF_STOCK = 'OUT_OF_STOCK';
+
+    public const SOLD_OUT = 'SOLD_OUT';
 
     /**
-     * Array of property to type mappings. Used for (de)serialization
-     *
-     * @return array
+     * Gets allowable values of the enum
+     * @return string[]
      */
-    public static function openAPITypes();
-
-    /**
-     * Array of property to format mappings. Used for (de)serialization
-     *
-     * @return array
-     */
-    public static function openAPIFormats();
-
-    /**
-     * Array of attributes where the key is the local name, and the value is the original name
-     *
-     * @return array
-     */
-    public static function attributeMap();
-
-    /**
-     * Array of attributes to setter functions (for deserialization of responses)
-     *
-     * @return array
-     */
-    public static function setters();
-
-    /**
-     * Array of attributes to getter functions (for serialization of requests)
-     *
-     * @return array
-     */
-    public static function getters();
-
-    /**
-     * Show all the invalid properties with reasons.
-     *
-     * @return array
-     */
-    public function listInvalidProperties();
-
-    /**
-     * Validate all the properties in the model
-     * return true if all passed
-     *
-     * @return bool
-     */
-    public function valid();
-
-    /**
-     * Checks if a property is nullable
-     *
-     * @param string $property
-     * @return bool
-     */
-    public static function isNullable(string $property): bool;
-
-    /**
-     * Checks if a nullable property is set to null.
-     *
-     * @param string $property
-     * @return bool
-     */
-    public function isNullableSetToNull(string $property): bool;
+    public static function getAllowableEnumValues()
+    {
+        return [
+            self::AVAILABLE,
+            self::IN_STOCK,
+            self::LIMITED_AVAILABILITY,
+            self::BACK_ORDER,
+            self::MADE_TO_ORDER,
+            self::PRE_ORDER,
+            self::PRE_SALE,
+            self::UNAVAILABLE,
+            self::RESERVED,
+            self::OUT_OF_STOCK,
+            self::SOLD_OUT
+        ];
+    }
 }

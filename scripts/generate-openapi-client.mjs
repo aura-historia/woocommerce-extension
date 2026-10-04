@@ -174,24 +174,6 @@ function cloneReferencedComponents(spec, componentRefs) {
     return clonedComponents;
 }
 
-function normalizeServer(server) {
-    if (!server || typeof server !== 'object') {
-        return server;
-    }
-
-    if (server.url === 'https://api.dev.aura-historia.com') {
-        return {
-            ...server,
-            url: 'https://api.aura-historia.com',
-            description:
-                server.description === 'Full Development-Server'
-                    ? 'Full Production-Server'
-                    : server.description,
-        };
-    }
-
-    return server;
-}
 
 function filterSpec(spec, operationIds) {
     const selectedOperations = [];
@@ -248,9 +230,7 @@ function filterSpec(spec, operationIds) {
     return {
         openapi: spec.openapi,
         info: spec.info,
-        servers: Array.isArray(spec.servers)
-            ? spec.servers.map(normalizeServer)
-            : [],
+        servers: Array.isArray(spec.servers) ? spec.servers : [],
         paths: filteredPaths,
         components: filteredComponents,
         tags: Array.isArray(spec.tags)
@@ -290,6 +270,8 @@ function removePath(config, relativePath) {
         [
             'run',
             '--rm',
+            '--network',
+            'none',
             '-v',
             `${projectRoot}:/local`,
             'alpine:3.22',
@@ -310,6 +292,8 @@ function runGenerator(config) {
     const dockerArgs = [
         'run',
         '--rm',
+        '--network',
+        'none',
         '-v',
         `${projectRoot}:/local`,
         config.generator.image,
@@ -464,6 +448,26 @@ function normalizeGeneratedPhpWhitespace(config) {
 
 function applyWordPressGeneratedClientPatches(config) {
     const outputPath = path.join(projectRoot, config.outputPath);
+
+    const productListingsPath = path.join(outputPath, 'Api', 'ProductListingsApi.php');
+    let productListings = readFileSync(productListingsPath, 'utf8');
+    productListings = replaceOrThrow(
+        productListings,
+        'if ($create_product_listing_data === null || (is_array($create_product_listing_data) && count($create_product_listing_data) === 0))',
+        'if ($create_product_listing_data === null)',
+        'Empty async product-listing batches are valid',
+    );
+    writeFileSync(productListingsPath, productListings, 'utf8');
+
+    const formDataProcessorPath = path.join(outputPath, 'FormDataProcessor.php');
+    let formDataProcessor = readFileSync(formDataProcessorPath, 'utf8');
+    formDataProcessor = replaceOrThrow(
+        formDataProcessor,
+        'array_is_list($source)',
+        '(!$source || array_keys($source) === range(0, count($source) - 1))',
+        'PHP 7.4 list compatibility',
+    );
+    writeFileSync(formDataProcessorPath, formDataProcessor, 'utf8');
 
     const configurationPath = path.join(outputPath, 'Configuration.php');
     let configuration = readFileSync(configurationPath, 'utf8');

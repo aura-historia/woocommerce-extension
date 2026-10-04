@@ -1,6 +1,6 @@
 <?php
 /**
- * PriceData
+ * ProductListingPriceData
  *
  * PHP version 8.1
  *
@@ -34,16 +34,15 @@ use \ArrayAccess;
 use \AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
 
 /**
- * PriceData Class Doc Comment
+ * ProductListingPriceData Class Doc Comment
  *
  * @category Class
- * @description Price information with currency
  * @package  AuraHistoria\PartnerConnect\InternalApi
  * @author   OpenAPI Generator team
  * @link     https://openapi-generator.tech
  * @implements \ArrayAccess<string, mixed>
  */
-class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
+class ProductListingPriceData implements ModelInterface, ArrayAccess, \JsonSerializable
 {
     public const DISCRIMINATOR = null;
 
@@ -52,7 +51,7 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      *
      * @var string
      */
-    protected static $openAPIModelName = 'PriceData';
+    protected static $openAPIModelName = 'ProductListingPriceData';
 
     /**
      * Array of property to type mappings. Used for (de)serialization
@@ -60,6 +59,7 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $openAPITypes = [
+        'type' => 'string',
         'currency' => '\AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData',
         'amount' => 'int'
     ];
@@ -72,6 +72,7 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @psalm-var array<string, string|null>
      */
     protected static $openAPIFormats = [
+        'type' => null,
         'currency' => null,
         'amount' => null
     ];
@@ -82,6 +83,7 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var boolean[]
      */
     protected static array $openAPINullables = [
+        'type' => false,
         'currency' => false,
         'amount' => false
     ];
@@ -172,6 +174,7 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $attributeMap = [
+        'type' => 'type',
         'currency' => 'currency',
         'amount' => 'amount'
     ];
@@ -182,6 +185,7 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $setters = [
+        'type' => 'setType',
         'currency' => 'setCurrency',
         'amount' => 'setAmount'
     ];
@@ -192,6 +196,7 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $getters = [
+        'type' => 'getType',
         'currency' => 'getCurrency',
         'amount' => 'getAmount'
     ];
@@ -237,6 +242,21 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
         return self::$openAPIModelName;
     }
 
+    public const TYPE_MONETARY = 'MONETARY';
+    public const TYPE_ON_REQUEST = 'ON_REQUEST';
+
+    /**
+     * Gets allowable values of the enum
+     *
+     * @return string[]
+     */
+    public function getTypeAllowableValues()
+    {
+        return [
+            self::TYPE_MONETARY,
+            self::TYPE_ON_REQUEST,
+        ];
+    }
 
     /**
      * Associative array for storing property values
@@ -253,6 +273,7 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
      */
     public function __construct(?array $data = null)
     {
+        $this->setIfExists('type', $data ?? [], null);
         $this->setIfExists('currency', $data ?? [], null);
         $this->setIfExists('amount', $data ?? [], null);
     }
@@ -284,6 +305,18 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
     {
         $invalidProperties = [];
 
+        if ($this->container['type'] === null) {
+            $invalidProperties[] = "'type' can't be null";
+        }
+        $allowedValues = $this->getTypeAllowableValues();
+        if (!is_null($this->container['type']) && !in_array($this->container['type'], $allowedValues, true)) {
+            $invalidProperties[] = sprintf(
+                "invalid value '%s' for 'type', must be one of '%s'",
+                $this->container['type'],
+                implode("', '", $allowedValues)
+            );
+        }
+
         if ($this->container['currency'] === null) {
             $invalidProperties[] = "'currency' can't be null";
         }
@@ -308,6 +341,43 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
         return count($this->listInvalidProperties()) === 0;
     }
 
+
+    /**
+     * Gets type
+     *
+     * @return string
+     */
+    public function getType()
+    {
+        return $this->container['type'];
+    }
+
+    /**
+     * Sets type
+     *
+     * @param string $type type
+     *
+     * @return self
+     */
+    public function setType($type)
+    {
+        if (is_null($type)) {
+            throw new \InvalidArgumentException('non-nullable type cannot be null');
+        }
+        $allowedValues = $this->getTypeAllowableValues();
+        if (!in_array($type, $allowedValues, true)) {
+            throw new \InvalidArgumentException(
+                sprintf(
+                    "Invalid value '%s' for 'type', must be one of '%s'",
+                    $type,
+                    implode("', '", $allowedValues)
+                )
+            );
+        }
+        $this->container['type'] = $type;
+
+        return $this;
+    }
 
     /**
      * Gets currency
@@ -349,7 +419,7 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
     /**
      * Sets amount
      *
-     * @param int $amount Price amount in minor currency units (e.g., cents for most supported currencies, whole yen for JPY)
+     * @param int $amount amount
      *
      * @return self
      */
@@ -360,7 +430,7 @@ class PriceData implements ModelInterface, ArrayAccess, \JsonSerializable
         }
 
         if (($amount < 0)) {
-            throw new \InvalidArgumentException('invalid value for $amount when calling PriceData., must be bigger than or equal to 0.');
+            throw new \InvalidArgumentException('invalid value for $amount when calling ProductListingPriceData., must be bigger than or equal to 0.');
         }
 
         $this->container['amount'] = $amount;

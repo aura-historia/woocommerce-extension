@@ -1,6 +1,6 @@
 <?php
 /**
- * PutProductData
+ * CreateProductListingData
  *
  * PHP version 8.1
  *
@@ -13,7 +13,7 @@
 /**
  * Aura Historia API Reference
  *
- * ## Overview  The Aura Historia API powers the Aura Historia antiques platform and its partner-facing integrations. It exposes product discovery, shop discovery, personalization, partner onboarding, and integration workflows on top of Aura Historia's serverless AWS platform.  This reference is designed for two audiences: - **Internal developers** building Aura Historia products, operational tooling, and backoffice workflows - **External partners and integrators** synchronizing inventory, consuming platform data, or   integrating with delegated access  ## Core API domains  - **Products and shops** — search, retrieve, and explore products, related products, product   history, and shop data - **Personalization** — manage watchlists, saved search filters, and user notifications - **Partner workflows** — submit partner applications, maintain partner shops, ingest catalog data   in batches, and receive WooCommerce webhooks - **Identity and access** — manage user accounts, Aura Historia access tokens, and OAuth 2.0   clients and token flows - **Billing** — create Stripe checkout, billing-portal, and subscription-management sessions  ## Authentication model  The API uses more than one authentication scheme depending on the route:  - **`BearerAuth`** — Cognito JWT bearer tokens for authenticated user, admin, and partner-user   workflows - **`AccessTokenAuth`** — Aura Historia opaque bearer access tokens created via   `/api/v1/me/access-tokens` or OAuth 2.0, primarily intended for partner automations and server-to-server   ingestion scenarios.  When a route lists multiple security schemes, any one of the listed schemes may be accepted. Some read endpoints can also be called without authentication, while a valid user token may enrich the response with personalized state such as watchlist, notification, or search-filter metadata.  ## Data and response conventions  - Localized resources frequently require **`language`** and **`currency`** parameters so the backend   can return localized text and normalized pricing - Errors are returned as **`application/problem+json`** using a consistent RFC 9457-style structure   with `status`, `title`, `error`, optional `source`, and optional `detail` - Many list and search endpoints use **cursor-based pagination** via `searchAfter` - Several partner ingestion endpoints are **asynchronous** and respond with **`202 Accepted`** after   work has been queued rather than fully processed  ## Environment endpoints  - **Development:** `https://api.dev.aura-historia.com` - **Production:** `https://api.aura-historia.com`  ## Notes for integrators  - Treat Aura Historia identifiers such as `shopId`, `productId`, `eventId`, `userSearchFilterId`,   and `partnerApplicationId` as opaque values - For partner product ingestion, `shopsProductId` is the partner-controlled identifier and should   remain stable within a shop - Endpoints marked `deprecated` or `x-disabled` are retained for reference only and should not be   used for new integrations
+ * ## Overview  The Aura Historia API powers the Aura Historia antiques platform and its partner-facing integrations. It exposes product discovery, listing source discovery, personalization, partner onboarding, and integration workflows on top of Aura Historia's serverless AWS platform.  This reference is designed for two audiences: - **Internal developers** building Aura Historia product-listings, operational tooling, and backoffice workflows - **External partners and integrators** synchronizing inventory, consuming platform data, or   integrating with delegated access  ## Core API domains  - **ProductListings and listing-sources** — search, retrieve, and explore product-listings, related product-listings, product   history, and listing source data - **Personalization** — manage watchlists, saved search filters, and user notifications - **Partner workflows** — submit partnership applications, maintain partnerships, ingest catalog data   in batches, and receive WooCommerce webhooks - **Identity and access** — manage user accounts, Aura Historia access tokens, and OAuth 2.0   clients and token flows - **Billing** — create Stripe checkout, billing-portal, and subscription-management sessions  ## Authentication model  The API uses more than one authentication scheme depending on the route:  - **`BearerAuth`** — Cognito **access** JWT bearer tokens for authenticated user, admin, and   partner-user workflows. Cognito ID tokens are not accepted as API credentials. - **`AccessTokenAuth`** — Aura Historia opaque bearer access tokens created via   `/api/v1/me/access-tokens` or OAuth 2.0, primarily intended for partner automations and server-to-server   ingestion scenarios.  When a route lists multiple security schemes, any one of the listed schemes may be accepted. Some read endpoints can also be called without authentication, while a valid user token may enrich the response with personalized state such as watchlist, notification, or search-filter metadata.  ## Data and response conventions  - **PATCH:** an omitted request member remains unchanged. A documented nullable PATCH member   accepts `null` to clear its value; `null` for any other member returns `400 BAD_BODY_VALUE`.   Use `[]`, not `null`, to replace a non-null collection with an empty collection. Empty HTTP   bodies are invalid, `{}` is a valid object-PATCH no-op, and the partner-product PATCH `[]`   remains a valid empty batch. Responses may omit absent optional values. - Product detail, watchlist, and saved-search match reads accept optional **`language`** and   **`currency`** parameters. Currency defaults to `EUR`. Detail pricing contains the seller's source   amounts, converted display amounts, and FX valuation metadata. Active product-listings use the latest persisted   snapshot; sold product-listings use their immutable sale snapshot. Product history remains immutable, source-only,   and is not localized. - Request-wide errors are returned as **`application/problem+json`** using a consistent RFC 9457-style structure   with `status`, `title`, `error`, optional `source`, and optional `detail` - Many list and search endpoints use **cursor-based pagination** via `searchAfter` - Origin API responses include server-generated `X-Request-Id` and `X-Correlation-Id` headers. Clients may send `X-Correlation-Id` to preserve a trace only when it is a 1–128-character ASCII value containing letters, digits, `.`, `_`, or `-`; invalid values are replaced. Both headers are CORS-exposed; CloudFront removes them from viewer responses on the six cache-enabled discovery behaviors so shared cache hits cannot replay origin IDs. - Requests are limited to 1 MiB and time out after 30 seconds. - `GET /api/v1/health` is a process liveness check. `GET /api/v1/ready` returns `204` only when the configured PostgreSQL and OpenSearch dependencies are reachable; it otherwise returns `503`. - WooCommerce webhook ingestion responds with **`204 No Content`** after signed validation. A mapped raw-capture command receives `204` only after confirmed shared FIFO admission; authorized ignored create/update status events are no-op `204`. Queue admission is not raw capture, provider receipt persistence, canonical normalization, or search visibility. Capture conflicts are handled by the consumer, not returned synchronously; existing partner Product batch writes remain synchronous.  ## Environment endpoints  - **Development:** `https://api.stage.aura-historia.com` - **Production:** `https://api.aura-historia.com`  ## Notes for integrators  - Treat Aura Historia identifiers such as `listingSourceId`, `productListingId`, `eventId`, `userSearchFilterId`,   and `partnershipApplicationId` as opaque values - For partner product ingestion, `sourceListingId` is the partner-controlled identifier and should   remain stable within a listing source - Endpoints marked `deprecated` or `x-disabled` are retained for reference only and should not be   used for new integrations
  *
  * The version of the OpenAPI document: 1.0.0
  * Generated by: https://openapi-generator.tech
@@ -34,16 +34,16 @@ use \ArrayAccess;
 use \AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
 
 /**
- * PutProductData Class Doc Comment
+ * CreateProductListingData Class Doc Comment
  *
  * @category Class
- * @description Data for upserting a single product via the partner batch-upsert endpoint. Only &#x60;shopsProductId&#x60; is required. All other fields are optional.  During later asynchronous ingestion: - If the product **does not yet exist**, it is created using all provided fields.   Omitting &#x60;title&#x60;, &#x60;url&#x60;, or &#x60;state&#x60; will result in placeholder defaults being applied   internally (empty title, a placeholder URL, and &#x60;LISTED&#x60; state respectively). - If the product **already exists**, &#x60;price&#x60;, &#x60;priceEstimateMin&#x60;,   &#x60;priceEstimateMax&#x60;, &#x60;state&#x60;, &#x60;url&#x60;, &#x60;images&#x60;, &#x60;auctionStart&#x60;, and &#x60;auctionEnd&#x60;   participate in the update path. - On the update path, omitting or sending &#x60;null&#x60; for &#x60;price&#x60;, &#x60;priceEstimateMin&#x60;,   &#x60;priceEstimateMax&#x60;, &#x60;url&#x60;, &#x60;auctionStart&#x60;, or &#x60;auctionEnd&#x60; leaves the stored value   unchanged. - On the update path, omitting &#x60;images&#x60; or sending &#x60;null&#x60; is treated as an empty list   and therefore clears all stored images.
+ * @description Data for creating a single product via the partner batch-create endpoint.
  * @package  AuraHistoria\PartnerConnect\InternalApi
  * @author   OpenAPI Generator team
  * @link     https://openapi-generator.tech
  * @implements \ArrayAccess<string, mixed>
  */
-class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
+class CreateProductListingData implements ModelInterface, ArrayAccess, \JsonSerializable
 {
     public const DISCRIMINATOR = null;
 
@@ -52,7 +52,7 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
      *
      * @var string
      */
-    protected static $openAPIModelName = 'PutProductData';
+    protected static $openAPIModelName = 'CreateProductListingData';
 
     /**
      * Array of property to type mappings. Used for (de)serialization
@@ -60,20 +60,16 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $openAPITypes = [
-        'shops_product_id' => 'string',
+        'source_listing_id' => 'string',
         'title' => '\AuraHistoria\PartnerConnect\InternalApi\Model\LocalizedTextData',
         'description' => '\AuraHistoria\PartnerConnect\InternalApi\Model\LocalizedTextData',
-        'price' => '\AuraHistoria\PartnerConnect\InternalApi\Model\PriceData',
+        'price' => '\AuraHistoria\PartnerConnect\InternalApi\Model\ProductListingPriceData',
         'price_estimate_min' => '\AuraHistoria\PartnerConnect\InternalApi\Model\PriceData',
         'price_estimate_max' => '\AuraHistoria\PartnerConnect\InternalApi\Model\PriceData',
-        'state' => '\AuraHistoria\PartnerConnect\InternalApi\Model\ProductStateData',
+        'availability' => '\AuraHistoria\PartnerConnect\InternalApi\Model\ListingAvailabilityData',
         'url' => 'string',
         'images' => 'string[]',
-        'auction_start' => '\DateTime',
-        'auction_end' => '\DateTime',
-        'seller_name' => 'string',
-        'structured_address' => '\AuraHistoria\PartnerConnect\InternalApi\Model\StructuredAddressData',
-        'geo_address' => '\AuraHistoria\PartnerConnect\InternalApi\Model\GeoAddressData'
+        'auction' => '\AuraHistoria\PartnerConnect\InternalApi\Model\ProductListingAuctionData'
     ];
 
     /**
@@ -84,20 +80,16 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @psalm-var array<string, string|null>
      */
     protected static $openAPIFormats = [
-        'shops_product_id' => null,
+        'source_listing_id' => null,
         'title' => null,
         'description' => null,
         'price' => null,
         'price_estimate_min' => null,
         'price_estimate_max' => null,
-        'state' => null,
+        'availability' => null,
         'url' => 'uri',
         'images' => 'uri',
-        'auction_start' => 'date-time',
-        'auction_end' => 'date-time',
-        'seller_name' => null,
-        'structured_address' => null,
-        'geo_address' => null
+        'auction' => null
     ];
 
     /**
@@ -106,20 +98,16 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var boolean[]
      */
     protected static array $openAPINullables = [
-        'shops_product_id' => false,
+        'source_listing_id' => false,
         'title' => true,
         'description' => true,
         'price' => true,
         'price_estimate_min' => true,
         'price_estimate_max' => true,
-        'state' => true,
-        'url' => true,
-        'images' => true,
-        'auction_start' => true,
-        'auction_end' => true,
-        'seller_name' => true,
-        'structured_address' => true,
-        'geo_address' => true
+        'availability' => true,
+        'url' => false,
+        'images' => false,
+        'auction' => false
     ];
 
     /**
@@ -208,20 +196,16 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $attributeMap = [
-        'shops_product_id' => 'shopsProductId',
+        'source_listing_id' => 'sourceListingId',
         'title' => 'title',
         'description' => 'description',
         'price' => 'price',
         'price_estimate_min' => 'priceEstimateMin',
         'price_estimate_max' => 'priceEstimateMax',
-        'state' => 'state',
+        'availability' => 'availability',
         'url' => 'url',
         'images' => 'images',
-        'auction_start' => 'auctionStart',
-        'auction_end' => 'auctionEnd',
-        'seller_name' => 'sellerName',
-        'structured_address' => 'structuredAddress',
-        'geo_address' => 'geoAddress'
+        'auction' => 'auction'
     ];
 
     /**
@@ -230,20 +214,16 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $setters = [
-        'shops_product_id' => 'setShopsProductId',
+        'source_listing_id' => 'setSourceListingId',
         'title' => 'setTitle',
         'description' => 'setDescription',
         'price' => 'setPrice',
         'price_estimate_min' => 'setPriceEstimateMin',
         'price_estimate_max' => 'setPriceEstimateMax',
-        'state' => 'setState',
+        'availability' => 'setAvailability',
         'url' => 'setUrl',
         'images' => 'setImages',
-        'auction_start' => 'setAuctionStart',
-        'auction_end' => 'setAuctionEnd',
-        'seller_name' => 'setSellerName',
-        'structured_address' => 'setStructuredAddress',
-        'geo_address' => 'setGeoAddress'
+        'auction' => 'setAuction'
     ];
 
     /**
@@ -252,20 +232,16 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
      * @var string[]
      */
     protected static $getters = [
-        'shops_product_id' => 'getShopsProductId',
+        'source_listing_id' => 'getSourceListingId',
         'title' => 'getTitle',
         'description' => 'getDescription',
         'price' => 'getPrice',
         'price_estimate_min' => 'getPriceEstimateMin',
         'price_estimate_max' => 'getPriceEstimateMax',
-        'state' => 'getState',
+        'availability' => 'getAvailability',
         'url' => 'getUrl',
         'images' => 'getImages',
-        'auction_start' => 'getAuctionStart',
-        'auction_end' => 'getAuctionEnd',
-        'seller_name' => 'getSellerName',
-        'structured_address' => 'getStructuredAddress',
-        'geo_address' => 'getGeoAddress'
+        'auction' => 'getAuction'
     ];
 
     /**
@@ -325,20 +301,16 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
      */
     public function __construct(?array $data = null)
     {
-        $this->setIfExists('shops_product_id', $data ?? [], null);
+        $this->setIfExists('source_listing_id', $data ?? [], null);
         $this->setIfExists('title', $data ?? [], null);
         $this->setIfExists('description', $data ?? [], null);
         $this->setIfExists('price', $data ?? [], null);
         $this->setIfExists('price_estimate_min', $data ?? [], null);
         $this->setIfExists('price_estimate_max', $data ?? [], null);
-        $this->setIfExists('state', $data ?? [], null);
+        $this->setIfExists('availability', $data ?? [], null);
         $this->setIfExists('url', $data ?? [], null);
         $this->setIfExists('images', $data ?? [], null);
-        $this->setIfExists('auction_start', $data ?? [], null);
-        $this->setIfExists('auction_end', $data ?? [], null);
-        $this->setIfExists('seller_name', $data ?? [], null);
-        $this->setIfExists('structured_address', $data ?? [], null);
-        $this->setIfExists('geo_address', $data ?? [], null);
+        $this->setIfExists('auction', $data ?? [], null);
     }
 
     /**
@@ -368,8 +340,14 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
     {
         $invalidProperties = [];
 
-        if ($this->container['shops_product_id'] === null) {
-            $invalidProperties[] = "'shops_product_id' can't be null";
+        if ($this->container['source_listing_id'] === null) {
+            $invalidProperties[] = "'source_listing_id' can't be null";
+        }
+        if ($this->container['url'] === null) {
+            $invalidProperties[] = "'url' can't be null";
+        }
+        if ($this->container['images'] === null) {
+            $invalidProperties[] = "'images' can't be null";
         }
         return $invalidProperties;
     }
@@ -387,28 +365,28 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
 
 
     /**
-     * Gets shops_product_id
+     * Gets source_listing_id
      *
      * @return string
      */
-    public function getShopsProductId()
+    public function getSourceListingId()
     {
-        return $this->container['shops_product_id'];
+        return $this->container['source_listing_id'];
     }
 
     /**
-     * Sets shops_product_id
+     * Sets source_listing_id
      *
-     * @param string $shops_product_id The shop's own identifier for the product. Must be unique within the shop.
+     * @param string $source_listing_id The listing source's own identifier for the product. Must be unique within the listing source.
      *
      * @return self
      */
-    public function setShopsProductId($shops_product_id)
+    public function setSourceListingId($source_listing_id)
     {
-        if (is_null($shops_product_id)) {
-            throw new \InvalidArgumentException('non-nullable shops_product_id cannot be null');
+        if (is_null($source_listing_id)) {
+            throw new \InvalidArgumentException('non-nullable source_listing_id cannot be null');
         }
-        $this->container['shops_product_id'] = $shops_product_id;
+        $this->container['source_listing_id'] = $source_listing_id;
 
         return $this;
     }
@@ -426,7 +404,7 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
     /**
      * Sets title
      *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\LocalizedTextData|null $title Optional localized title for the product. Used only when creating a new product.
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\LocalizedTextData|null $title Optional localized title. Omit or send `null` when no title is available.
      *
      * @return self
      */
@@ -460,7 +438,7 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
     /**
      * Sets description
      *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\LocalizedTextData|null $description Optional localized description of the product. Used only when creating a new product.
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\LocalizedTextData|null $description Optional localized description. Omit or send `null` when no description is available.
      *
      * @return self
      */
@@ -484,7 +462,7 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
     /**
      * Gets price
      *
-     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\PriceData|null
+     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\ProductListingPriceData|null
      */
     public function getPrice()
     {
@@ -494,7 +472,7 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
     /**
      * Sets price
      *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\PriceData|null $price Optional asking price for the product. Applied on create and on update when a non-null value is provided. Omit or send `null` to leave the current stored price unchanged.
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\ProductListingPriceData|null $price Optional asking-price assertion for the product.
      *
      * @return self
      */
@@ -528,7 +506,7 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
     /**
      * Sets price_estimate_min
      *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\PriceData|null $price_estimate_min Optional lower bound of the estimated price range. Applied on both create and update paths. Omit or send `null` to leave the current stored lower bound unchanged.
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\PriceData|null $price_estimate_min Optional lower bound of the estimated price range
      *
      * @return self
      */
@@ -562,7 +540,7 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
     /**
      * Sets price_estimate_max
      *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\PriceData|null $price_estimate_max Optional upper bound of the estimated price range. Applied on both create and update paths. Omit or send `null` to leave the current stored upper bound unchanged.
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\PriceData|null $price_estimate_max Optional upper bound of the estimated price range
      *
      * @return self
      */
@@ -584,35 +562,35 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
     }
 
     /**
-     * Gets state
+     * Gets availability
      *
-     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\ProductStateData|null
+     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\ListingAvailabilityData|null
      */
-    public function getState()
+    public function getAvailability()
     {
-        return $this->container['state'];
+        return $this->container['availability'];
     }
 
     /**
-     * Sets state
+     * Sets availability
      *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\ProductStateData|null $state Optional product state. Applied on both create and update paths.
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\ListingAvailabilityData|null $availability Omit or send `null` when Aura has no reliable current availability assertion.
      *
      * @return self
      */
-    public function setState($state)
+    public function setAvailability($availability)
     {
-        if (is_null($state)) {
-            array_push($this->openAPINullablesSetToNull, 'state');
+        if (is_null($availability)) {
+            array_push($this->openAPINullablesSetToNull, 'availability');
         } else {
             $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
-            $index = array_search('state', $nullablesSetToNull);
+            $index = array_search('availability', $nullablesSetToNull);
             if ($index !== FALSE) {
                 unset($nullablesSetToNull[$index]);
                 $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
             }
         }
-        $this->container['state'] = $state;
+        $this->container['availability'] = $availability;
 
         return $this;
     }
@@ -620,7 +598,7 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
     /**
      * Gets url
      *
-     * @return string|null
+     * @return string
      */
     public function getUrl()
     {
@@ -630,21 +608,14 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
     /**
      * Sets url
      *
-     * @param string|null $url URL to the product on the shop's website. Applied on both create and update paths. Omit or send `null` to leave the current stored URL unchanged.
+     * @param string $url URL to the product on the listing source's website
      *
      * @return self
      */
     public function setUrl($url)
     {
         if (is_null($url)) {
-            array_push($this->openAPINullablesSetToNull, 'url');
-        } else {
-            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
-            $index = array_search('url', $nullablesSetToNull);
-            if ($index !== FALSE) {
-                unset($nullablesSetToNull[$index]);
-                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
-            }
+            throw new \InvalidArgumentException('non-nullable url cannot be null');
         }
         $this->container['url'] = $url;
 
@@ -654,7 +625,7 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
     /**
      * Gets images
      *
-     * @return string[]|null
+     * @return string[]
      */
     public function getImages()
     {
@@ -664,21 +635,14 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
     /**
      * Sets images
      *
-     * @param string[]|null $images List of image URLs for the product. Applied on both create and update paths. On update, the provided array replaces the stored image set; omitting `images` or sending `null` is treated as an empty list and therefore clears all stored images.
+     * @param string[] $images List of image URLs for the product. May be empty.
      *
      * @return self
      */
     public function setImages($images)
     {
         if (is_null($images)) {
-            array_push($this->openAPINullablesSetToNull, 'images');
-        } else {
-            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
-            $index = array_search('images', $nullablesSetToNull);
-            if ($index !== FALSE) {
-                unset($nullablesSetToNull[$index]);
-                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
-            }
+            throw new \InvalidArgumentException('non-nullable images cannot be null');
         }
         $this->container['images'] = $images;
 
@@ -686,171 +650,28 @@ class PutProductData implements ModelInterface, ArrayAccess, \JsonSerializable
     }
 
     /**
-     * Gets auction_start
+     * Gets auction
      *
-     * @return \DateTime|null
+     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\ProductListingAuctionData|null
      */
-    public function getAuctionStart()
+    public function getAuction()
     {
-        return $this->container['auction_start'];
+        return $this->container['auction'];
     }
 
     /**
-     * Sets auction_start
+     * Sets auction
      *
-     * @param \DateTime|null $auction_start RFC3339 timestamp of when the auction for this product starts. Only relevant for auction-house shop types. Applied on both create and update paths. Omit or send `null` to leave the current stored start timestamp unchanged.
+     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\ProductListingAuctionData|null $auction Omit for no Auction or lot changes, or send an asserted nested Auction/lot-facts patch. `null` is invalid. `auctionId` must identify an existing Auction for this ListingSource.
      *
      * @return self
      */
-    public function setAuctionStart($auction_start)
+    public function setAuction($auction)
     {
-        if (is_null($auction_start)) {
-            array_push($this->openAPINullablesSetToNull, 'auction_start');
-        } else {
-            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
-            $index = array_search('auction_start', $nullablesSetToNull);
-            if ($index !== FALSE) {
-                unset($nullablesSetToNull[$index]);
-                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
-            }
+        if (is_null($auction)) {
+            throw new \InvalidArgumentException('non-nullable auction cannot be null');
         }
-        $this->container['auction_start'] = $auction_start;
-
-        return $this;
-    }
-
-    /**
-     * Gets auction_end
-     *
-     * @return \DateTime|null
-     */
-    public function getAuctionEnd()
-    {
-        return $this->container['auction_end'];
-    }
-
-    /**
-     * Sets auction_end
-     *
-     * @param \DateTime|null $auction_end RFC3339 timestamp of when the auction for this product ends. Only relevant for auction-house shop types. Applied on both create and update paths. Omit or send `null` to leave the current stored end timestamp unchanged.
-     *
-     * @return self
-     */
-    public function setAuctionEnd($auction_end)
-    {
-        if (is_null($auction_end)) {
-            array_push($this->openAPINullablesSetToNull, 'auction_end');
-        } else {
-            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
-            $index = array_search('auction_end', $nullablesSetToNull);
-            if ($index !== FALSE) {
-                unset($nullablesSetToNull[$index]);
-                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
-            }
-        }
-        $this->container['auction_end'] = $auction_end;
-
-        return $this;
-    }
-
-    /**
-     * Gets seller_name
-     *
-     * @return string|null
-     */
-    public function getSellerName()
-    {
-        return $this->container['seller_name'];
-    }
-
-    /**
-     * Sets seller_name
-     *
-     * @param string|null $seller_name Optional raw name of the secondary seller for this product. Only applicable for `AUCTION_PLATFORM` and `MARKETPLACE` shop types. When provided, the backend resolves the seller shop by this name and associates the product with that seller. When omitted, or when the shop type is neither `AUCTION_PLATFORM` nor `MARKETPLACE`, the partner shop itself is used as the seller. Used only when creating a new product.
-     *
-     * @return self
-     */
-    public function setSellerName($seller_name)
-    {
-        if (is_null($seller_name)) {
-            array_push($this->openAPINullablesSetToNull, 'seller_name');
-        } else {
-            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
-            $index = array_search('seller_name', $nullablesSetToNull);
-            if ($index !== FALSE) {
-                unset($nullablesSetToNull[$index]);
-                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
-            }
-        }
-        $this->container['seller_name'] = $seller_name;
-
-        return $this;
-    }
-
-    /**
-     * Gets structured_address
-     *
-     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\StructuredAddressData|null
-     */
-    public function getStructuredAddress()
-    {
-        return $this->container['structured_address'];
-    }
-
-    /**
-     * Sets structured_address
-     *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\StructuredAddressData|null $structured_address Optional structured address to attach to the product for geo-aware indexing and search. Used only when creating a new product.
-     *
-     * @return self
-     */
-    public function setStructuredAddress($structured_address)
-    {
-        if (is_null($structured_address)) {
-            array_push($this->openAPINullablesSetToNull, 'structured_address');
-        } else {
-            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
-            $index = array_search('structured_address', $nullablesSetToNull);
-            if ($index !== FALSE) {
-                unset($nullablesSetToNull[$index]);
-                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
-            }
-        }
-        $this->container['structured_address'] = $structured_address;
-
-        return $this;
-    }
-
-    /**
-     * Gets geo_address
-     *
-     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\GeoAddressData|null
-     */
-    public function getGeoAddress()
-    {
-        return $this->container['geo_address'];
-    }
-
-    /**
-     * Sets geo_address
-     *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\GeoAddressData|null $geo_address Optional coordinates to attach to the product for geo-aware indexing and search. Used only when creating a new product.
-     *
-     * @return self
-     */
-    public function setGeoAddress($geo_address)
-    {
-        if (is_null($geo_address)) {
-            array_push($this->openAPINullablesSetToNull, 'geo_address');
-        } else {
-            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
-            $index = array_search('geo_address', $nullablesSetToNull);
-            if ($index !== FALSE) {
-                unset($nullablesSetToNull[$index]);
-                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
-            }
-        }
-        $this->container['geo_address'] = $geo_address;
+        $this->container['auction'] = $auction;
 
         return $this;
     }

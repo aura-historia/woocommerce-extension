@@ -7,7 +7,6 @@
 
 namespace AuraHistoria\PartnerConnect;
 
-use AuraHistoria\PartnerConnect\InternalApi\Model\PatchShopData;
 use WC_Data_Store;
 use WC_Webhook;
 use WP_Error;
@@ -15,6 +14,8 @@ use WP_Error;
 if (!defined("ABSPATH")) {
     exit();
 }
+
+require_once __DIR__ . "/class-type-id-validator.php";
 
 /**
  * Manages the WooCommerce webhooks owned by this plugin.
@@ -48,7 +49,7 @@ class Webhook_Manager
     public static function default_settings()
     {
         return [
-            "shop_id" => "",
+            "listing_source_id" => "",
             "access_token" => "",
             "secret" => "",
         ];
@@ -65,55 +66,51 @@ class Webhook_Manager
     }
 
     /**
-     * Normalizes a shop UUID.
+     * Normalizes a listing source TypeID.
      *
-     * @param string $shop_id Shop UUID.
+     * @param string $listing_source_id Listing source TypeID.
      * @return string
      */
-    public static function normalize_shop_id($shop_id)
+    public static function normalize_listing_source_id($listing_source_id)
     {
-        return strtolower(trim(sanitize_text_field((string) $shop_id)));
+        return is_string($listing_source_id) ? $listing_source_id : "";
     }
 
     /**
-     * Returns whether the given shop ID looks like a UUID.
+     * Checks the canonical ls_ TypeID format and UUIDv7 payload.
      *
-     * @param string $shop_id Shop UUID.
+     * @param string $listing_source_id Listing source TypeID.
      * @return bool
      */
-    public static function is_valid_shop_id($shop_id)
+    public static function is_valid_listing_source_id($listing_source_id)
     {
-        return 1 ===
-            preg_match(
-                "/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i",
-                self::normalize_shop_id($shop_id),
-            );
+        return Type_ID_Validator::is_valid($listing_source_id, "ls_");
     }
 
     /**
-     * Normalizes an Aura Historia access token.
+     * Preserves an opaque bearer token exactly as issued. Altering whitespace or
+     * control characters here could turn an invalid credential into a valid one.
      *
-     * @param string $access_token Aura Historia access token.
+     * @param mixed $access_token Aura Historia access token.
      * @return string
      */
     public static function normalize_access_token($access_token)
     {
-        return trim(sanitize_text_field((string) $access_token));
+        return is_string($access_token) ? $access_token : "";
     }
 
     /**
-     * Returns whether the given Aura Historia access token matches the expected lightweight format.
+     * Accepts nonempty RFC 6750 bearer-token characters without assuming a
+     * particular backend token prefix. Whitespace and control bytes cannot enter
+     * an Authorization header.
      *
-     * @param string $access_token Aura Historia access token.
+     * @param mixed $access_token Aura Historia access token.
      * @return bool
      */
     public static function is_valid_access_token($access_token)
     {
-        return 1 ===
-            preg_match(
-                "/\Aaurahistoria_accesstoken_[A-Za-z0-9]{6,}_[A-Za-z0-9]{12,}\z/",
-                self::normalize_access_token($access_token),
-            );
+        return is_string($access_token) &&
+            1 === preg_match('/\A[A-Za-z0-9\-._~+\/]+=*\z/', $access_token);
     }
 
     /**
@@ -138,41 +135,22 @@ class Webhook_Manager
     }
 
     /**
-     * Returns the backend shop registration URL.
-     *
-     * @param string $shop_id Shop UUID.
-     * @return string
-     */
-    public static function get_shop_registration_url($shop_id)
-    {
-        $shop_id = self::normalize_shop_id($shop_id);
-        $base_url = self::get_backend_base_url();
-
-        if (!$base_url || !self::is_valid_shop_id($shop_id)) {
-            return "";
-        }
-
-        return $base_url . "/api/v1/shops/" . rawurlencode($shop_id);
-    }
-
-    /**
      * Returns the backend webhook delivery URL.
      *
-     * @param string $shop_id Shop UUID.
+     * @param string $listing_source_id Listing source TypeID.
      * @return string
      */
-    public static function get_webhook_endpoint_url($shop_id)
+    public static function get_webhook_endpoint_url($listing_source_id)
     {
-        $shop_id = self::normalize_shop_id($shop_id);
         $base_url = self::get_backend_base_url();
 
-        if (!$base_url || !self::is_valid_shop_id($shop_id)) {
+        if (!$base_url || !self::is_valid_listing_source_id($listing_source_id)) {
             return "";
         }
 
         return $base_url .
             "/api/v1/webhooks/woocommerce/" .
-            rawurlencode($shop_id);
+            rawurlencode($listing_source_id);
     }
 
     /**
@@ -202,6 +180,62 @@ class Webhook_Manager
     }
 
     /**
+     * Adds bearer auth only to signed deliveries of our managed webhooks.
+     *
+     * @param array  $args HTTP request arguments.
+     * @param string $url  Request URL.
+     * @return array
+     */
+    public static function authorize_delivery($args, $url)
+    {
+        $manager = new self();
+        $settings = $manager->get_settings();
+        if (
+            !self::is_valid_listing_source_id($settings["listing_source_id"]) ||
+            !self::is_valid_access_token($settings["access_token"]) ||
+            self::get_webhook_endpoint_url($settings["listing_source_id"]) !== $url ||
+            !is_array($args) ||
+            empty($args["headers"]) ||
+            !is_array($args["headers"])
+        ) {
+            return $args;
+        }
+
+        $headers = array_change_key_case($args["headers"], CASE_LOWER);
+        $id = isset($headers["x-wc-webhook-id"])
+            ? absint($headers["x-wc-webhook-id"])
+            : 0;
+        $topic = isset($headers["x-wc-webhook-topic"])
+            ? $headers["x-wc-webhook-topic"]
+            : "";
+        $ids = $manager->get_webhook_ids();
+        $payload = isset($args["body"]) && is_string($args["body"])
+            ? json_decode($args["body"], true)
+            : null;
+        $signature = isset($headers["x-wc-webhook-signature"])
+            ? $headers["x-wc-webhook-signature"]
+            : "";
+        if (
+            !$id ||
+            !isset($ids[$topic]) ||
+            $ids[$topic] !== $id ||
+            !is_string($signature) ||
+            !is_array($payload) ||
+            !isset($payload["id"]) ||
+            !hash_equals(
+                base64_encode(hash_hmac("sha256", $args["body"], $settings["secret"], true)),
+                $signature,
+            ) ||
+            array_key_exists("authorization", $headers)
+        ) {
+            return $args;
+        }
+
+        $args["headers"]["Authorization"] = "Bearer " . $settings["access_token"];
+        return $args;
+    }
+
+    /**
      * Marks the managed webhooks for synchronization.
      *
      * @return void
@@ -224,32 +258,19 @@ class Webhook_Manager
             $settings = [];
         }
 
-        $settings = wp_parse_args($settings, self::default_settings());
-        $needs_migration = isset($settings["api_key"]);
-
-        $settings["shop_id"] = isset($settings["shop_id"])
-            ? self::normalize_shop_id($settings["shop_id"])
-            : "";
-        $legacy_access_token = isset($settings["api_key"])
-            ? self::normalize_access_token($settings["api_key"])
-            : "";
-        $settings["access_token"] = isset($settings["access_token"])
-            ? self::normalize_access_token($settings["access_token"])
-            : $legacy_access_token;
-
-        if ($needs_migration) {
-            unset($settings["api_key"]);
-        }
-        $settings["secret"] = isset($settings["secret"])
-            ? sanitize_text_field((string) $settings["secret"])
-            : "";
+        $stored = wp_parse_args($settings, self::default_settings());
+        $settings = [
+            "listing_source_id" => self::normalize_listing_source_id(
+                $stored["listing_source_id"],
+            ),
+            "access_token" => self::normalize_access_token(
+                $stored["access_token"],
+            ),
+            "secret" => sanitize_text_field((string) $stored["secret"]),
+        ];
 
         if ("" === $settings["secret"]) {
             $settings["secret"] = self::generate_secret();
-            $needs_migration = true;
-        }
-
-        if ($needs_migration) {
             update_option(self::OPTION_SETTINGS, $settings, false);
         }
 
@@ -353,16 +374,17 @@ class Webhook_Manager
 
         try {
             $settings = $this->get_settings();
-            $shop_id = $settings["shop_id"];
+            $listing_source_id = $settings["listing_source_id"];
             $access_token = $settings["access_token"];
-            $endpoint_url = self::get_webhook_endpoint_url($shop_id);
+            $endpoint_url = self::get_webhook_endpoint_url($listing_source_id);
             $user_id = $this->resolve_webhook_user_id();
             $webhook_ids = $this->get_webhook_ids();
             $setup_error = null;
-            $has_shop_id = "" !== $shop_id;
+            $has_listing_source_id = "" !== $listing_source_id;
             $has_access_token = "" !== $access_token;
 
             if (!$user_id) {
+                $this->pause_webhooks_best_effort();
                 return $this->record_sync_error(
                     new WP_Error(
                         "ahpc_missing_user",
@@ -374,7 +396,7 @@ class Webhook_Manager
                 );
             }
 
-            if ($has_shop_id || $has_access_token) {
+            if ($has_listing_source_id || $has_access_token) {
                 if (!self::get_backend_base_url()) {
                     $setup_error = new WP_Error(
                         "ahpc_missing_backend_base_url",
@@ -383,11 +405,11 @@ class Webhook_Manager
                             "aura-historia-partner-connect",
                         ),
                     );
-                } elseif ($has_shop_id && !self::is_valid_shop_id($shop_id)) {
+                } elseif ($has_listing_source_id && !self::is_valid_listing_source_id($listing_source_id)) {
                     $setup_error = new WP_Error(
-                        "ahpc_invalid_shop_id",
+                        "ahpc_invalid_listing_source_id",
                         __(
-                            "The OAuth connection returned an invalid Aura Historia Shop ID. Reconnect this store and try once more.",
+                            "The connection returned an invalid Aura Historia Listing Source ID. Reconnect this store and try once more.",
                             "aura-historia-partner-connect",
                         ),
                     );
@@ -399,7 +421,7 @@ class Webhook_Manager
                             "aura-historia-partner-connect",
                         ),
                     );
-                } elseif (!$has_shop_id || !$has_access_token) {
+                } elseif (!$has_listing_source_id || !$has_access_token) {
                     $setup_error = null;
                 } elseif ("" === $endpoint_url) {
                     $setup_error = new WP_Error(
@@ -409,27 +431,23 @@ class Webhook_Manager
                             "aura-historia-partner-connect",
                         ),
                     );
-                } else {
-                    $registration_result = $this->register_webhook_secret(
-                        $shop_id,
-                        $access_token,
-                        $settings["secret"],
+                } elseif (null === Store_Locale::get_currency()) {
+                    $setup_error = new WP_Error(
+                        "ahpc_unsupported_currency",
+                        __(
+                            "The WooCommerce store currency is not supported by Aura Historia. Select a supported currency before connecting this store.",
+                            "aura-historia-partner-connect",
+                        ),
                     );
-
-                    if (is_wp_error($registration_result)) {
-                        $setup_error = $registration_result;
-                    }
                 }
             }
 
-            $desired_status = $this->get_desired_status(
-                $settings,
-                $endpoint_url,
-                $setup_error,
-            );
-
+            // Persist all local changes in a paused state before sending the
+            // signing secret to the backend. A failed PUT must never leave an
+            // old active webhook delivering with a new or unregistered secret.
             foreach (array_keys($this->get_managed_topics()) as $topic) {
                 if (!wc_is_webhook_valid_topic($topic)) {
+                    $this->pause_webhooks_best_effort();
                     return $this->record_sync_error(
                         new WP_Error(
                             "ahpc_invalid_topic",
@@ -450,47 +468,104 @@ class Webhook_Manager
                         $topic,
                         $webhook_ids,
                     );
-                } catch (\Exception $exception) {
+                } catch (\Throwable $exception) {
+                    $this->pause_webhooks_best_effort();
                     return $this->record_sync_error(
                         new WP_Error(
                             "ahpc_webhook_load_failed",
-                            $exception->getMessage(),
+                            __("A managed webhook could not be loaded. Retry the synchronization.", "aura-historia-partner-connect"),
                         ),
                     );
                 }
 
-                $save_result = $this->save_managed_webhook(
-                    $webhook,
-                    $topic,
-                    $desired_status,
-                    $endpoint_url,
-                    $settings["secret"],
-                    $user_id,
-                );
+                try {
+                    $save_result = $this->save_managed_webhook(
+                        $webhook,
+                        $topic,
+                        "paused",
+                        $endpoint_url,
+                        $settings["secret"],
+                        $user_id,
+                    );
+                } catch (\Throwable $exception) {
+                    $save_result = new WP_Error(
+                        "ahpc_webhook_save_failed",
+                        __("A managed webhook could not be saved. Retry the synchronization.", "aura-historia-partner-connect"),
+                    );
+                }
 
                 if (is_wp_error($save_result)) {
+                    $this->pause_webhooks_best_effort();
                     return $this->record_sync_error($save_result);
                 }
 
                 $webhook_ids[$topic] = absint($webhook->get_id());
+                // Preserve newly created IDs even if a later stage fails.
+                update_option(self::OPTION_WEBHOOK_IDS, $webhook_ids, false);
             }
 
-            update_option(self::OPTION_WEBHOOK_IDS, $webhook_ids, false);
+            if (!$setup_error && "" !== $listing_source_id && "" !== $access_token) {
+                $registration_result = $this->reconcile_ingestion_configuration(
+                    $listing_source_id,
+                    $access_token,
+                    $settings["secret"],
+                );
+                if (is_wp_error($registration_result)) {
+                    $setup_error = $registration_result;
+                } else {
+                    foreach (array_keys($this->get_managed_topics()) as $topic) {
+                        try {
+                            $webhook = $this->load_managed_webhook($topic, $webhook_ids);
+                            if (!$webhook) {
+                                throw new \RuntimeException("Missing managed webhook");
+                            }
+                        } catch (\Throwable $exception) {
+                            $setup_error = new WP_Error(
+                                "ahpc_webhook_load_failed",
+                                __("A managed webhook could not be loaded. Retry the synchronization.", "aura-historia-partner-connect"),
+                            );
+                            break;
+                        }
+
+                        try {
+                            $save_result = $this->save_managed_webhook(
+                                $webhook,
+                                $topic,
+                                "active",
+                                $endpoint_url,
+                                $settings["secret"],
+                                $user_id,
+                            );
+                        } catch (\Throwable $exception) {
+                            $save_result = new WP_Error(
+                                "ahpc_webhook_save_failed",
+                                __("A managed webhook could not be saved. Retry the synchronization.", "aura-historia-partner-connect"),
+                            );
+                        }
+                        if (is_wp_error($save_result)) {
+                            $setup_error = $save_result;
+                            break;
+                        }
+                    }
+                }
+            }
+
             update_option(self::OPTION_PLUGIN_VERSION, AHPC_VERSION, false);
+
+            if ($setup_error) {
+                $this->pause_webhooks_best_effort();
+                // Webhooks are paused; leave sync required so a later attempt can
+                // register the secret before activating delivery.
+                return $this->record_sync_error($setup_error);
+            }
+
             update_option(self::OPTION_NEEDS_SYNC, "no", false);
             update_option(
                 self::OPTION_LAST_SYNC_AT,
                 current_time("mysql"),
                 false,
             );
-
-            if ($setup_error) {
-                return $this->record_sync_error($setup_error, false);
-            }
-
             delete_option(self::OPTION_LAST_SYNC_ERROR);
-
-            $this->maybe_schedule_backfill($settings, $desired_status);
 
             return true;
         } finally {
@@ -499,37 +574,30 @@ class Webhook_Manager
     }
 
     /**
-     * Pushes the generated WooCommerce webhook secret to the backend.
+     * Reconciles the WooCommerce ingestion configuration with the backend.
      *
      * Also sends the current store currency and language so that the backend
      * can immediately process WooCommerce webhook payloads without requiring a
      * separate configuration step.
      *
-     * @param string $shop_id Shop UUID.
+     * @param string $listing_source_id Listing source TypeID.
      * @param string $access_token Aura Historia access token.
      * @param string $secret  Generated webhook secret.
      * @return true|WP_Error
      */
-    private function register_webhook_secret($shop_id, $access_token, $secret)
+    private function reconcile_ingestion_configuration($listing_source_id, $access_token, $secret)
     {
-        $request_body = new PatchShopData();
-        $request_body->setWoocommerceWebhookSecret($secret);
-        $request_body->setWoocommerceLanguage(Store_Locale::get_language());
-
-        $currency = Store_Locale::get_currency();
-        if (null !== $currency) {
-            $request_body->setWoocommerceCurrency($currency);
-        }
-
         $client = new Backend_Api_Client(self::get_backend_base_url());
-        $response = $client->patch_shop_by_id(
-            $shop_id,
+        $response = $client->put_woocommerce_listing_source_ingestion_configuration(
+            $listing_source_id,
             $access_token,
-            $request_body,
+            $secret,
+            Store_Locale::get_currency(),
+            Store_Locale::get_language(),
         );
 
         if (is_wp_error($response)) {
-            return $this->translate_backend_registration_error($response);
+            return $this->translate_backend_configuration_error($response);
         }
 
         return true;
@@ -537,17 +605,16 @@ class Webhook_Manager
 
     /**
      * Converts a low-level backend client error into the existing admin-facing
-     * secret-registration error wording.
+     * ingestion-configuration error wording.
      *
      * @param WP_Error $error Backend client error.
      * @return WP_Error
      */
-    private function translate_backend_registration_error(WP_Error $error)
+    private function translate_backend_configuration_error(WP_Error $error)
     {
         $error_code = $error->get_error_code();
-        $error_message = sanitize_text_field(
-            (string) $error->get_error_message(),
-        );
+        // Backend/transport messages can include URLs or credentials. Only
+        // expose the bounded HTTP status and our own fixed wording.
         $error_data = $error->get_error_data($error_code);
         $response_code =
             is_array($error_data) && isset($error_data["response_code"])
@@ -556,9 +623,9 @@ class Webhook_Manager
 
         if ("ahpc_backend_invalid_url" === $error_code) {
             return new WP_Error(
-                "ahpc_invalid_registration_url",
+                "ahpc_invalid_configuration_url",
                 __(
-                    "The backend registration URL could not be built from the configured Shop ID.",
+                    "The backend configuration URL could not be built from the configured Listing Source ID.",
                     "aura-historia-partner-connect",
                 ),
             );
@@ -566,7 +633,7 @@ class Webhook_Manager
 
         if ("ahpc_backend_client_unavailable" === $error_code) {
             return new WP_Error(
-                "ahpc_backend_registration_failed",
+                "ahpc_backend_configuration_failed",
                 __(
                     "The plugin installation is incomplete and cannot contact Aura Historia right now.",
                     "aura-historia-partner-connect",
@@ -576,29 +643,15 @@ class Webhook_Manager
 
         if ("ahpc_backend_invalid_request" === $error_code) {
             return new WP_Error(
-                "ahpc_backend_registration_failed",
-                sprintf(
-                    /* translators: %s: error detail. */
-                    __(
-                        "The backend request could not be prepared: %s",
-                        "aura-historia-partner-connect",
-                    ),
-                    $error_message,
-                ),
+                "ahpc_backend_configuration_failed",
+                __("The backend request could not be prepared.", "aura-historia-partner-connect"),
             );
         }
 
         if ("ahpc_backend_request_failed" === $error_code) {
             return new WP_Error(
-                "ahpc_backend_registration_failed",
-                sprintf(
-                    /* translators: %s: error detail. */
-                    __(
-                        "The backend rejected the secret registration request: %s",
-                        "aura-historia-partner-connect",
-                    ),
-                    $error_message,
-                ),
+                "ahpc_backend_configuration_failed",
+                __("The backend configuration request could not be confirmed. Try again.", "aura-historia-partner-connect"),
             );
         }
 
@@ -606,53 +659,44 @@ class Webhook_Manager
             $message = sprintf(
                 /* translators: %d: HTTP response code. */
                 __(
-                    "The backend returned HTTP %d while storing the WooCommerce webhook secret.",
+                    "The backend returned HTTP %d while storing the WooCommerce ingestion configuration.",
                     "aura-historia-partner-connect",
                 ),
                 $response_code,
             );
         } else {
             $message = __(
-                "The backend returned an invalid response while storing the WooCommerce webhook secret.",
+                "The backend returned an invalid response while storing the WooCommerce ingestion configuration.",
                 "aura-historia-partner-connect",
             );
         }
 
-        if ("" !== $error_message) {
-            $message .= " " . $error_message;
-        }
-
-        return new WP_Error("ahpc_backend_registration_failed", $message);
+        return new WP_Error("ahpc_backend_configuration_failed", $message);
     }
 
     /**
-     * Schedules or cancels a product backfill depending on the desired status.
+     * Attempts to pause every managed webhook after an interrupted sync.
+     * Keep the original sync error; a failed pause will be retried next time.
      *
-     * Called at the end of a successful sync.  When the webhooks are active,
-     * a fresh backfill is (re)scheduled so that all existing products are sent
-     * to the backend.  When the webhooks are paused, any pending backfill is
-     * cancelled because the backend connection is not active.
-     *
-     * @param array<string,mixed> $settings       Current plugin settings.
-     * @param string              $desired_status Webhook status chosen by the sync.
      * @return void
      */
-    private function maybe_schedule_backfill($settings, $desired_status)
+    private function pause_webhooks_best_effort()
     {
-        if (!class_exists(Product_Backfill::class)) {
-            return;
-        }
+        $webhook_ids = $this->get_webhook_ids();
 
-        $backfill = new Product_Backfill();
-
-        if ("active" === $desired_status) {
-            $backfill->schedule_backfill(
-                isset($settings["shop_id"])
-                    ? (string) $settings["shop_id"]
-                    : "",
-            );
-        } else {
-            $backfill->cancel_backfill();
+        foreach (array_keys($this->get_managed_topics()) as $topic) {
+            try {
+                $webhook = $this->load_managed_webhook($topic, $webhook_ids);
+                if ($webhook && "paused" !== $webhook->get_status()) {
+                    $webhook->set_status("paused");
+                    if (method_exists($webhook, "set_pending_delivery")) {
+                        $webhook->set_pending_delivery(false);
+                    }
+                    $webhook->save();
+                }
+            } catch (\Throwable $exception) {
+                // Continue pausing the other topics; retry the failed one on sync.
+            }
         }
     }
 
@@ -738,6 +782,9 @@ class Webhook_Manager
         delete_option(self::OPTION_LAST_SYNC_ERROR);
         delete_option(self::OPTION_LAST_SYNC_AT);
         delete_option(self::OPTION_LAST_OAUTH_ERROR);
+        delete_option("ahpc_initial_backfill_pending_source");
+        delete_option("ahpc_initial_backfill_started_sources");
+        delete_option("ahpc_initial_backfill_error");
 
         if (class_exists(Product_Backfill::class)) {
             (new Product_Backfill())->cancel_backfill();
@@ -799,26 +846,6 @@ class Webhook_Manager
         return (string) get_option(self::OPTION_LAST_SYNC_AT, "");
     }
 
-    /**
-     * Returns the desired webhook status for the current settings.
-     *
-     * @param array<string,mixed> $settings     Plugin settings.
-     * @param string              $endpoint_url Hardcoded delivery endpoint.
-     * @param WP_Error|null       $setup_error  Setup error, if any.
-     * @return string
-     */
-    private function get_desired_status(
-        $settings,
-        $endpoint_url,
-        $setup_error = null,
-    ) {
-        return !empty($settings["shop_id"]) &&
-            !empty($settings["access_token"]) &&
-            !$setup_error &&
-            !empty($endpoint_url)
-            ? "active"
-            : "paused";
-    }
 
     /**
      * Loads an existing managed webhook or creates a new one.
@@ -940,10 +967,10 @@ class Webhook_Manager
     {
         try {
             $webhook->save();
-        } catch (\Exception $exception) {
+        } catch (\Throwable $exception) {
             return new WP_Error(
                 "ahpc_webhook_save_failed",
-                $exception->getMessage(),
+                __("A managed webhook could not be saved. Retry the synchronization.", "aura-historia-partner-connect"),
             );
         }
 

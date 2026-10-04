@@ -1,7 +1,7 @@
 {
   "source": {
     "repositoryUrl": "https://github.com/aura-historia/backend",
-    "commit": "5757432d394dda447a186da6deaaf98860d63a4a",
+    "commit": "792444f6d62cfb9f8dd4dc44ffb47a420de54cad",
     "specPath": "docs/swagger.yaml"
   },
   "generator": {
@@ -9,8 +9,8 @@
     "image": "openapitools/openapi-generator-cli:v7.22.0"
   },
   "operations": [
-    "patchShopById",
-    "putPartnerProducts",
+    "putWoocommerceListingSourceIngestionConfiguration",
+    "postAsyncPartnerProductListings",
     "oauthTokenByThirdPartyCode"
   ],
   "namespace": "AuraHistoria\\PartnerConnect\\InternalApi",
