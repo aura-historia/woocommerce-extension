@@ -78,7 +78,7 @@ Managed webhook topics:
 - sends the generated secret to Aura Historia before activating delivery
 - injects bearer `Authorization` into signed, managed webhook deliveries late in the WordPress HTTP stack without rewriting WooCommerce's signed body
 - submits published catalog listings to the async ProductListings API in background batches after connection; admission does not mean ingestion is complete
-- imports supported shipping policy and item class membership through separate, resumable Action Scheduler work after connection and on manual request
+- imports supported shipping policy and item class membership through resumable Action Scheduler work after connection, local changes, periodic reconciliation and manual repair
 - pauses plugin-owned webhooks on deactivation
 - removes plugin-owned webhooks and plugin options on uninstall
 
@@ -133,7 +133,32 @@ Shipping assertions are advertised terms. Aura owns validation, inheritance and 
 | Product/variation membership | Simple/variable products use the parent WooCommerce product ID matching `sourceListingId` in catalog ingestion; variations keep `wc:variation:<id>` codes and inherited class IDs. Different available variation classes remain partial/unknown rather than choosing the first. Virtual or mixed virtual/physical products suppress inherited delivery without asserting prohibition or free shipping. External, grouped and extension product types preserve previous assertions for review. |
 | Currency, tax and units | Decimal-string conversion uses supported currency exponents with checked integer bounds. Taxable shipping marks tax excluded, without calculating tax. Weight/dimension units are acquired for change detection; no unsupported dimensional rate or packing conversion is published. |
 
-The local API surface is covered by the repository's WooCommerce version matrix (10.6.2 through 11.0 and latest). Unsupported settings and capability limits are visible in the shipping import status. Product descriptions (#93) and ongoing shipping hooks/reconciliation (#98) remain separate work.
+The local API surface is covered by the repository's WooCommerce version matrix (10.6.2 through 11.0 and latest). Unsupported settings and capability limits are visible in the shipping import status. Product descriptions remain separate work (#93).
+
+### Automatic refresh and hook coverage
+
+Local saves coalesce durable configuration or parent-product identities. They never traverse shipping configuration or call Aura. A background action rereads current facts through the same acquisition, mapper and publisher used by initial/manual imports. Product changes affect shipping only; they do not queue catalog CREATE, UPSERT or withdrawal operations.
+
+| Local change | Notification and refresh scope |
+| --- | --- |
+| Zone creation, locations, precedence/order, deletion, fallback zone 0 | `woocommerce_after_shipping_zone_object_save`, `woocommerce_delete_shipping_zone` and allowlisted `woocommerce_update_non_option_setting` identifiers; shared configuration and bounded product traversal. |
+| Method addition, deletion, enablement | `woocommerce_shipping_zone_method_added`, `woocommerce_shipping_zone_method_deleted`, `woocommerce_delete_shipping_zone_method`, `woocommerce_shipping_zone_method_status_toggled`; shared configuration. |
+| Method settings, including a price-only change | WordPress added/updated/deleted option notifications restricted to `woocommerce_<method>_<instance>_settings`; shared configuration. Core admin and REST instance settings use this path independently of zone saves. No option values enter the dirty queue. |
+| REST method ordering | Successful mutation responses on the local `/wc/v1..3/shipping/zones/<id>/methods[/<id>]` routes; shared configuration. These controllers can update ordering without a zone save or method action. |
+| Shipping class creation, edits, deletion | Taxonomy-specific create/edit/delete actions; shared configuration and product traversal. |
+| Class assignment, product type, virtual/physical flags, dimensions/weight, variation availability and inheritance | Product/variation CRUD saves, scoped taxonomy assignments, status transitions, allowlisted product meta and stock-status actions; only the parent product's selection and inputs. Variation deletion retains its parent identity before deletion. |
+| Core settings | Narrow option notifications for currency, units, selling/shipping countries, taxes and pickup settings; shared configuration. Currency still pauses signed product deliveries until the existing provider configuration succeeds. |
+| Unpublication, rescheduling, trash, deletion, restoration | Product status/deletion actions mark identities. Workers independently confirm absence/unpublication before owned removals, including products rescheduled for future publication. Failed local rechecks retain the pending removal and its bounded retries; confirmed restoration reacquires both components. |
+
+Hook review uses the actual WooCommerce zone, AJAX and REST controller implementations, including the [zone source reference](https://woocommerce.github.io/code-reference/files/woocommerce-includes-class-wc-shipping-zone.html). Tests exercise real CRUD/option/taxonomy/REST paths in the supported-version CI matrix. Generic order/customer events are not observed.
+
+Every six hours, reconciliation requests a bounded full refresh and scans previously published product identities in pages of 20 for confirmed removals. Publisher actions traverse one product/component at a time with a fixed upper product-ID bound; reconciliation pages also have a fixed upper bound. This recovers missed hooks and supported data changed by extensions. Direct database writes that leave WooCommerce/object caches stale are only visible after those caches become current. Arbitrary plugin settings, dynamic checkout filters, third-party rate semantics and unsupported product types remain conservative/unsupported; reconciliation does not interpret them or treat incomplete reads as absence.
+
+### Scheduler operation and status
+
+WooCommerce's Action Scheduler must initialize, and WordPress cron or a server runner must execute it. Low-traffic sites and sites with `DISABLE_WP_CRON` need a real cron trigger or an Action Scheduler CLI runner, for example `wp action-scheduler run --group=aura-historia-shipping`. Work requires no open browser or wp-admin page. All shipping actions use the separate `aura-historia-shipping` group and contain identities/generations/cursors only; workers load the current Aura token from protected local settings. Valid token rotation preserves exact pending requests.
+
+The settings page shows the oldest dirty/unfinished work, queue failures, deferred components, protected manual edits and last confirmed API write. A queued action or an attempt is not a confirmed write; a confirmed write is not completed search indexing. If progress stops, inspect WooCommerce Scheduled Actions and the server runner. Dirty tickets survive queue failure and source-lock contention; a concurrent save cannot be erased by an older worker's acknowledgement. Periodic reconciliation and the existing capability/nonce-protected **Import shipping** action repair missed changes without catalog recreation. Automatic attempts stop after five failures; at most 100 deferred components are retained before publication stops at its checkpoint. Periodic/manual refreshes can resume this retained work.
 
 ### Publication and recovery
 
@@ -143,11 +168,15 @@ Profile identity is `woocommerce:shipping:core:v1` within the authenticated sour
 
 `Shipping_Acquisition`, `Shipping_Mapper` and `Shipping_Publisher` are the shared implementation for W01 and W02. All callers must use the publisher's source queue/lock and persistent monotonic sequence. Configuration is compared during traversal and items are reread around remote revision reads. A configuration change republishes the profile before dependent work. A newer requested refresh follows an unchanged pending retry and reacquires configuration; stale wake-ups and expired lock holders cannot checkpoint over newer work. Source lifecycle revisions are internal to Aura and never supplied by the plugin.
 
-W02 can call `queue($source)` for policy/full refresh, `queue_items($source, $product_ids)` for up to 100 scoped item refreshes, and `queue_item_removal($source, $product_id)` for confirmed removals. These enqueue identities and acquire facts inside the worker; outside captures never receive a newer sequence. A busy source must be retried. Dirty in-flight targets receive another acquisition. Global configuration changes revisit the bounded product scope, with repeated configuration churn stopping for review after five restarts.
+`Shipping_Sync` calls `queue($source)` for policy/full refresh, `queue_items($source, $product_ids)` for up to 100 scoped item refreshes, and `queue_item_removal($source, $product_id)` for confirmed removals. These enqueue identities and acquire facts inside the worker; outside captures never receive a newer sequence. A busy source retains its dirty ticket for retry. Dirty in-flight targets receive another acquisition. Global configuration changes revisit the bounded product scope, with repeated configuration churn stopping for review after five restarts.
 
 Every successful new acquisition supplies its actual microsecond `acquiredAt` and `observation: {}`. Exact retries retain their original body, keys, sequence and time. Assertions have no expiry/keepalive. No `freshUntil`/`expiresAt` is sent; evidence uses only `verifiedAt`. A complete profile replacement explicitly removes obsolete zones/methods. `queue_item_removal()` rechecks confirmed local absence/unpublication and clears only owned selection/input components, with no observation. Missing pages, failed reads and unsupported products never imply removal. No arbitrary metadata creates item shipping overrides.
 
-Deactivation cancels local shipping actions and retains checkpoints; uninstall removes local shipping state. Neither event promises immediate backend withdrawal: Aura assertions continue until updated, withdrawn or their source loses authority. No new webhook, extension callback, reverse backend access, provider domain, WooCommerce REST credential or shared credential store is introduced. The signing secret authenticates webhook bodies; the locally stored Aura token authorizes outbound typed calls.
+Source changes, explicit reconnects and deactivation fence old workers and cancel local shipping actions. Reconnect/reactivation starts a new local acquisition, retaining monotonic source ordering without relabeling old requests. Changes to the configured API target/signing context also fence old captures. Valid token rotation alone keeps the immutable retry. Expired/canceled lock holders cannot checkpoint over newer work.
+
+Before an OAuth replacement, on deactivation and during uninstall, the plugin attempts existing protected default-clear/profile-retirement commands using the current credentials, where it has attempted publication. It records committed, protected and unconfirmed cleanup separately. This retires the common owned profile; it does not revoke source authorization or claim removal of independently managed/manual item terms. A credential replacement observed only after the old credentials were lost reports unconfirmed cleanup. Failure preserves previous assertions and their observation age. There is no automatic expiry, including after 30 days. The settings page directs merchants to review retained Aura assertions when cleanup is unconfirmed; uninstall records a bounded diagnostic if cleanup cannot be confirmed, then removes plugin-owned jobs, dirty tickets, identity indexes, checkpoints and options. No pending request contents or credentials are shown in status or diagnostics.
+
+No new webhook, extension callback, reverse backend access, provider domain, WooCommerce REST credential or shared credential store is introduced. The signing secret authenticates webhook bodies; the locally stored Aura token authorizes outbound typed calls.
 
 ### Generated client provenance
 
@@ -177,7 +206,7 @@ Depending on the action, the plugin may send:
 - when a webhook sync registers the generated WooCommerce signing secret
 - when WooCommerce triggers one of the managed webhook events
 - on the first successful connection to a ListingSource or when a merchant explicitly queues a full backfill, and while its batches run
-- on initial/manual shipping import and its background retries
+- on initial/manual shipping import, local shipping/product changes, periodic reconciliation, background retries and best effort lifecycle cleanup
 
 ### Service endpoints
 
@@ -354,7 +383,8 @@ npm run plugin:check
 | `includes/class-product-backfill.php` | Background catalog CREATE admission via Action Scheduler |
 | `includes/class-shipping-acquisition.php` | Allowlisted local shipping configuration and item reads |
 | `includes/class-shipping-mapper.php` | Pure conservative mapping to Aura shipping types |
-| `includes/class-shipping-publisher.php` | Source ordering, immutable retries, bounded initial/manual publication |
+| `includes/class-shipping-publisher.php` | Source ordering, immutable retries, bounded shipping publication and protected cleanup |
+| `includes/class-shipping-sync.php` | Local notifications, durable dirty scopes, periodic reconciliation and lifecycle fencing |
 | `includes/class-backend-api-client.php` | Typed Aura Historia API integration |
 | `uninstall.php` | Uninstall cleanup |
 | `tests/` | WordPress integration tests |

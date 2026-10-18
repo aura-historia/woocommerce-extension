@@ -27,7 +27,7 @@ After you connect the store through Aura Historia OAuth, the plugin automaticall
 * pauses plugin-owned webhooks on deactivation
 * removes plugin-owned webhooks and plugin options on uninstall
 * queues the first published-product CREATE backfill once per ListingSource after successful configuration; failed setup/queueing leaves that first run pending for later retry, while ordinary repairs never start a fresh run
-* imports supported local shipping configuration and scoped item class/variation inputs through separate typed APIs, initially and through the Import shipping action
+* imports supported local shipping configuration and scoped item class/variation inputs through separate typed APIs after connection, local changes, periodic reconciliation and the Import shipping repair action
 
 The plugin keeps the settings surface intentionally small. Merchants do not manually enter Aura Historia credentials in wp-admin. The OAuth flow sets and stores:
 
@@ -123,7 +123,7 @@ Yes. Once configuration succeeds, the plugin schedules an initial backfill once 
 
 = What happens when the plugin is disabled? =
 
-Plugin-owned webhooks are paused on deactivation so WooCommerce stops sending deliveries.
+Plugin-owned webhooks are paused on deactivation so WooCommerce stops sending deliveries. Shipping jobs are fenced/canceled, and the plugin attempts protected retirement of its shared shipping profile and clearing of its source default. This is not source authorization revocation. Unconfirmed cleanup is visible after reactivation; review retained assertions in Aura Historia. Existing assertions have no automatic expiry.
 
 = Which shipping settings are supported? =
 
@@ -133,13 +133,22 @@ Ordered zones including fallback zone 0, country restrictions, reviewed state co
 
 Import shipping resumes immutable pending work and retries missing catalog listings without recreating products. Each background action makes at most one write; automatic retries and retained deferred work are bounded. Progress, manual protection and capability limits appear on the settings page. Shipping policy is shared in profiles, while item inputs remain separate. Incomplete reads preserve previous assertions; only confirmed local removals or complete scoped replacement remove owned assertions. Manual edits remain protected. A restored product cancels unsent removals and refreshes its selection and inputs.
 
-Shipping assertions remain valid until updated, withdrawn or their source loses authority, without expiry or keepalive. Deactivation cancels shipping actions and retains checkpoints; uninstall removes local state. These local events do not promise immediate withdrawal at Aura. No WooCommerce REST key/secret is needed or exported; the backend never calls the plugin. The three signed product webhook bodies and their receiver remain unchanged. Ongoing hooks/reconciliation are follow-up work.
+Local hooks observe zone/location/order changes (including fallback zone 0), method addition/deletion/enablement and instance settings, shipping classes, core settings/units/currency, product inputs and variation inheritance. Save requests only mark durable identities. Background workers reread current facts and reuse the initial/manual publisher. Missed changes converge through six-hour reconciliation with bounded product traversal and pages of 20 previously published identities. Unsupported plugin behavior remains conservative; failed or incomplete reads never establish removal. No shipping refresh recreates catalog products.
+
+WooCommerce Action Scheduler and a working WordPress cron or server runner are required. Low-traffic sites or DISABLE_WP_CRON installations need a server cron trigger or an Action Scheduler CLI runner, for example `wp action-scheduler run --group=aura-historia-shipping`. No browser session is required. The settings page shows oldest pending/failed work, deferred components, protected edits and last confirmed API write. Search indexing completes separately. Automatic attempts stop after five failures; up to 100 deferred components are retained before stopping at a checkpoint. Periodic/manual refreshes resume retained work.
+
+Shipping assertions remain valid until updated, withdrawn or their source loses authority, without expiry or keepalive, including after 30 days. Reconnect/reactivation requires a fresh local acquisition; old jobs cannot relabel/replay their captures into a new connection. Valid Aura token rotation preserves immutable retries and uses the current token at execution. Deactivation/reconnect/uninstall attempt existing protected cleanup where possible and record whether it committed. Cleanup preserves manual terms and does not revoke authorization. Uninstall removes local shipping jobs/state and records a bounded diagnostic if remote cleanup was not confirmed. Lost credentials or unreachable Aura can leave assertions eligible until explicitly changed in Aura.
+
+No WooCommerce REST key/secret is needed or exported; the backend never calls the plugin. Scheduled action arguments, status and diagnostics exclude credentials, raw settings and pending request contents. The three signed product webhook bodies and their receiver remain unchanged. The repository README documents hook and supported-version coverage.
+
+Rescheduling a published product for future publication clears its owned shipping components until it is published again. A failed local removal recheck retains the original request and bounded retries; only confirmed restoration cancels a pending removal.
 
 == Changelog ==
 
 = 0.2.0 =
 * The plugin now auto-configures with Aura Historia on installation. No more manual insertion of credentials needed. Just install, activate, and approve the OAuth connection when prompted.
 * Adds background initial/manual shipping imports with conservative local mapping, resumable retries and protection for manual Aura edits.
+* Refreshes shipping after local changes and bounded periodic reconciliation, with durable retry scopes, connection fencing and recorded lifecycle cleanup.
 
 = 0.1.0 =
 * Initial release.

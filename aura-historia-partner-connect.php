@@ -89,6 +89,7 @@ require_once AHPC_PLUGIN_DIR . "includes/class-product-backfill.php";
 require_once AHPC_PLUGIN_DIR . "includes/class-shipping-mapper.php";
 require_once AHPC_PLUGIN_DIR . "includes/class-shipping-acquisition.php";
 require_once AHPC_PLUGIN_DIR . "includes/class-shipping-publisher.php";
+require_once AHPC_PLUGIN_DIR . "includes/class-shipping-sync.php";
 require_once AHPC_PLUGIN_DIR . "includes/class-plugin.php";
 
 /**

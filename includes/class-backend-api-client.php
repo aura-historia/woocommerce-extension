@@ -288,6 +288,10 @@ class Backend_Api_Client
             "getProductListingDelivery" => ["listing", null],
             "changeProductListingDelivery" => ["listing", "ProductListingDeliveryCommandData"],
         ];
+        // A long-running worker must observe source and token changes made by
+        // another request before every outbound shipping operation.
+        wp_cache_delete(Webhook_Manager::OPTION_SETTINGS, "options");
+        wp_cache_delete("notoptions", "options");
         $settings = (new Webhook_Manager())->get_settings();
         if ("" === $this->base_url || !isset($operations[$operation]) || !Webhook_Manager::is_valid_listing_source_id($listing_source_id)
             || $settings["listing_source_id"] !== $listing_source_id || !Webhook_Manager::is_valid_access_token($settings["access_token"])) {

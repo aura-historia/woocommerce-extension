@@ -47,3 +47,8 @@ tests_add_filter("muplugins_loaded", static function () {
 });
 
 require $_tests_dir . "/includes/bootstrap.php";
+
+// On a fresh database WooCommerce installs capabilities after WordPress has
+// instantiated its role objects. Reload the persisted roles before testing
+// real admin/REST permissions; do not grant capabilities in individual tests.
+wp_roles()->for_site();
