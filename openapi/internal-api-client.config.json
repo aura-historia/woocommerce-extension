@@ -1,7 +1,7 @@
 {
   "source": {
     "repositoryUrl": "https://github.com/aura-historia/backend",
-    "commit": "792444f6d62cfb9f8dd4dc44ffb47a420de54cad",
+    "commit": "8f39fcd549ebc49608bb2722bb219e623c6742e2",
     "specPath": "docs/swagger.yaml"
   },
   "generator": {
@@ -11,8 +11,20 @@
   "operations": [
     "putWoocommerceListingSourceIngestionConfiguration",
     "postAsyncPartnerProductListings",
-    "oauthTokenByThirdPartyCode"
+    "oauthTokenByThirdPartyCode",
+    "listShippingProfiles",
+    "getShippingProfile",
+    "createShippingProfile",
+    "replaceShippingProfile",
+    "retireShippingProfile",
+    "restoreShippingProfile",
+    "getShippingDefault",
+    "assignShippingDefault",
+    "clearShippingDefault",
+    "getProductListingDelivery",
+    "changeProductListingDelivery"
   ],
+  "schemas": ["DeliveryAssertionEvidence"],
   "namespace": "AuraHistoria\\PartnerConnect\\InternalApi",
   "modelPackage": "Model",
   "filteredSpecPath": "openapi/internal-api.filtered.yaml",

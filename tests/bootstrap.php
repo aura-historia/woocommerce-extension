@@ -25,6 +25,14 @@ if (!defined("WP_TESTS_PHPUNIT_POLYFILLS_PATH") && is_dir($polyfills)) {
 
 require_once $_tests_dir . "/includes/functions.php";
 
+// Bootstrap and background hooks must also stay offline. Individual integration
+// tests can replace this preemption with their own explicit response mocks.
+tests_add_filter("pre_http_request", static function ($preempt) {
+    return false === $preempt
+        ? new WP_Error("ahpc_test_network_disabled", "External HTTP is disabled in tests.")
+        : $preempt;
+}, 1);
+
 tests_add_filter("muplugins_loaded", static function () {
     $woocommerce_files = glob(WP_PLUGIN_DIR . "/*/woocommerce.php");
 

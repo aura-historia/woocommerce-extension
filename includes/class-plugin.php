@@ -19,7 +19,7 @@ if (!defined("ABSPATH")) {
 class Plugin
 {
     const PAGE_SLUG = "aura-historia-partner-connect";
-    const OAUTH_SCOPE = "product-listings:write listing-sources:write";
+    const OAUTH_SCOPE = "product-listings:read product-listings:write listing-sources:read listing-sources:write";
     const OAUTH_STATE_TRANSIENT_PREFIX = "ahpc_oauth_state_";
     const OAUTH_STATE_TTL = 600;
     const OPTION_INITIAL_BACKFILL_PENDING_SOURCE = "ahpc_initial_backfill_pending_source";
@@ -111,6 +111,7 @@ class Plugin
     {
         $manager = new Webhook_Manager();
         $manager->pause_webhooks();
+        Shipping_Publisher::cancel();
     }
 
     /**
@@ -161,6 +162,7 @@ class Plugin
                 $this,
                 "handle_backfill_request",
             ]);
+            add_action("admin_post_ahpc_import_shipping", [$this, "handle_shipping_request"]);
             add_action("admin_notices", [
                 $this,
                 "maybe_show_dependency_notice",
@@ -187,6 +189,10 @@ class Plugin
         $this->manager = new Webhook_Manager();
 
         $this->manager->initialize_options();
+
+        $shipping = new Shipping_Publisher();
+        add_action(Shipping_Publisher::ACTION_HOOK, [$shipping, "process"], 10, 2);
+        add_action("action_scheduler_init", [$shipping, "maybe_queue_initial"], 20);
 
         if (defined("AHPC_FORCE_SYNC_DELIVERY") && AHPC_FORCE_SYNC_DELIVERY) {
             add_filter("woocommerce_webhook_deliver_async", "__return_false");
@@ -225,6 +231,9 @@ class Plugin
 
         if ($this->manager->maybe_sync_webhooks()) {
             $this->maybe_schedule_pending_initial_backfill();
+            if (did_action("action_scheduler_init")) {
+                $shipping->maybe_queue_initial();
+            }
         }
     }
 
@@ -812,7 +821,7 @@ class Plugin
             return new WP_Error(
                 "ahpc_oauth_missing_scope",
                 __(
-                    "Aura Historia did not grant the permissions required to manage the listing source and sync product listings.",
+                    "Aura Historia did not grant the permissions required to manage the listing source, sync product listings and publish shipping.",
                     "aura-historia-partner-connect",
                 ),
             );
@@ -874,6 +883,7 @@ class Plugin
             }
         }
 
+        (new Shipping_Publisher())->queue($listing_source_id);
         return true;
     }
 
@@ -1039,6 +1049,36 @@ class Plugin
             return $backfill_result;
         }
         return true;
+    }
+
+    /** Queues a separate manual shipping run after the normal configuration gate. */
+    public function queue_manual_shipping()
+    {
+        if (!current_user_can("manage_woocommerce")) {
+            return new WP_Error("ahpc_shipping_forbidden", __("You are not allowed to import shipping.", "aura-historia-partner-connect"));
+        }
+        $settings = $this->get_current_settings();
+        if (!$this->is_woocommerce_available() || !Webhook_Manager::is_valid_listing_source_id($settings["listing_source_id"])
+            || !Webhook_Manager::is_valid_access_token($settings["access_token"])) {
+            return Shipping_Mapper::error("not_connected");
+        }
+        $this->bootstrap_woocommerce();
+        $result = $this->manager->maybe_sync_webhooks();
+        if (!$result) {
+            return Shipping_Mapper::error("configuration_not_ready");
+        }
+        return (new Shipping_Publisher())->queue($settings["listing_source_id"]);
+    }
+
+    public function handle_shipping_request()
+    {
+        if (!current_user_can("manage_woocommerce")) {
+            wp_die(esc_html__("You are not allowed to import shipping.", "aura-historia-partner-connect"), 403);
+        }
+        check_admin_referer("ahpc_import_shipping");
+        $result = $this->queue_manual_shipping();
+        wp_safe_redirect(add_query_arg("ahpc_shipping", is_wp_error($result) ? "failed" : "queued", $this->get_settings_page_url()));
+        exit();
     }
 
     /**
@@ -1401,7 +1441,7 @@ class Plugin
              ? esc_html__("Stored", "aura-historia-partner-connect")
              : esc_html__("Not stored", "aura-historia-partner-connect"); ?></strong>
 							<p class="description"><?php echo esc_html__(
-            "The access token is saved locally for webhook delivery and product backfill requests, but it is hidden from administrators after OAuth completes.",
+            "The access token is saved locally for webhook delivery, product backfill and shipping requests, but it is hidden from administrators after OAuth completes.",
             "aura-historia-partner-connect",
         ); ?></p>
 						</td>
@@ -1453,6 +1493,7 @@ class Plugin
     ); ?></p>
 			<?php endif; ?>
 
+			<?php $this->render_shipping_status($settings["listing_source_id"]); ?>
 			<h2><?php echo esc_html__(
        "Managed webhooks",
        "aura-historia-partner-connect",
@@ -1943,6 +1984,42 @@ class Plugin
         ];
     }
 
+    /** Bounded progress and capability diagnostics; never display saved payloads. */
+    private function render_shipping_status($source)
+    {
+        $state = (new Shipping_Publisher())->get_status($source);
+        echo '<h2>' . esc_html__("Shipping import", "aura-historia-partner-connect") . '</h2>';
+        echo '<p>' . esc_html__("Import supported shipping settings and item classes in the background. This also resumes interrupted shipping work.", "aura-historia-partner-connect") . '</p>';
+        if ("failed" === $this->get_query_param("ahpc_shipping")) {
+            $this->render_inline_notice("error", esc_html__("Shipping could not be queued. Check the connection and import status before trying again.", "aura-historia-partner-connect"));
+        } elseif ("queued" === $this->get_query_param("ahpc_shipping")) {
+            $this->render_inline_notice("success", esc_html__("Shipping import queued. Progress appears below as background work completes.", "aura-historia-partner-connect"));
+        }
+        $labels = ["queued" => __("Queued", "aura-historia-partner-connect"), "running" => __("Running", "aura-historia-partner-connect"),
+            "complete" => __("Complete", "aura-historia-partner-connect"), "partial" => __("Partial — retry needed", "aura-historia-partner-connect"),
+            "failed" => __("Failed — retry needed", "aura-historia-partner-connect"), "needs_review" => __("Needs review", "aura-historia-partner-connect")];
+        echo '<p><strong>' . esc_html($labels[$state["status"] ?? ""] ?? __("Not queued", "aura-historia-partner-connect")) . '</strong></p>';
+        if ($state) {
+            echo '<p>' . sprintf(
+                /* translators: 1: processed products, 2: pending components, 3: protected manual components. */
+                esc_html__('Processed products: %1$d. Deferred components: %2$d. Protected manual edits: %3$d.', "aura-historia-partner-connect"),
+                (int) ($state["processed"] ?? 0), count($state["deferred"] ?? []), (int) ($state["protected"] ?? 0)
+            ) . '</p>';
+            if (!empty($state["limitations"])) {
+                echo '<p>' . esc_html__("Some rates need checkout context and remain uncertain. See the documented shipping support matrix.", "aura-historia-partner-connect") . '</p>';
+            }
+            if (!empty($state["last_error"])) {
+                echo '<p><code>' . esc_html($state["last_error"]) . '</code></p>';
+            }
+        }
+        if ($this->is_woocommerce_available()) {
+            echo '<form method="post" action="' . esc_url(admin_url("admin-post.php")) . '"><input type="hidden" name="action" value="ahpc_import_shipping" />';
+            wp_nonce_field("ahpc_import_shipping");
+            submit_button(__("Import shipping", "aura-historia-partner-connect"), "secondary", "submit", false);
+            echo '</form>';
+        }
+    }
+
     /**
      * Formats a MySQL datetime for the admin UI.
      *
@@ -2344,8 +2421,7 @@ class Plugin
             $granted_scopes = [];
         }
 
-        return in_array("product-listings:write", $granted_scopes, true) &&
-            in_array("listing-sources:write", $granted_scopes, true);
+        return !array_diff(explode(" ", self::OAUTH_SCOPE), $granted_scopes);
     }
 
     /**

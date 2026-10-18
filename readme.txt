@@ -27,6 +27,7 @@ After you connect the store through Aura Historia OAuth, the plugin automaticall
 * pauses plugin-owned webhooks on deactivation
 * removes plugin-owned webhooks and plugin options on uninstall
 * queues the first published-product CREATE backfill once per ListingSource after successful configuration; failed setup/queueing leaves that first run pending for later retry, while ordinary repairs never start a fresh run
+* imports supported local shipping configuration and scoped item class/variation inputs through separate typed APIs, initially and through the Import shipping action
 
 The plugin keeps the settings surface intentionally small. Merchants do not manually enter Aura Historia credentials in wp-admin. The OAuth flow sets and stores:
 
@@ -44,13 +45,14 @@ This plugin is intended for merchants who already use Aura Historia. Once OAuth 
 
 This plugin connects to Aura Historia, a hosted service required for the plugin to work.
 
-It sends data after a merchant connects the store through Aura Historia OAuth, and later when WooCommerce sends managed webhook events or the plugin runs a product backfill.
+It sends data after a merchant connects the store through Aura Historia OAuth, and later when WooCommerce sends managed webhook events or the plugin runs a product backfill or shipping import. These background jobs run without an open admin page.
 
 The service is used to:
 
 * register the generated WooCommerce webhook secret and current store locale details
 * receive ongoing product webhook deliveries
 * receive background product backfill batches
+* store typed shipping profiles, source defaults, listing selections and class/variation inputs acquired locally by the plugin
 
 Data sent to the service may include:
 
@@ -61,6 +63,7 @@ Data sent to the service may include:
 * store language and currency
 * unchanged signed WooCommerce webhook payloads for `product.created`, `product.updated`, and `product.deleted`, including any WooCommerce descriptions
 * published products during backfill: WooCommerce product ID as `sourceListingId`, canonical URL, image URL array, optional localized title, optional tagged monetary price (exact integer currency minor units; non-representable prices omitted), and optional availability. Backfill does not send description/body yet (follow-up #93).
+* shipping import: supported geographic shipping rules and ordered zones, enabled service identifiers, exact/conditional rates and currency, pickup availability without addresses, source-scoped class/variation codes, WooCommerce product IDs, producer operation keys/order and actual acquisition time. Shipping requests do not contain credentials in their bodies, whole settings/metadata, customers, orders, addresses or full product descriptions.
 
 Service endpoints:
 
@@ -70,6 +73,10 @@ Service endpoints:
 * `PUT https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/ingestion-configurations/woocommerce`
 * `POST https://api.aura-historia.com/api/v1/webhooks/woocommerce/{listingSourceId}`
 * `POST https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/product-listings/async`
+* `GET/POST https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/shipping-profiles`
+* `GET/PUT/DELETE https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/shipping-profiles/{shippingProfileId}` and `POST .../{shippingProfileId}/restore`
+* `GET/PUT/DELETE https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/shipping-default`
+* `GET/PUT https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/product-listings/by-source-id/{sourceListingId}/delivery`
 
 Service provider and policies:
 
@@ -86,7 +93,7 @@ Service provider and policies:
 4. Go to `WooCommerce > Aura Historia`.
 5. Approve the Aura Historia OAuth connection when prompted.
 
-A real registered canonical UUIDv7 `oc_` OAuth client ID must be supplied via `AHPC_OAUTH_CLIENT_ID` (constant or environment variable); none is bundled. Configure the same client ID and its matching secret in the webapp redirect broker, register the broker redirect URI, and grant exactly `product-listings:write listing-sources:write`. The broker must return an `ls_` ListingSource ID in its external `partner_shop_id` callback field; UUID Shop IDs are rejected. The API uses `https://api.aura-historia.com` in production and `https://api.stage.aura-historia.com` for stage. After OAuth completes, the plugin configures WooCommerce ingestion and syncs the managed webhooks.
+A real registered canonical UUIDv7 `oc_` OAuth client ID must be supplied via `AHPC_OAUTH_CLIENT_ID` (constant or environment variable); none is bundled. Configure the same client ID and its matching secret in the webapp redirect broker, register the broker redirect URI, and grant `product-listings:read product-listings:write listing-sources:read listing-sources:write`. Reconnect older connections to grant the read scopes shipping needs for identity/revision recovery. The broker must return an `ls_` ListingSource ID in its external `partner_shop_id` callback field; UUID Shop IDs are rejected. The API uses `https://api.aura-historia.com` in production and `https://api.stage.aura-historia.com` for stage. After OAuth completes, the plugin configures WooCommerce ingestion and syncs the managed webhooks.
 
 == Frequently Asked Questions ==
 
@@ -100,7 +107,7 @@ Only `product.created`, `product.updated`, and `product.deleted`.
 
 = What data is sent to Aura Historia? =
 
-After configuration, the plugin sends the generated WooCommerce webhook secret, store language and currency, unchanged signed live product webhook payloads, and published product listing data during backfill. The backfill never sends description/body; live WooCommerce webhook bodies remain untouched. See `External services` above.
+After configuration, the plugin sends the generated WooCommerce webhook secret, store language and currency, unchanged signed live product webhook payloads, published product listing data during backfill, and typed shipping rules and item inputs during shipping import. The backfill never sends description/body; live WooCommerce webhook bodies remain untouched. See `External services` above.
 
 = Can I change the delivery URL or webhook secret in wp-admin? =
 
@@ -118,10 +125,21 @@ Yes. Once configuration succeeds, the plugin schedules an initial backfill once 
 
 Plugin-owned webhooks are paused on deactivation so WooCommerce stops sending deliveries.
 
+= Which shipping settings are supported? =
+
+Ordered zones including fallback zone 0, country restrictions, reviewed state codes, exact postcodes and reviewed German postcode forms, core constant/quantity flat rates, bounded per-class quantity charges, conditional free shipping and conservative local pickup. Shared base/class surcharges, per-order class maxima, coupon/tax/cart context, unreviewed geography, third-party methods and other expressions remain uncertain or externally calculated. Nothing runs checkout or evaluates arbitrary expressions. Zones without locations retain their position and cover the permitted shipping countries. Class charges are ignored when no shipping classes exist, matching WooCommerce. The complete support matrix is in the repository README.
+
+= How do shipping imports recover? =
+
+Import shipping resumes immutable pending work and retries missing catalog listings without recreating products. Each background action makes at most one write; automatic retries and retained deferred work are bounded. Progress, manual protection and capability limits appear on the settings page. Shipping policy is shared in profiles, while item inputs remain separate. Incomplete reads preserve previous assertions; only confirmed local removals or complete scoped replacement remove owned assertions. Manual edits remain protected. A restored product cancels unsent removals and refreshes its selection and inputs.
+
+Shipping assertions remain valid until updated, withdrawn or their source loses authority, without expiry or keepalive. Deactivation cancels shipping actions and retains checkpoints; uninstall removes local state. These local events do not promise immediate withdrawal at Aura. No WooCommerce REST key/secret is needed or exported; the backend never calls the plugin. The three signed product webhook bodies and their receiver remain unchanged. Ongoing hooks/reconciliation are follow-up work.
+
 == Changelog ==
 
 = 0.2.0 =
 * The plugin now auto-configures with Aura Historia on installation. No more manual insertion of credentials needed. Just install, activate, and approve the OAuth connection when prompted.
+* Adds background initial/manual shipping imports with conservative local mapping, resumable retries and protection for manual Aura edits.
 
 = 0.1.0 =
 * Initial release.

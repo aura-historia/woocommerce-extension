@@ -267,6 +267,58 @@ class Backend_Api_Client
         return $filtered instanceof ClientInterface ? $filtered : $client;
     }
 
+    /**
+     * Existing typed shipping operations. Resolve the current protected local
+     * credential for every call; persisted work never carries credentials.
+     *
+     * @return array|WP_Error Committed result, never asynchronous admission.
+     */
+    public function shipping_request($operation, $listing_source_id, array $arguments = [])
+    {
+        $operations = [
+            "listShippingProfiles" => ["source", null],
+            "getShippingProfile" => ["source", null],
+            "createShippingProfile" => ["source", "CreateShippingProfileData"],
+            "replaceShippingProfile" => ["source", "ReplaceShippingProfileData"],
+            "retireShippingProfile" => ["source", "ShippingProfileLifecycleData"],
+            "restoreShippingProfile" => ["source", "ShippingProfileLifecycleData"],
+            "getShippingDefault" => ["source", null],
+            "assignShippingDefault" => ["source", "AssignShippingDefaultData"],
+            "clearShippingDefault" => ["source", "ClearShippingDefaultData"],
+            "getProductListingDelivery" => ["listing", null],
+            "changeProductListingDelivery" => ["listing", "ProductListingDeliveryCommandData"],
+        ];
+        $settings = (new Webhook_Manager())->get_settings();
+        if ("" === $this->base_url || !isset($operations[$operation]) || !Webhook_Manager::is_valid_listing_source_id($listing_source_id)
+            || $settings["listing_source_id"] !== $listing_source_id || !Webhook_Manager::is_valid_access_token($settings["access_token"])) {
+            return new WP_Error("ahpc_shipping_connection_changed", __("Reconnect this store before publishing shipping.", "aura-historia-partner-connect"));
+        }
+        if (!$this->is_runtime_available()) {
+            return $this->unavailable_error();
+        }
+        try {
+            [$scope, $model] = $operations[$operation];
+            if ($model) {
+                $body = array_pop($arguments);
+                $arguments[] = InternalApi\ObjectSerializer::deserialize(wp_json_encode($body), __NAMESPACE__ . "\\InternalApi\\Model\\" . $model, []);
+            }
+            array_unshift($arguments, $listing_source_id);
+            $api = "source" === $scope ? $this->create_listing_sources_api($settings["access_token"]) : $this->create_product_listings_api($settings["access_token"]);
+            [$response, $status] = $api->{$operation . "WithHttpInfo"}(...$arguments);
+            if (200 !== $status || null === $response) {
+                return $this->transport_error();
+            }
+            $result = json_decode(wp_json_encode(InternalApi\ObjectSerializer::sanitizeForSerialization($response)), true);
+            return is_array($result) ? $result : $this->transport_error();
+        } catch (ApiException $exception) {
+            return $this->translate_api_exception($exception);
+        } catch (\InvalidArgumentException $exception) {
+            return $this->invalid_request_error();
+        } catch (\Throwable $exception) {
+            return $this->transport_error();
+        }
+    }
+
     private function translate_api_exception(ApiException $exception)
     {
         $status = (int) $exception->getCode();

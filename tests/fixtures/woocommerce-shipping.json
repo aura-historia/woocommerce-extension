@@ -1,0 +1,94 @@
+{
+  "source": "WooCommerce core settings, acquired locally; supported 10.6.2–11.0 APIs",
+  "cases": [
+    {
+      "name": "ordered-overlap-and-fallback",
+      "zones": [
+        {"id": 1, "locations": [{"type": "country", "code": "DE"}], "methods": [{"id": "flat_rate", "cost": "80.00"}, {"id": "free_shipping"}]},
+        {"id": 2, "locations": [{"type": "country", "code": "DE"}], "methods": [{"id": "flat_rate", "cost": "95"}]},
+        {"id": 0, "locations": [], "methods": []}
+      ],
+      "expect": {
+        "terms.shipping.coverage.zones.0.areas.0.code": "DE",
+        "terms.shipping.coverage.zones.0.services.0.rate.price.amount.amount_minor": 8000,
+        "terms.shipping.coverage.zones.0.services.0.rate.basis": "PER_SHIPMENT",
+        "terms.shipping.coverage.zones.0.services.1.rate.price.kind": "FREE",
+        "terms.shipping.coverage.zones.1.services.0.rate.price.amount.amount_minor": 9500,
+        "terms.shipping.coverage.zones.2.areas.0.kind": "ANYWHERE",
+        "terms.shipping.coverage.zones.2.services.0.eligibility": "NOT_OFFERED"
+      }
+    },
+    {
+      "name": "uncertain-earlier-postal-zone-blocks-fallback",
+      "zones": [
+        {"id": 1, "locations": [{"type": "country", "code": "GB"}, {"type": "postcode", "code": "SW*"}], "methods": []},
+        {"id": 0, "locations": [], "methods": [{"id": "flat_rate", "cost": "5"}]}
+      ],
+      "expect": {"terms.shipping.coverage.zones.0.areas.0.kind": "UNRESOLVED", "terms.shipping.coverage.zones.1.services.0.rate.price.amount.amount_minor": 500},
+      "limitations": ["unsupported_postcode"]
+    },
+    {
+      "name": "german-postal-forms-preserve-zeroes",
+      "zones": [{"id": 1, "locations": [{"type": "country", "code": "DE"}, {"type": "postcode", "code": "01*"}, {"type": "postcode", "code": "01000...01999"}, {"type": "postcode", "code": "01067"}], "methods": []}],
+      "expect": {"terms.shipping.coverage.zones.0.areas.0.form": {"kind": "GERMAN_PREFIX", "prefix": "01"}, "terms.shipping.coverage.zones.0.areas.1.form": {"kind": "GERMAN_RANGE", "first": "01000", "last": "01999"}, "terms.shipping.coverage.zones.0.areas.2.form": {"kind": "EXACT", "code": "01067"}}
+    },
+    {
+      "name": "subdivision-translation-and-intersection",
+      "zones": [
+        {"id": 1, "locations": [{"type": "state", "code": "DE:DE-BW"}], "methods": []},
+        {"id": 2, "locations": [{"type": "state", "code": "JP:JP01"}], "methods": []},
+        {"id": 3, "locations": [{"type": "state", "code": "DE:BY"}, {"type": "postcode", "code": "80*"}], "methods": []}
+      ],
+      "expect": {"terms.shipping.coverage.zones.0.areas.0.code": "DE-BW", "terms.shipping.coverage.zones.1.areas.0.kind": "UNRESOLVED", "terms.shipping.coverage.zones.2.areas.0.kind": "UNRESOLVED"}
+    },
+    {
+      "name": "fixed-and-quantity-costs-exactly",
+      "zones": [{"id": 0, "locations": [], "methods": [{"id": "flat_rate", "cost": "0.29"}, {"id": "flat_rate", "cost": "[qty] * 2.03"}, {"id": "flat_rate", "cost": "0"}]}],
+      "expect": {"terms.shipping.coverage.zones.0.services.0.rate.price.amount.amount_minor": 29, "terms.shipping.coverage.zones.0.services.1.rate.price.amount.amount_minor": 203, "terms.shipping.coverage.zones.0.services.1.rate.basis": "PER_ITEM", "terms.shipping.coverage.zones.0.services.2.rate.price.kind": "FREE"}
+    },
+    {
+      "name": "per-class-quantity-costs-without-shared-base",
+      "zones": [{"id": 0, "locations": [], "methods": [{"id": "flat_rate", "cost": "0", "class_costs": {"0": "1.00 * [qty]", "17": "[qty] * 8.30"}}]}],
+      "expect": {"terms.shipping.coverage.zones.0.services.0.applicability.class": "wc:class:none", "terms.shipping.coverage.zones.0.services.0.rate.price.amount.amount_minor": 100, "terms.shipping.coverage.zones.0.services.1.applicability.class": "wc:class:17", "terms.shipping.coverage.zones.0.services.1.rate.price.amount.amount_minor": 830}
+    },
+    {
+      "name": "additive-and-per-order-class-costs-stay-external",
+      "zones": [{"id": 0, "locations": [], "methods": [{"id": "flat_rate", "cost": "5", "class_costs": {"0": "2", "17": "8"}}, {"id": "flat_rate", "cost": "0", "type": "order", "class_costs": {"0": "2", "17": "8"}}]}],
+      "expect": {"terms.shipping.coverage.zones.0.services.0.rate.price.kind": "EXTERNALLY_CALCULATED", "terms.shipping.coverage.zones.0.services.0.eligibility": null, "terms.shipping.coverage.zones.0.services.1.rate.price.kind": "EXTERNALLY_CALCULATED"},
+      "limitations": ["class_costs_per_class", "class_costs_per_order"]
+    },
+    {
+      "name": "unsupported-expression-never-executes",
+      "zones": [{"id": 0, "locations": [], "methods": [{"id": "flat_rate", "cost": "10 + [fee percent=5]"}, {"id": "flat_rate", "cost": "file_put_contents('/tmp/ahpc-unsafe', 'x')"}, {"id": "flat_rate", "cost": "0.001"}]}],
+      "expect": {"terms.shipping.coverage.zones.0.services.0.eligibility": null, "terms.shipping.coverage.zones.0.services.1.rate.price.kind": "EXTERNALLY_CALCULATED", "terms.shipping.coverage.zones.0.services.2.rate.price.kind": "EXTERNALLY_CALCULATED"},
+      "limitations": ["unsupported_cost_expression"]
+    },
+    {
+      "name": "free-shipping-conditions-preserve-uncertainty",
+      "zones": [{"id": 0, "locations": [], "methods": [{"id": "free_shipping", "requires": "min_amount", "min_amount": "100.29"}, {"id": "free_shipping", "requires": "coupon"}, {"id": "free_shipping", "requires": "either"}, {"id": "free_shipping", "requires": "both", "min_amount": "25"}]}],
+      "expect": {"terms.shipping.coverage.zones.0.services.0.applicability.threshold.minimum.amount_minor": 10029, "terms.shipping.coverage.zones.0.services.0.eligibility": null, "terms.shipping.coverage.zones.0.services.1.eligibility": null, "terms.shipping.coverage.zones.0.services.2.applicability.threshold": null, "terms.shipping.coverage.zones.0.services.3.applicability.threshold.minimum.amount_minor": 2500}
+    },
+    {
+      "name": "pickup-is-independent-collection",
+      "zones": [{"id": 1, "locations": [{"type": "country", "code": "DE"}], "methods": [{"id": "local_pickup"}]}],
+      "expect": {"terms.collection.dependency": "INDEPENDENT", "terms.collection.eligibility": "SUBJECT_TO_CONFIRMATION", "terms.collection.site": null, "terms.shipping.coverage.zones.0.services.0.eligibility": "NOT_OFFERED"}
+    },
+    {
+      "name": "runtime-method-is-unknown",
+      "zones": [{"id": 0, "locations": [], "methods": [{"id": "carrier_plugin", "core": false}]}],
+      "expect": {"terms.shipping.coverage.zones.0.services.0.eligibility": null, "terms.shipping.coverage.zones.0.services.0.rate.price.kind": "EXTERNALLY_CALCULATED"},
+      "limitations": ["runtime_shipping_method"]
+    },
+    {
+      "name": "selling-country-restriction-applies-to-fallback",
+      "settings": {"restricted_countries": true, "shipping_countries": ["DE"]},
+      "zones": [{"id": 1, "locations": [{"type": "country", "code": "US"}], "methods": [{"id": "flat_rate", "cost": "5"}]}, {"id": 0, "locations": [], "methods": []}],
+      "expect": {"terms.shipping.coverage.zones.0.areas": [{"kind": "COUNTRY", "code": "DE", "reference_release": "iso-codes-4.20.1"}], "terms.shipping.coverage.zones.0.services.0.eligibility": "NOT_OFFERED"}
+    },
+    {
+      "name": "blank-base-and-no-class-are-not-free",
+      "zones": [{"id": 0, "locations": [], "methods": [{"id": "flat_rate", "cost": "", "class_costs": {"0": "", "17": ""}}]}],
+      "expect": {"terms.shipping.coverage.zones.0.services.0.eligibility": "NOT_OFFERED", "terms.shipping.coverage.zones.0.services.0.rate": null}
+    }
+  ]
+}

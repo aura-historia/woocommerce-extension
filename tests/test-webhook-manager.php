@@ -316,7 +316,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
      */
     protected function mock_oauth_token_response(
         $access_token,
-        $scope = "product-listings:write listing-sources:write",
+        $scope = \AuraHistoria\PartnerConnect\Plugin::OAUTH_SCOPE,
         $token_type = "BEARER",
     ) {
         return new Response(
@@ -525,7 +525,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         );
         $this->assertSame("code", $query["response_type"]);
         $this->assertSame("S256", $query["code_challenge_method"]);
-        $this->assertSame("product-listings:write listing-sources:write", $query["scope"]);
+        $this->assertSame(\AuraHistoria\PartnerConnect\Plugin::OAUTH_SCOPE, $query["scope"]);
         $this->assertSame("true", $query["requires_partner_shop_id"]);
         $this->assertNotEmpty($query["code_challenge"]);
         $this->assertNotEmpty($query["state"]);
@@ -1627,7 +1627,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $listing_source_id = "ls_01jw7j4azge00800000000000g";
         $access_token = "aurahistoria_abcdefghijk_verylongtokenvalue";
 
-        update_option("woocommerce_currency", "INR", false);
+        update_option("woocommerce_currency", "BHD", false);
         update_option(
             Webhook_Manager::OPTION_SETTINGS,
             [
@@ -2137,7 +2137,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $this->assertTrue($manager->sync_webhooks());
         $ids = $manager->get_webhook_ids();
 
-        update_option("woocommerce_currency", "INR", false);
+        update_option("woocommerce_currency", "BHD", false);
         $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
         $result = $manager->sync_webhooks();
         $this->assertSame("ahpc_unsupported_currency", $result->get_error_code());
@@ -2398,7 +2398,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
                 $this->assertSame("active", (new WC_Webhook($webhook_id))->get_status());
             }
 
-            update_option("woocommerce_currency", "INR", false);
+            update_option("woocommerce_currency", "BHD", false);
             $assert_paused();
             $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
             $this->assertFalse($manager->maybe_sync_webhooks());

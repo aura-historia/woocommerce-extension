@@ -96,6 +96,18 @@ class Product_Backfill
         "HKD" => 2,
         "SGD" => 2,
         "CHF" => 2,
+        "ZAR" => 2,
+        "SEK" => 2,
+        "DKK" => 2,
+        "NOK" => 2,
+        "KRW" => 0,
+        "INR" => 2,
+        "TWD" => 2,
+        "HUF" => 2,
+        "RON" => 2,
+        "MXN" => 2,
+        "THB" => 2,
+        "ARS" => 2,
     ];
 
     /**

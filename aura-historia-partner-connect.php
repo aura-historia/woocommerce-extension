@@ -21,7 +21,7 @@ if (!defined("ABSPATH")) {
 }
 
 if (!defined("AHPC_VERSION")) {
-    define("AHPC_VERSION", "0.1.0");
+    define("AHPC_VERSION", "0.2.0");
 }
 
 if (!defined("AHPC_PLUGIN_FILE")) {
@@ -86,6 +86,9 @@ require_once AHPC_PLUGIN_DIR . "includes/class-backend-api-client.php";
 require_once AHPC_PLUGIN_DIR . "includes/class-store-locale.php";
 require_once AHPC_PLUGIN_DIR . "includes/class-webhook-manager.php";
 require_once AHPC_PLUGIN_DIR . "includes/class-product-backfill.php";
+require_once AHPC_PLUGIN_DIR . "includes/class-shipping-mapper.php";
+require_once AHPC_PLUGIN_DIR . "includes/class-shipping-acquisition.php";
+require_once AHPC_PLUGIN_DIR . "includes/class-shipping-publisher.php";
 require_once AHPC_PLUGIN_DIR . "includes/class-plugin.php";
 
 /**
