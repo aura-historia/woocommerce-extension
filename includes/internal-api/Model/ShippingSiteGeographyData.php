@@ -1,0 +1,621 @@
+<?php
+/**
+ * ShippingSiteGeographyData
+ *
+ * PHP version 8.1
+ *
+ * @category Class
+ * @package  AuraHistoria\PartnerConnect\InternalApi
+ * @author   OpenAPI Generator team
+ * @link     https://openapi-generator.tech
+ */
+
+/**
+ * Aura Historia API Reference
+ *
+ * ## Overview  The Aura Historia API powers the Aura Historia antiques platform and its partner-facing integrations. It exposes product discovery, listing source discovery, personalization, partner onboarding, and integration workflows on top of Aura Historia's serverless AWS platform.  This reference is designed for two audiences: - **Internal developers** building Aura Historia product-listings, operational tooling, and backoffice workflows - **External partners and integrators** synchronizing inventory, consuming platform data, or   integrating with delegated access  ## Core API domains  - **ProductListings and listing-sources** — search, retrieve, and explore product-listings, related product-listings, product   history, and listing source data - **Personalization** — manage watchlists, saved search filters, and user notifications - **Partner workflows** — submit partnership applications, maintain partnerships, ingest catalog data   in batches, and receive WooCommerce webhooks - **Identity and access** — manage user accounts, Aura Historia access tokens, and OAuth 2.0   clients and token flows - **Billing** — create Stripe checkout, billing-portal, and subscription-management sessions  ## Authentication model  The API uses more than one authentication scheme depending on the route:  - **`BearerAuth`** — Cognito **access** JWT bearer tokens for authenticated user, admin, and   partner-user workflows. Cognito ID tokens are not accepted as API credentials. - **`AccessTokenAuth`** — Aura Historia opaque bearer access tokens created via   `/api/v1/me/access-tokens` or OAuth 2.0, primarily intended for partner automations and server-to-server   ingestion scenarios.  When a route lists multiple security schemes, any one of the listed schemes may be accepted. Some read endpoints can also be called without authentication, while a valid user token may enrich the response with personalized state such as watchlist, notification, or search-filter metadata.  ## Data and response conventions  - **PATCH:** an omitted request member remains unchanged. A documented nullable PATCH member   accepts `null` to clear its value; `null` for any other member returns `400 BAD_BODY_VALUE`.   Use `[]`, not `null`, to replace a non-null collection with an empty collection. Empty HTTP   bodies are invalid, `{}` is a valid object-PATCH no-op, and the partner-product PATCH `[]`   remains a valid empty batch. Responses may omit absent optional values. - Product detail, watchlist, and saved-search match reads accept optional **`language`** and   **`currency`** parameters. Currency defaults to `EUR`. Detail pricing contains the seller's source   amounts, converted display amounts, and FX valuation metadata. Active product-listings use the latest persisted   snapshot; sold product-listings use their immutable sale snapshot. Product history preserves immutable source values and accepts optional `currency` for historical FX display projections.   History text is not localized. - Request-wide errors are returned as **`application/problem+json`** using a consistent RFC 9457-style structure   with `status`, `title`, `error`, optional `source`, and optional `detail` - Many list and search endpoints use **cursor-based pagination** via `searchAfter` - Origin API responses include server-generated `X-Request-Id` and `X-Correlation-Id` headers. Clients may send `X-Correlation-Id` to preserve a trace only when it is a 1–128-character ASCII value containing letters, digits, `.`, `_`, or `-`; invalid values are replaced. Both headers are CORS-exposed; CloudFront removes them from viewer responses on the six cache-enabled discovery behaviors so shared cache hits cannot replay origin IDs. - Requests are limited to 1 MiB and time out after 30 seconds. - `POST /api/v1/webhooks/loops` is limited to 64 KiB and has a 10-second processing budget; it requires a valid Loops signature but no Aura bearer. - `GET /api/v1/health` is a process liveness check. `GET /api/v1/ready` returns `204` only when the configured PostgreSQL and OpenSearch dependencies are reachable; it otherwise returns `503`. - WooCommerce webhook ingestion responds with **`204 No Content`** after signed validation. A mapped raw-capture command receives `204` only after confirmed shared FIFO admission; authorized ignored create/update status events are no-op `204`. Queue admission is not raw capture, provider receipt persistence, canonical normalization, or search visibility. Capture conflicts are handled by the consumer, not returned synchronously; existing partner Product batch writes remain synchronous.  ## Environment endpoints  - **Development:** `https://api.stage.aura-historia.com` - **Production:** `https://api.aura-historia.com`  ## Notes for integrators  - Treat Aura Historia identifiers such as `listingSourceId`, `productListingId`, `eventId`, `userSearchFilterId`,   and `partnershipApplicationId` as opaque values - For partner product ingestion, `sourceListingId` is the partner-controlled identifier and should   remain stable within a listing source - Endpoints marked `deprecated` or `x-disabled` are retained for reference only and should not be   used for new integrations
+ *
+ * The version of the OpenAPI document: 1.0.0
+ * Generated by: https://openapi-generator.tech
+ * Generator version: 7.22.0
+ */
+
+/**
+ * NOTE: This class is auto generated by OpenAPI Generator (https://openapi-generator.tech).
+ * https://openapi-generator.tech
+ * Do not edit the class manually.
+ */
+// phpcs:disable WordPress.Security.EscapeOutput.ExceptionNotEscaped
+
+
+namespace AuraHistoria\PartnerConnect\InternalApi\Model;
+
+use \ArrayAccess;
+use \AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
+
+/**
+ * ShippingSiteGeographyData Class Doc Comment
+ *
+ * @category Class
+ * @description One whole advertised site assertion. ISO geography constructors validate codes, release and compatibility. Confidential assertions are protected management data.
+ * @package  AuraHistoria\PartnerConnect\InternalApi
+ * @author   OpenAPI Generator team
+ * @link     https://openapi-generator.tech
+ * @implements \ArrayAccess<string, mixed>
+ */
+class ShippingSiteGeographyData implements ModelInterface, ArrayAccess, \JsonSerializable
+{
+    public const DISCRIMINATOR = null;
+
+    /**
+     * The original name of the model.
+     *
+     * @var string
+     */
+    protected static $openAPIModelName = 'ShippingSiteGeographyData';
+
+    /**
+     * Array of property to type mappings. Used for (de)serialization
+     *
+     * @var string[]
+     */
+    protected static $openAPITypes = [
+        'reference_release' => 'string',
+        'address_text' => 'string',
+        'country' => 'string',
+        'subdivision' => 'string',
+        'postal_code' => 'string'
+    ];
+
+    /**
+     * Array of property to format mappings. Used for (de)serialization
+     *
+     * @var string[]
+     * @phpstan-var array<string, string|null>
+     * @psalm-var array<string, string|null>
+     */
+    protected static $openAPIFormats = [
+        'reference_release' => null,
+        'address_text' => null,
+        'country' => null,
+        'subdivision' => null,
+        'postal_code' => null
+    ];
+
+    /**
+     * Array of nullable properties. Used for (de)serialization
+     *
+     * @var boolean[]
+     */
+    protected static array $openAPINullables = [
+        'reference_release' => false,
+        'address_text' => true,
+        'country' => true,
+        'subdivision' => true,
+        'postal_code' => true
+    ];
+
+    /**
+     * If a nullable field gets set to null, insert it here
+     *
+     * @var boolean[]
+     */
+    protected array $openAPINullablesSetToNull = [];
+
+    /**
+     * Array of property to type mappings. Used for (de)serialization
+     *
+     * @return array
+     */
+    public static function openAPITypes()
+    {
+        return self::$openAPITypes;
+    }
+
+    /**
+     * Array of property to format mappings. Used for (de)serialization
+     *
+     * @return array
+     */
+    public static function openAPIFormats()
+    {
+        return self::$openAPIFormats;
+    }
+
+    /**
+     * Array of nullable properties
+     *
+     * @return array
+     */
+    protected static function openAPINullables(): array
+    {
+        return self::$openAPINullables;
+    }
+
+    /**
+     * Array of nullable field names deliberately set to null
+     *
+     * @return boolean[]
+     */
+    private function getOpenAPINullablesSetToNull(): array
+    {
+        return $this->openAPINullablesSetToNull;
+    }
+
+    /**
+     * Setter - Array of nullable field names deliberately set to null
+     *
+     * @param boolean[] $openAPINullablesSetToNull
+     */
+    private function setOpenAPINullablesSetToNull(array $openAPINullablesSetToNull): void
+    {
+        $this->openAPINullablesSetToNull = $openAPINullablesSetToNull;
+    }
+
+    /**
+     * Checks if a property is nullable
+     *
+     * @param string $property
+     * @return bool
+     */
+    public static function isNullable(string $property): bool
+    {
+        return self::openAPINullables()[$property] ?? false;
+    }
+
+    /**
+     * Checks if a nullable property is set to null.
+     *
+     * @param string $property
+     * @return bool
+     */
+    public function isNullableSetToNull(string $property): bool
+    {
+        return in_array($property, $this->getOpenAPINullablesSetToNull(), true);
+    }
+
+    /**
+     * Array of attributes where the key is the local name,
+     * and the value is the original name
+     *
+     * @var string[]
+     */
+    protected static $attributeMap = [
+        'reference_release' => 'reference_release',
+        'address_text' => 'address_text',
+        'country' => 'country',
+        'subdivision' => 'subdivision',
+        'postal_code' => 'postal_code'
+    ];
+
+    /**
+     * Array of attributes to setter functions (for deserialization of responses)
+     *
+     * @var string[]
+     */
+    protected static $setters = [
+        'reference_release' => 'setReferenceRelease',
+        'address_text' => 'setAddressText',
+        'country' => 'setCountry',
+        'subdivision' => 'setSubdivision',
+        'postal_code' => 'setPostalCode'
+    ];
+
+    /**
+     * Array of attributes to getter functions (for serialization of requests)
+     *
+     * @var string[]
+     */
+    protected static $getters = [
+        'reference_release' => 'getReferenceRelease',
+        'address_text' => 'getAddressText',
+        'country' => 'getCountry',
+        'subdivision' => 'getSubdivision',
+        'postal_code' => 'getPostalCode'
+    ];
+
+    /**
+     * Array of attributes where the key is the local name,
+     * and the value is the original name
+     *
+     * @return array
+     */
+    public static function attributeMap()
+    {
+        return self::$attributeMap;
+    }
+
+    /**
+     * Array of attributes to setter functions (for deserialization of responses)
+     *
+     * @return array
+     */
+    public static function setters()
+    {
+        return self::$setters;
+    }
+
+    /**
+     * Array of attributes to getter functions (for serialization of requests)
+     *
+     * @return array
+     */
+    public static function getters()
+    {
+        return self::$getters;
+    }
+
+    /**
+     * The original name of the model.
+     *
+     * @return string
+     */
+    public function getModelName()
+    {
+        return self::$openAPIModelName;
+    }
+
+    public const REFERENCE_RELEASE_ISO_CODES_4_20_1 = 'iso-codes-4.20.1';
+
+    /**
+     * Gets allowable values of the enum
+     *
+     * @return string[]
+     */
+    public function getReferenceReleaseAllowableValues()
+    {
+        return [
+            self::REFERENCE_RELEASE_ISO_CODES_4_20_1,
+        ];
+    }
+
+    /**
+     * Associative array for storing property values
+     *
+     * @var mixed[]
+     */
+    protected $container = [];
+
+    /**
+     * Constructor
+     *
+     * @param mixed[]|null $data Associated array of property values
+     *                      initializing the model
+     */
+    public function __construct(?array $data = null)
+    {
+        $this->setIfExists('reference_release', $data ?? [], null);
+        $this->setIfExists('address_text', $data ?? [], null);
+        $this->setIfExists('country', $data ?? [], null);
+        $this->setIfExists('subdivision', $data ?? [], null);
+        $this->setIfExists('postal_code', $data ?? [], null);
+    }
+
+    /**
+     * Sets $this->container[$variableName] to the given data or to the given default Value; if $variableName
+     * is nullable and its value is set to null in the $fields array, then mark it as "set to null" in the
+     * $this->openAPINullablesSetToNull array
+     *
+     * @param string $variableName
+     * @param array  $fields
+     * @param mixed  $defaultValue
+     */
+    private function setIfExists(string $variableName, array $fields, $defaultValue): void
+    {
+        if (self::isNullable($variableName) && array_key_exists($variableName, $fields) && is_null($fields[$variableName])) {
+            $this->openAPINullablesSetToNull[] = $variableName;
+        }
+
+        $this->container[$variableName] = $fields[$variableName] ?? $defaultValue;
+    }
+
+    /**
+     * Show all the invalid properties with reasons.
+     *
+     * @return array invalid properties with reasons
+     */
+    public function listInvalidProperties()
+    {
+        $invalidProperties = [];
+
+        if ($this->container['reference_release'] === null) {
+            $invalidProperties[] = "'reference_release' can't be null";
+        }
+        $allowedValues = $this->getReferenceReleaseAllowableValues();
+        if (!is_null($this->container['reference_release']) && !in_array($this->container['reference_release'], $allowedValues, true)) {
+            $invalidProperties[] = sprintf(
+                "invalid value '%s' for 'reference_release', must be one of '%s'",
+                $this->container['reference_release'],
+                implode("', '", $allowedValues)
+            );
+        }
+
+        if ($this->container['address_text'] === null && !$this->isNullableSetToNull('address_text')) {
+            $invalidProperties[] = "'address_text' is required";
+        }
+        if ($this->container['country'] === null && !$this->isNullableSetToNull('country')) {
+            $invalidProperties[] = "'country' is required";
+        }
+        if ($this->container['subdivision'] === null && !$this->isNullableSetToNull('subdivision')) {
+            $invalidProperties[] = "'subdivision' is required";
+        }
+        if ($this->container['postal_code'] === null && !$this->isNullableSetToNull('postal_code')) {
+            $invalidProperties[] = "'postal_code' is required";
+        }
+        return $invalidProperties;
+    }
+
+    /**
+     * Validate all the properties in the model
+     * return true if all passed
+     *
+     * @return bool True if all properties are valid
+     */
+    public function valid()
+    {
+        return count($this->listInvalidProperties()) === 0;
+    }
+
+
+    /**
+     * Gets reference_release
+     *
+     * @return string
+     */
+    public function getReferenceRelease()
+    {
+        return $this->container['reference_release'];
+    }
+
+    /**
+     * Sets reference_release
+     *
+     * @param string $reference_release reference_release
+     *
+     * @return self
+     */
+    public function setReferenceRelease($reference_release)
+    {
+        if (is_null($reference_release)) {
+            throw new \InvalidArgumentException('non-nullable reference_release cannot be null');
+        }
+        $allowedValues = $this->getReferenceReleaseAllowableValues();
+        if (!in_array($reference_release, $allowedValues, true)) {
+            throw new \InvalidArgumentException(
+                sprintf(
+                    "Invalid value '%s' for 'reference_release', must be one of '%s'",
+                    $reference_release,
+                    implode("', '", $allowedValues)
+                )
+            );
+        }
+        $this->container['reference_release'] = $reference_release;
+
+        return $this;
+    }
+
+    /**
+     * Gets address_text
+     *
+     * @return string|null
+     */
+    public function getAddressText()
+    {
+        return $this->container['address_text'];
+    }
+
+    /**
+     * Sets address_text
+     *
+     * @param string|null $address_text address_text
+     *
+     * @return self
+     */
+    public function setAddressText($address_text)
+    {
+        if (is_null($address_text)) {
+            array_push($this->openAPINullablesSetToNull, 'address_text');
+        } else {
+            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
+            $index = array_search('address_text', $nullablesSetToNull);
+            if ($index !== FALSE) {
+                unset($nullablesSetToNull[$index]);
+                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
+            }
+        }
+        $this->container['address_text'] = $address_text;
+
+        return $this;
+    }
+
+    /**
+     * Gets country
+     *
+     * @return string|null
+     */
+    public function getCountry()
+    {
+        return $this->container['country'];
+    }
+
+    /**
+     * Sets country
+     *
+     * @param string|null $country country
+     *
+     * @return self
+     */
+    public function setCountry($country)
+    {
+        if (is_null($country)) {
+            array_push($this->openAPINullablesSetToNull, 'country');
+        } else {
+            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
+            $index = array_search('country', $nullablesSetToNull);
+            if ($index !== FALSE) {
+                unset($nullablesSetToNull[$index]);
+                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
+            }
+        }
+        $this->container['country'] = $country;
+
+        return $this;
+    }
+
+    /**
+     * Gets subdivision
+     *
+     * @return string|null
+     */
+    public function getSubdivision()
+    {
+        return $this->container['subdivision'];
+    }
+
+    /**
+     * Sets subdivision
+     *
+     * @param string|null $subdivision subdivision
+     *
+     * @return self
+     */
+    public function setSubdivision($subdivision)
+    {
+        if (is_null($subdivision)) {
+            array_push($this->openAPINullablesSetToNull, 'subdivision');
+        } else {
+            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
+            $index = array_search('subdivision', $nullablesSetToNull);
+            if ($index !== FALSE) {
+                unset($nullablesSetToNull[$index]);
+                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
+            }
+        }
+        $this->container['subdivision'] = $subdivision;
+
+        return $this;
+    }
+
+    /**
+     * Gets postal_code
+     *
+     * @return string|null
+     */
+    public function getPostalCode()
+    {
+        return $this->container['postal_code'];
+    }
+
+    /**
+     * Sets postal_code
+     *
+     * @param string|null $postal_code postal_code
+     *
+     * @return self
+     */
+    public function setPostalCode($postal_code)
+    {
+        if (is_null($postal_code)) {
+            array_push($this->openAPINullablesSetToNull, 'postal_code');
+        } else {
+            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
+            $index = array_search('postal_code', $nullablesSetToNull);
+            if ($index !== FALSE) {
+                unset($nullablesSetToNull[$index]);
+                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
+            }
+        }
+        $this->container['postal_code'] = $postal_code;
+
+        return $this;
+    }
+    /**
+     * Returns true if offset exists. False otherwise.
+     *
+     * @param integer|string $offset Offset
+     *
+     * @return boolean
+     */
+    public function offsetExists(mixed $offset): bool
+    {
+        return isset($this->container[$offset]);
+    }
+
+    /**
+     * Gets offset.
+     *
+     * @param integer|string $offset Offset
+     *
+     * @return mixed|null
+     */
+    #[\ReturnTypeWillChange]
+    public function offsetGet(mixed $offset)
+    {
+        return $this->container[$offset] ?? null;
+    }
+
+    /**
+     * Sets value based on offset.
+     *
+     * @param int|null $offset Offset
+     * @param mixed    $value  Value to be set
+     *
+     * @return void
+     */
+    public function offsetSet($offset, $value): void
+    {
+        if (is_null($offset)) {
+            $this->container[] = $value;
+        } else {
+            $this->container[$offset] = $value;
+        }
+    }
+
+    /**
+     * Unsets offset.
+     *
+     * @param integer|string $offset Offset
+     *
+     * @return void
+     */
+    public function offsetUnset(mixed $offset): void
+    {
+        unset($this->container[$offset]);
+    }
+
+    /**
+     * Serializes the object to a value that can be serialized natively by json_encode().
+     * @link https://www.php.net/manual/en/jsonserializable.jsonserialize.php
+     *
+     * @return mixed Returns data which can be serialized by json_encode(), which is a value
+     * of any type other than a resource.
+     */
+    #[\ReturnTypeWillChange]
+    public function jsonSerialize()
+    {
+       return ObjectSerializer::sanitizeForSerialization($this);
+    }
+
+    /**
+     * Gets the string presentation of the object
+     *
+     * @return string
+     */
+    public function __toString()
+    {
+        return json_encode(
+            ObjectSerializer::sanitizeForSerialization($this),
+            JSON_PRETTY_PRINT
+        );
+    }
+
+    /**
+     * Gets a header-safe presentation of the object
+     *
+     * @return string
+     */
+    public function toHeaderValue()
+    {
+        return json_encode(ObjectSerializer::sanitizeForSerialization($this));
+    }
+}

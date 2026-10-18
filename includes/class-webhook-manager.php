@@ -791,6 +791,9 @@ class Webhook_Manager
         }
 
         delete_option("ahpc_backfill_state");
+        if (class_exists(Shipping_Publisher::class)) {
+            Shipping_Publisher::uninstall();
+        }
     }
 
     /**

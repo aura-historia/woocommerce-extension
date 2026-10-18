@@ -28,7 +28,7 @@ async function fetchSpec(specUrl) {
         throw new Error(`Failed to fetch OpenAPI spec from ${specUrl}: HTTP ${response.status}`);
     }
 
-    return YAML.parse(await response.text());
+    return YAML.parse(await response.text(), { intAsBigInt: true });
 }
 
 function ensureSet(map, key) {
@@ -175,11 +175,15 @@ function cloneReferencedComponents(spec, componentRefs) {
 }
 
 
-function filterSpec(spec, operationIds) {
+function filterSpec(spec, operationIds, schemaNames = []) {
     const selectedOperations = [];
     const usedTags = new Set();
     const componentRefs = createComponentRefStore();
     const filteredPaths = {};
+
+    for (const name of schemaNames) {
+        addComponentRef(componentRefs, `#/components/schemas/${name}`);
+    }
 
     for (const [pathName, pathItem] of Object.entries(spec.paths || {})) {
         const filteredPathItem = {};
@@ -214,6 +218,10 @@ function filterSpec(spec, operationIds) {
         filteredPaths[pathName] = filteredPathItem;
     }
 
+    const missing = operationIds.filter((id) => !selectedOperations.some((op) => op.operationId === id));
+    if (missing.length) {
+        throw new Error(`Upstream spec is missing operations: ${missing.join(', ')}`);
+    }
     const securitySchemeNames = collectSecuritySchemeNames(spec, selectedOperations);
     const filteredComponents = cloneReferencedComponents(spec, componentRefs);
 
@@ -253,6 +261,58 @@ function writeFilteredSpec(config, filteredSpec, specUrl) {
     ].join('\n');
 
     writeFileSync(filteredSpecPath, header + YAML.stringify(filteredSpec), 'utf8');
+}
+
+// PHP 7.22 otherwise flattens oneOf branches and keeps only the last enum.
+// Promote anonymous discriminated unions to named components, preserving exactly
+// the upstream branches, fields and allowed values. Runtime dispatch below uses
+// their explicit OpenAPI discriminator mappings (the generated classes do not
+// inherit from the union class).
+function normalizeDiscriminatedUnions(spec) {
+    const schemas = spec.components.schemas;
+    const pascal = (value) => value.split(/[^A-Za-z0-9]+/).map((part) => part[0].toUpperCase() + part.slice(1).toLowerCase()).join('');
+    const resolve = (value) => value.$ref ? schemas[value.$ref.split('/').pop()] : value;
+    const visit = (value, name, root = false) => {
+        if (!value || typeof value !== 'object' || value.$ref) return;
+        if (Array.isArray(value.oneOf)) {
+            const property = ['kind', 'state'].find((key) => value.oneOf.every((branch) => {
+                const values = resolve(branch)?.properties?.[key]?.enum;
+                return Array.isArray(values) && values.length && values.every((v) => typeof v === 'string');
+            }));
+            if (property) {
+                if (!root) {
+                    if (schemas[name]) throw new Error(`Union component collision: ${name}`);
+                    schemas[name] = { ...value };
+                    for (const key of Object.keys(value)) delete value[key];
+                    value.$ref = `#/components/schemas/${name}`;
+                    visit(schemas[name], name, true);
+                    return;
+                }
+                const mapping = {};
+                value.oneOf = value.oneOf.map((branch) => {
+                    const values = resolve(branch).properties[property].enum;
+                    if (!branch.$ref) {
+                        const branchName = `${name}${pascal(values[0])}`;
+                        if (schemas[branchName]) throw new Error(`Union branch collision: ${branchName}`);
+                        schemas[branchName] = branch;
+                        visit(branch, branchName, true);
+                        branch = { $ref: `#/components/schemas/${branchName}` };
+                    }
+                    for (const code of values) {
+                        if (mapping[code]) throw new Error(`Ambiguous discriminator ${name}/${code}`);
+                        mapping[code] = branch.$ref;
+                    }
+                    return branch;
+                });
+                value.discriminator = { propertyName: property, mapping };
+            }
+        }
+        for (const [key, property] of Object.entries(value.properties || {})) {
+            visit(property, `${name}${key[0].toUpperCase()}${key.slice(1)}`);
+        }
+        if (value.items) visit(value.items, `${name}Item`);
+    };
+    for (const [name, schema] of Object.entries(schemas)) visit(schema, name, true);
 }
 
 function removePath(config, relativePath) {
@@ -323,6 +383,19 @@ function runGenerator(config) {
         ].join(','),
     ];
 
+    // The optional official CLI JAR runs the same pinned generator without Docker.
+    const jar = process.env.AHPC_OPENAPI_GENERATOR_JAR;
+    const version = config.generator.image.split(':').pop().replace(/^v/, '');
+    if (jar) {
+        const actual = execFileSync('java', ['-jar', jar, 'version'], { encoding: 'utf8' }).trim();
+        if (actual !== version) {
+            throw new Error(`Expected OpenAPI Generator ${version}, received ${actual}`);
+        }
+        const args = dockerArgs.slice(dockerArgs.indexOf('generate'))
+            .map((arg) => arg.startsWith('/local/') ? path.join(projectRoot, arg.slice(7)) : arg);
+        execFileSync('java', ['-jar', jar, ...args], { cwd: projectRoot, stdio: 'inherit' });
+        return;
+    }
     execFileSync('docker', dockerArgs, {
         cwd: projectRoot,
         stdio: 'inherit',
@@ -716,6 +789,55 @@ function applyWordPressGeneratedClientPatches(config) {
 
     const objectSerializerPath = path.join(outputPath, 'ObjectSerializer.php');
     let objectSerializer = readFileSync(objectSerializerPath, 'utf8');
+    const spec = YAML.parse(readFileSync(path.join(projectRoot, config.filteredSpecPath), 'utf8'));
+    const phpString = (value) => `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+    const mappings = Object.entries(spec.components.schemas)
+        .filter(([, schema]) => schema.discriminator?.mapping)
+        .map(([name, schema]) => {
+            const branches = Object.entries(schema.discriminator.mapping).map(([code, ref]) =>
+                `${phpString(code)} => ${phpString(`${config.namespace}\\Model\\${ref.split('/').pop()}`)}`);
+            return `${phpString(`${config.namespace}\\Model\\${name}`)} => ['property' => ${phpString(schema.discriminator.propertyName)}, 'mapping' => [${branches.join(', ')}]]`;
+        });
+    objectSerializer = replaceOrThrow(objectSerializer, 'class ObjectSerializer\n{',
+        `class ObjectSerializer\n{\n    private const DISCRIMINATOR_MAPPINGS = [\n        ${mappings.join(',\n        ')}\n    ];\n`,
+        'Explicit OpenAPI union discriminator mappings');
+    objectSerializer = replaceRegexOrThrow(objectSerializer,
+        /            \/\/ If a discriminator is defined[\s\S]*?\n            \/\*\* @var ModelInterface \$instance \*\//,
+        String.raw`            $mapping = self::DISCRIMINATOR_MAPPINGS[ltrim($class, '\\')] ?? null;
+            if ($mapping && isset($data->{$mapping['property']})) {
+                $target = $mapping['mapping'][$data->{$mapping['property']}] ?? null;
+                if (!$target) {
+                    throw new \InvalidArgumentException('Unknown OpenAPI discriminator value.');
+                }
+                $class = $target;
+            }
+
+            /** @var ModelInterface $instance */`,
+        'Dispatch discriminated unions to their concrete generated models');
+    objectSerializer = replaceOrThrow(
+        objectSerializer,
+        'private static $dateTimeFormat = \\DateTime::ATOM;',
+        "private static $dateTimeFormat = 'Y-m-d\\\\TH:i:s.uP';",
+        'Preserve shipping acquisition microseconds',
+    );
+    objectSerializer = replaceOrThrow(
+        objectSerializer,
+        "        if ($class === 'object') {\n            settype($data, 'array');\n            return $data;",
+        "        if ($class === 'object') {\n            return (object) $data;",
+        'Preserve explicit empty shipping observation objects',
+    );
+    objectSerializer = replaceOrThrow(
+        objectSerializer,
+        '                    if ($instance::isNullable($property)) {',
+        '                    if (property_exists($data, $instance::attributeMap()[$property]) && $instance::isNullable($property)) {',
+        'Preserve omitted optional import observation on removals',
+    );
+    objectSerializer = replaceOrThrow(
+        objectSerializer,
+        '                $data[$property] = self::sanitizeForSerialization($value);\n            }\n            return $data;',
+        '                $data[$property] = self::sanitizeForSerialization($value);\n            }\n            return preg_match(\'/^(map\\\\[|array<)/\', (string) $type) ? (object) $data : $data;',
+        'Preserve empty typed shipping component maps',
+    );
 
     objectSerializer = replaceRegexOrThrow(
         objectSerializer,
@@ -802,8 +924,11 @@ async function main() {
 
     console.log(`Fetching OpenAPI spec from ${specUrl}`);
 
-    const upstreamSpec = await fetchSpec(specUrl);
-    const filteredSpec = filterSpec(upstreamSpec, config.operations);
+    const upstreamSpec = process.env.AHPC_OPENAPI_SPEC_PATH
+        ? YAML.parse(readFileSync(process.env.AHPC_OPENAPI_SPEC_PATH, 'utf8'), { intAsBigInt: true })
+        : await fetchSpec(specUrl);
+    const filteredSpec = filterSpec(upstreamSpec, config.operations, config.schemas);
+    normalizeDiscriminatedUnions(filteredSpec);
 
     writeFilteredSpec(config, filteredSpec, specUrl);
 

@@ -11,6 +11,7 @@ if (!defined("WP_UNINSTALL_PLUGIN")) {
 
 require_once __DIR__ . "/includes/class-webhook-manager.php";
 require_once __DIR__ . "/includes/class-product-backfill.php";
+require_once __DIR__ . "/includes/class-shipping-publisher.php";
 
 $ahpc_manager = new \AuraHistoria\PartnerConnect\Webhook_Manager();
 $ahpc_manager->delete_webhooks();

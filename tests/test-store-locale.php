@@ -86,7 +86,7 @@ class Test_AHPC_Store_Locale extends WP_UnitTestCase
      */
     public function test_get_currency_rejects_unsupported_woocommerce_currency()
     {
-        update_option("woocommerce_currency", "INR", false);
+        update_option("woocommerce_currency", "BHD", false);
 
         $this->assertNull(Store_Locale::get_currency());
     }

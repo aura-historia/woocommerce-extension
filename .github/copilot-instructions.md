@@ -4,13 +4,13 @@
 
 This repository contains a lean WordPress plugin for WooCommerce.
 
-Its job is to automatically create and maintain exactly three WooCommerce webhooks for the installing shop:
+It automatically creates and maintains exactly three WooCommerce webhooks for the installing shop:
 
 - `product.created`
 - `product.updated`
 - `product.deleted`
 
-The delivery target is the Aura Historia backend endpoint hardcoded into the plugin.
+The delivery target is the Aura Historia backend endpoint hardcoded into the plugin. Separate Action Scheduler jobs submit the initial catalog backfill and initial/manual shipping imports through the typed Aura API client.
 
 ## Architecture
 
@@ -19,6 +19,9 @@ Keep the plugin small and follow the current structure:
 - `aura-historia-partner-connect.php` — plugin header, bootstrap, and hardcoded backend base URL constant
 - `includes/class-plugin.php` — WordPress/WooCommerce bootstrapping, admin UI, settings page, lightweight validation, and manual sync action
 - `includes/class-webhook-manager.php` — webhook ownership, idempotent sync, backend secret registration, pause/delete behavior, drift recovery, and endpoint resolution
+- `includes/class-product-backfill.php` — separate asynchronous catalog CREATE admission
+- `includes/class-shipping-{acquisition,mapper,publisher}.php` — local shipping reads, conservative mapping and resumable typed publication shared with ongoing reconciliation
+- `includes/class-backend-api-client.php` — typed backend requests using the generated client
 - `uninstall.php` — uninstall cleanup
 - `tests/` — WordPress integration tests
 - `.wp-env.json`, `package.json`, and `composer.json` — local development and test tooling
@@ -40,12 +43,12 @@ When changing functionality, preserve these invariants:
 9. Keep the settings surface minimal.
 10. The delivery endpoint URL should stay hardcoded in the plugin, not user-configurable in wp-admin, unless explicitly requested.
 11. The WooCommerce webhook secret should be auto-generated and hidden from the merchant.
-12. Merchant-configurable settings should be limited to the backend Shop ID and backend access token.
+12. Obtain the ListingSource ID and backend access token through OAuth; keep credentials hidden and the signing secret generated locally.
 
 ## WordPress and WooCommerce conventions
 
 - Follow WordPress plugin best practices.
-- Keep compatibility with the plugin's declared minimums, especially PHP `7.4`.
+- Keep compatibility with the plugin's declared minimums, especially PHP `8.2`.
 - Prefer WordPress and WooCommerce APIs over custom infrastructure.
 - For webhook management, use WooCommerce's `WC_Webhook` CRUD API unless a cleanup fallback genuinely requires direct database access.
 - Sanitize all settings input and escape all admin output.
@@ -55,13 +58,13 @@ When changing functionality, preserve these invariants:
 
 ## Backend integration rules
 
-- The plugin must PATCH the generated webhook secret to `/api/v1/shops/{shopId}` before activating delivery.
-- The plugin must send webhook deliveries to `/api/v1/webhooks/woocommerce/{shopId}`.
+- PUT the generated signing secret and store locale to `/api/v1/listing-sources/{listingSourceId}/ingestion-configurations/woocommerce` before activating delivery.
+- The plugin must send webhook deliveries to `/api/v1/webhooks/woocommerce/{listingSourceId}`.
 - The backend access token is a separate credential from the WooCommerce webhook secret.
-- The backend access token must be validated lightly in the UI before saving.
-- The Shop ID must be validated lightly as a UUID before saving.
-- The plugin should add the access token to the webhook `x-api-key` header as safely as possible.
-- Prefer adding the access token to the webhook `x-api-key` header late in the WordPress HTTP stack if that avoids leaking the header into WooCommerce delivery logs.
+- Validate the OAuth access token and required scopes before saving.
+- Validate canonical UUIDv7 `ls_` ListingSource and `oc_` OAuth client TypeIDs with the shared validator.
+- The plugin should add the access token to the webhook bearer `Authorization` header as safely as possible.
+- Prefer adding the access token to the webhook bearer `Authorization` header late in the WordPress HTTP stack if that avoids leaking the header into WooCommerce delivery logs.
 
 ## WordPress.org mindset
 
@@ -82,7 +85,9 @@ That means:
 - Deleted payloads only contain an `id`.
 - WooCommerce signs deliveries with `X-WC-Webhook-Signature`.
 - The generated secret is a signing secret, not a standalone Authorization header.
-- Do not add catalog backfill behavior unless explicitly requested.
+- Keep catalog backfill separate from live webhooks and shipping publication. Shipping must never restart catalog CREATE work.
+- Shipping uses the pinned API contract, stable profile identity, immutable retry requests, actual acquisition times and `observation: {}`; do not add expiry fields or a backend-to-plugin callback.
+- Failed or incomplete shipping reads preserve existing assertions. Respect component ownership and reacquire after conflicts; use the shared publisher source lock and ordering for all shipping work.
 
 ## Local development and tests
 
@@ -106,7 +111,7 @@ When changing behavior, add or update tests when sensible, especially around:
 
 - managed webhook creation
 - backend secret registration
-- outgoing webhook `x-api-key` access token header behavior
+- outgoing webhook bearer `Authorization` access token header behavior
 - idempotent updates
 - pause/delete cleanup
 - drift recovery

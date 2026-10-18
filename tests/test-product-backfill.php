@@ -387,6 +387,9 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             "PLN" => 2, "TRY" => 2, "JPY" => 0, "CZK" => 2,
             "RUB" => 2, "AED" => 2, "SAR" => 2, "HKD" => 2,
             "SGD" => 2, "CHF" => 2,
+            "ZAR" => 2, "SEK" => 2, "DKK" => 2, "NOK" => 2,
+            "KRW" => 0, "INR" => 2, "TWD" => 2, "HUF" => 2,
+            "RON" => 2, "MXN" => 2, "THB" => 2, "ARS" => 2,
         ];
         $this->assertEqualsCanonicalizing(array_keys($expected), CurrencyData::getAllowableEnumValues());
 
