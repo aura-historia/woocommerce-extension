@@ -72,7 +72,8 @@ class Shipping_Publisher
             "INSERT IGNORE INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, %s, 'no')",
             $name, maybe_serialize($value)
         ));
-        self::clear_option_cache($name);
+        wp_cache_delete($name, "options");
+        wp_cache_delete("notoptions", "options");
         return 1 === $inserted;
     }
 
