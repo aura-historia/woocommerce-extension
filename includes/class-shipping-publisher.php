@@ -1,6 +1,6 @@
 <?php
 /**
- * Source-ordered, resumable initial and manual typed shipping publication.
+ * Source-ordered, resumable typed shipping publication.
  *
  * @package AuraHistoria\PartnerConnect
  */
@@ -14,7 +14,7 @@ if (!defined("ABSPATH")) {
 // phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery -- Prepared atomic comparisons affect only plugin-owned options; their caches are invalidated explicitly. The option APIs cannot fence expired workers.
 
 /**
- * W02 must use this same source queue/lock and acquisition sequence. One action
+ * All shipping paths share this source queue/lock and acquisition sequence. One action
  * performs at most one write. A persisted request is immutable until confirmed
  * or rejected; credentials are always resolved at execution time.
  */
@@ -26,6 +26,7 @@ class Shipping_Publisher
     const ACTION_HOOK = "ahpc_publish_shipping";
     const ACTION_GROUP = "aura-historia-shipping";
     const OPTION_SOURCES = "ahpc_shipping_sources";
+    const OPTION_CLEANUP = "ahpc_shipping_cleanup";
     const MAX_ATTEMPTS = 5;
     const MAX_DEFERRED = 100;
     const RETRY_DELAY = 60;
@@ -77,7 +78,7 @@ class Shipping_Publisher
         return 1 === $inserted;
     }
 
-    /** Shared coordination boundary for all initial/manual/W02 operations. */
+    /** Shared coordination boundary for all shipping operations. */
     public function acquire_source_lock($source)
     {
         if (!Webhook_Manager::is_valid_listing_source_id($source)) {
@@ -98,7 +99,7 @@ class Shipping_Publisher
                 return false;
             }
         }
-        $this->lock = ["source" => $source, "name" => $name, "value" => $value];
+        $this->lock = ["source" => $source, "name" => $name, "value" => $value, "generation" => Shipping_Sync::generation()];
         self::clear_option_cache(self::state_option($source));
         return true;
     }
@@ -122,14 +123,15 @@ class Shipping_Publisher
         wp_cache_delete($this->lock["name"], "options");
         $current = get_option($this->lock["name"], "");
         $decoded = json_decode($current, true);
-        if ($current !== $this->lock["value"] || !is_array($decoded) || $decoded["until"] <= time()) {
+        if ($current !== $this->lock["value"] || !is_array($decoded) || $decoded["until"] <= time()
+            || $this->lock["generation"] !== Shipping_Sync::generation()) {
             throw new \RuntimeException("shipping_lock_lost");
         }
     }
 
     /**
      * Queues an initial run once, resumes exact pending work, or starts a manual
-     * refresh after completion. W02 requests a refresh through this same method.
+     * refresh after completion. Automatic changes use the same method.
      *
      * @return true|\WP_Error
      */
@@ -146,7 +148,16 @@ class Shipping_Publisher
             return Shipping_Mapper::error("source_busy");
         }
         try {
+            $binding = Shipping_Sync::binding();
+            if (isset($binding["enabled"]) && (!$binding["enabled"] || ($binding["source"] ?? "") !== $source)) {
+                return Shipping_Mapper::error("connection_changed");
+            }
             $state = $this->get_status($source);
+            if (($state["generation"] ?? "") !== Shipping_Sync::generation()) {
+                // Reconnection cannot relabel a queued capture from an earlier
+                // binding. Preserve the monotonic order, acquire new facts.
+                $state = [];
+            }
             if (!$refresh && (in_array($state["status"] ?? "", ["complete", "partial", "needs_review"], true) || ($state["attempt"] ?? 0) >= self::MAX_ATTEMPTS)) {
                 return true;
             }
@@ -163,6 +174,7 @@ class Shipping_Publisher
                     return $upper_id;
                 }
                 $state = ["source" => $source, "status" => "queued", "phase" => "profile", "cursor" => 0, "upper_id" => $upper_id,
+                    "generation" => Shipping_Sync::generation(), "queued_at" => time(),
                     "item_id" => 0, "component" => "selection", "pending" => null, "deferred" => [], "traversed" => false,
                     "processed" => 0, "protected" => 0, "failed" => 0, "attempt" => 0, "conflicts" => 0, "limitations" => [], "last_error" => "", "retry_remaining" => 0];
             } elseif ($refresh && !empty($state["deferred"])) {
@@ -191,7 +203,11 @@ class Shipping_Publisher
 
     public function maybe_queue_initial()
     {
-        $settings = (new Webhook_Manager())->get_settings();
+        $binding = Shipping_Sync::binding();
+        if (isset($binding["enabled"]) && !$binding["enabled"]) {
+            return;
+        }
+        $settings = Shipping_Sync::settings();
         if (Webhook_Manager::is_valid_listing_source_id($settings["listing_source_id"]) && Webhook_Manager::is_valid_access_token($settings["access_token"])
             && "no" === get_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes")) {
             $this->queue($settings["listing_source_id"], false);
@@ -199,7 +215,7 @@ class Shipping_Publisher
     }
 
     /**
-     * W02 can enqueue an explicit owned removal after local trash/deletion.
+     * Enqueue an explicit owned removal after local trash/deletion.
      * Omission from a page, an unsupported product and a failed read never call
      * this operation. Recheck actual absence again immediately before writing.
      */
@@ -237,17 +253,18 @@ class Shipping_Publisher
         }
     }
 
-    private function confirmed_removed($item_id)
+    public static function confirmed_removed($item_id)
     {
         global $wpdb;
         if (!is_int($item_id) || $item_id <= 0) {
             return false;
         }
+        wp_cache_delete($item_id, "posts");
         $post = get_post($item_id);
-        return !$wpdb->last_error && (!$post || ("product" === $post->post_type && in_array($post->post_status, ["trash", "draft", "private", "pending"], true)));
+        return !$wpdb->last_error && (!$post || ("product" === $post->post_type && in_array($post->post_status, ["trash", "draft", "private", "pending", "future"], true)));
     }
 
-    /** Scoped W02 membership refresh; facts are acquired inside the same worker. */
+    /** Scoped membership refresh; facts are acquired inside the same worker. */
     public function queue_items($source, array $item_ids)
     {
         if (!$item_ids || count($item_ids) > self::MAX_DEFERRED) {
@@ -303,9 +320,15 @@ class Shipping_Publisher
     /** Action Scheduler entry point; arguments contain identifiers only. */
     public function process($source, $wake)
     {
+        $binding = Shipping_Sync::binding();
+        if (isset($binding["enabled"]) && (!$binding["enabled"] || ($binding["source"] ?? "") !== $source)) {
+            return;
+        }
         if (!$this->acquire_source_lock($source)) {
             // Do not lose a wake-up when another source operation holds the lock.
-            as_schedule_single_action(time() + self::RETRY_DELAY, self::ACTION_HOOK, [$source, $wake], self::ACTION_GROUP);
+            if (($binding["generation"] ?? "") === Shipping_Sync::generation()) {
+                as_schedule_single_action(time() + self::RETRY_DELAY, self::ACTION_HOOK, [$source, $wake], self::ACTION_GROUP);
+            }
             return;
         }
         try {
@@ -313,14 +336,22 @@ class Shipping_Publisher
             if (!$state || ($state["wake"] ?? "") !== $wake) {
                 return;
             }
-            $settings = (new Webhook_Manager())->get_settings();
-            if ($source !== $settings["listing_source_id"] || !Webhook_Manager::is_valid_access_token($settings["access_token"])) {
+            $settings = Shipping_Sync::settings();
+            $binding = Shipping_Sync::binding();
+            if ($source !== $settings["listing_source_id"] || !Webhook_Manager::is_valid_access_token($settings["access_token"])
+                || ($state["generation"] ?? "") !== Shipping_Sync::generation() || (isset($binding["enabled"]) && !$binding["enabled"])) {
                 $state["status"] = "failed";
                 $state["last_error"] = "connection_changed";
                 $this->save($state);
                 return;
             }
+            if (isset($binding["enabled"]) && "no" !== get_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes")) {
+                $state["last_error"] = "configuration_not_ready";
+                $this->schedule($state, self::RETRY_DELAY);
+                return;
+            }
             $state["status"] = "running";
+            $state["attempted_at"] = time();
             if (empty($state["pending"])) {
                 $request = $this->prepare($state);
                 if (is_wp_error($request)) {
@@ -337,6 +368,15 @@ class Shipping_Publisher
             }
             $this->assert_lock($source);
             $pending = $state["pending"];
+            if (str_starts_with($pending["kind"], "remove_") && !self::confirmed_removed($pending["item_id"])) {
+                $result = $this->reconcile_restored_item($state, $pending["item_id"]);
+                if (is_wp_error($result)) {
+                    // An inconclusive read must retain the immutable request
+                    // and a retry; only confirmed restoration cancels it.
+                    $this->failure($state, $result);
+                }
+                return;
+            }
             $result = $this->client->shipping_request($pending["operation"], $source, $pending["arguments"]);
             $this->assert_lock($source);
             if (is_wp_error($result)) {
@@ -349,6 +389,22 @@ class Shipping_Publisher
                     return;
                 }
                 $state["profile_id"] = $result["shippingProfileId"];
+            }
+            $state["committed_at"] = time();
+            if (in_array($pending["kind"], ["selection", "inputs"], true)) {
+                global $wpdb;
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.NoCaching -- The dynamic option and negative option caches are cleared by clear_option_cache() immediately below.
+                $indexed = $wpdb->query($wpdb->prepare(
+                    "INSERT IGNORE INTO {$wpdb->options} (option_name, option_value, autoload) SELECT %s, %s, 'no' FROM {$wpdb->options} AS lease WHERE lease.option_name = %s AND lease.option_value = %s",
+                    Shipping_Sync::MEMBER_PREFIX . $source . "_" . $pending["item_id"], (string) $pending["item_id"], $this->lock["name"], $this->lock["value"]
+                ));
+                self::clear_option_cache(Shipping_Sync::MEMBER_PREFIX . $source . "_" . $pending["item_id"]);
+                $this->assert_lock($source);
+                if (false === $indexed) {
+                    throw new \RuntimeException("shipping_membership_checkpoint_failed");
+                }
+            } elseif ("remove_inputs" === $pending["kind"]) {
+                delete_option(Shipping_Sync::MEMBER_PREFIX . $source . "_" . $pending["item_id"]);
             }
             $this->advance($state, $pending["kind"]);
             $state["pending"] = null;
@@ -422,6 +478,7 @@ class Shipping_Publisher
         }
         if ($state["traversed"]) {
             $state["status"] = $state["deferred"] ? "partial" : "complete";
+            $state["completed_at"] = time();
             $this->save($state);
             return null;
         }
@@ -433,6 +490,7 @@ class Shipping_Publisher
             if (!$ids) {
                 $state["traversed"] = true;
                 $state["status"] = $state["deferred"] ? "partial" : "complete";
+                $state["completed_at"] = time();
                 $this->save($state);
                 return null;
             }
@@ -516,6 +574,7 @@ class Shipping_Publisher
             $targets[$index] = ["id" => $item_id, "component" => "selection"];
         }
         $state["targets"] = $targets;
+        $state["pending"] = null;
         array_shift($state["removals"]);
         $state["removing"] = false;
         $state["attempt"] = 0;
@@ -721,6 +780,15 @@ class Shipping_Publisher
         $data = is_array($data) ? $data : [];
         $code = $data["backend_error"] ?? $error->get_error_code();
         $state["last_error"] = $code;
+        if (in_array($data["response_code"] ?? 0, [401, 403], true)) {
+            $state["status"] = "failed";
+            $state["last_error"] = "authorization_changed";
+            $this->save($state);
+            Shipping_Sync::stop();
+            (new Webhook_Manager())->mark_sync_required();
+            update_option(self::OPTION_CLEANUP, ["source" => $state["source"], "at" => time(), "result" => "unconfirmed_authorization_change"], false);
+            return;
+        }
         $pending = $state["pending"];
         $active_item = !empty($state["replaying"]) ? $state["deferred"][0] : (!empty($state["targeting"]) ? $state["targets"][0] : null);
         $kind = $pending["kind"] ?? ($active_item["component"] ?? ("items" === $state["phase"] ? $state["component"] : $state["phase"]));
@@ -797,7 +865,7 @@ class Shipping_Publisher
         $name = self::state_option($state["source"]);
         wp_cache_delete($name, "options");
         if (false === get_option($name, false)) {
-            $inserted = $wpdb->query($wpdb->prepare(
+            $inserted = $this->checkpoint_query($wpdb->prepare(
                 "INSERT IGNORE INTO {$wpdb->options} (option_name, option_value, autoload) SELECT %s, %s, 'no' FROM {$wpdb->options} AS lease WHERE lease.option_name = %s AND lease.option_value = %s",
                 $name, maybe_serialize($state), $this->lock["name"], $this->lock["value"]
             ));
@@ -810,7 +878,7 @@ class Shipping_Publisher
         }
         // Check ownership in the write statement itself, not only in PHP before
         // it: an expired worker can be suspended between that check and the SQL.
-        $changed = $wpdb->query($wpdb->prepare(
+        $changed = $this->checkpoint_query($wpdb->prepare(
             "UPDATE {$wpdb->options} AS checkpoint INNER JOIN {$wpdb->options} AS lease ON lease.option_name = %s SET checkpoint.option_value = %s WHERE checkpoint.option_name = %s AND lease.option_value = %s",
             $this->lock["name"], maybe_serialize($state), $name, $this->lock["value"]
         ));
@@ -818,6 +886,30 @@ class Shipping_Publisher
         $this->assert_lock($state["source"]);
         if (false === $changed || (0 === $changed && get_option($name) != $state)) {
             throw new \RuntimeException("shipping_checkpoint_failed");
+        }
+    }
+
+    /** Database diagnostics must not print serialized pending request bodies. */
+    private function checkpoint_query($query)
+    {
+        global $wpdb;
+        $suppressed = $wpdb->suppress_errors(true);
+        try {
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- This private helper receives only queries prepared by save(), which explicitly invalidates its checkpoint option cache.
+            return $wpdb->query($query);
+        } finally {
+            $wpdb->suppress_errors($suppressed);
+        }
+    }
+
+    private function save_cleanup(array $report)
+    {
+        global $wpdb;
+        $suppressed = $wpdb->suppress_errors(true);
+        try {
+            update_option(self::OPTION_CLEANUP, $report, false);
+        } finally {
+            $wpdb->suppress_errors($suppressed);
         }
     }
 
@@ -849,6 +941,9 @@ class Shipping_Publisher
 
     private function schedule(array &$state, $delay = 0)
     {
+        if (in_array($state["status"] ?? "", ["complete", "partial", "failed", "needs_review"], true)) {
+            $state["queued_at"] = time();
+        }
         $state["wake"] = wp_generate_uuid4();
         $state["status"] = "queued";
         $this->save($state);
@@ -862,8 +957,104 @@ class Shipping_Publisher
         return (bool) $id;
     }
 
+    /**
+     * Best effort shutdown of the owned shared profile/default using existing
+     * protected commands. This is not source authorization revocation, and
+     * cannot promise withdrawal of independently owned/manual components.
+     */
+    public function withdraw()
+    {
+        $settings = Shipping_Sync::settings();
+        $source = $settings["listing_source_id"];
+        $report = ["source" => $source, "at" => time(), "result" => "unconfirmed", "profile" => "unconfirmed", "default" => "unconfirmed"];
+        $this->save_cleanup($report);
+        $state = $this->get_status($source);
+        if (empty($state["profile_id"]) && empty($state["pending"]) && !(int) get_option(self::order_option($source), 0)) {
+            // A merely queued initial run has never attempted a remote write.
+            $report["result"] = "not_published";
+            $report["profile"] = "not_published";
+            $report["default"] = "not_owned";
+            $this->save_cleanup($report);
+            return true;
+        }
+        if (!Webhook_Manager::is_valid_listing_source_id($source) || !Webhook_Manager::is_valid_access_token($settings["access_token"])
+            || !$this->acquire_source_lock($source)) {
+            return false;
+        }
+        try {
+            $profiles = $this->client->shipping_request("listShippingProfiles", $source, [1, null, Shipping_Mapper::OBJECT_KEY, "WOOCOMMERCE"]);
+            if (is_wp_error($profiles) || count($profiles) > 1) {
+                return false;
+            }
+            if (!$profiles) {
+                $report["profile"] = "absent";
+                $report["default"] = "not_owned";
+            } else {
+                $profile = $profiles[0];
+                if (empty($profile["shippingProfileId"]) || !$this->positive_revision($profile["managementRevision"] ?? null)) {
+                    return false;
+                }
+                $current = $this->client->shipping_request("getShippingDefault", $source);
+                if (!is_wp_error($current) && $this->positive_revision($current["revision"] ?? null)) {
+                    if (($current["shippingProfileId"] ?? null) !== $profile["shippingProfileId"]) {
+                        $report["default"] = "not_owned";
+                    } else {
+                        $pending = ["operation" => "clearShippingDefault", "arguments" => [["expectedRevision" => $current["revision"], "import" => $this->metadata($source, Shipping_Acquisition::acquired_at(), false)]]];
+                        $report["pending"] = $pending;
+                        $this->save_cleanup($report);
+                        $this->assert_lock($source);
+                        $result = $this->client->shipping_request($pending["operation"], $source, $pending["arguments"]);
+                        $report["default"] = $this->cleanup_result($result);
+                        if ("unconfirmed" === $report["default"]) {
+                            $report["unconfirmed_requests"][] = $pending;
+                        }
+                        unset($report["pending"]);
+                    }
+                }
+                if ("RETIRED" === ($profile["lifecycle"] ?? "")) {
+                    $report["profile"] = "retired";
+                } else {
+                    $pending = ["operation" => "retireShippingProfile", "arguments" => [$profile["shippingProfileId"], ["expectedRevision" => $profile["managementRevision"], "import" => $this->metadata($source, Shipping_Acquisition::acquired_at(), false)]]];
+                    $report["pending"] = $pending;
+                    $this->save_cleanup($report);
+                    $this->assert_lock($source);
+                    $result = $this->client->shipping_request($pending["operation"], $source, $pending["arguments"]);
+                    $report["profile"] = !is_wp_error($result) && "RETIRED" === ($result["lifecycle"] ?? "") ? "retired" : $this->cleanup_result($result, false);
+                    if ("unconfirmed" === $report["profile"]) {
+                        $report["unconfirmed_requests"][] = $pending;
+                    }
+                    unset($report["pending"]);
+                }
+            }
+            $report["result"] = in_array($report["profile"], ["retired", "absent"], true) && in_array($report["default"], ["committed", "not_owned"], true) ? "committed" : "unconfirmed";
+            return "committed" === $report["result"];
+        } catch (\Throwable $exception) {
+            return false;
+        } finally {
+            $this->save_cleanup($report);
+            $this->release_source_lock();
+        }
+    }
+
+    private function cleanup_result($result, $valid = true)
+    {
+        if (is_wp_error($result)) {
+            $data = $result->get_error_data();
+            return is_array($data) && "SHIPPING_IMPORT_OWNERSHIP_CONFLICT" === ($data["backend_error"] ?? "") ? "protected" : "unconfirmed";
+        }
+        return $valid ? "committed" : "unconfirmed";
+    }
+
     public static function cancel()
     {
+        // Invalidating the lease also fences a worker suspended between its
+        // PHP ownership check and the atomic checkpoint SQL statement.
+        self::clear_option_cache(self::OPTION_SOURCES);
+        foreach (array_keys((array) get_option(self::OPTION_SOURCES, [])) as $source) {
+            if (Webhook_Manager::is_valid_listing_source_id($source)) {
+                delete_option(self::lock_option($source));
+            }
+        }
         if (function_exists("as_unschedule_all_actions")) {
             as_unschedule_all_actions(self::ACTION_HOOK, null, self::ACTION_GROUP);
         }
@@ -871,6 +1062,7 @@ class Shipping_Publisher
 
     public static function uninstall()
     {
+        Shipping_Sync::uninstall();
         self::cancel();
         foreach (array_keys((array) get_option(self::OPTION_SOURCES, [])) as $source) {
             if (Webhook_Manager::is_valid_listing_source_id($source)) {
@@ -880,6 +1072,7 @@ class Shipping_Publisher
             }
         }
         delete_option(self::OPTION_SOURCES);
+        delete_option(self::OPTION_CLEANUP);
     }
 }
 

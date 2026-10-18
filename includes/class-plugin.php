@@ -93,6 +93,8 @@ class Plugin
         update_option(Webhook_Manager::OPTION_SETTINGS, $settings, false);
         update_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes", false);
 
+        (new Shipping_Sync())->initialize(true);
+
         if (current_user_can("manage_woocommerce")) {
             update_option(
                 Webhook_Manager::OPTION_WEBHOOK_USER_ID,
@@ -111,7 +113,8 @@ class Plugin
     {
         $manager = new Webhook_Manager();
         $manager->pause_webhooks();
-        Shipping_Publisher::cancel();
+        Shipping_Sync::stop();
+        (new Shipping_Publisher())->withdraw();
     }
 
     /**
@@ -191,6 +194,11 @@ class Plugin
         $this->manager->initialize_options();
 
         $shipping = new Shipping_Publisher();
+        $shipping_sync = new Shipping_Sync();
+        $shipping_sync->register();
+        if (did_action("action_scheduler_init")) {
+            $shipping_sync->initialize();
+        }
         add_action(Shipping_Publisher::ACTION_HOOK, [$shipping, "process"], 10, 2);
         add_action("action_scheduler_init", [$shipping, "maybe_queue_initial"], 20);
 
@@ -828,6 +836,10 @@ class Plugin
         }
 
         $settings = $this->get_current_settings();
+        Shipping_Sync::stop();
+        if (Webhook_Manager::is_valid_listing_source_id($settings["listing_source_id"])) {
+            (new Shipping_Publisher())->withdraw();
+        }
         if ($settings["listing_source_id"] !== $listing_source_id) {
             if (class_exists(Product_Backfill::class)) {
                 (new Product_Backfill())->cancel_backfill();
@@ -847,6 +859,7 @@ class Plugin
         }
 
         update_option(Webhook_Manager::OPTION_SETTINGS, $settings, false);
+        (new Shipping_Sync())->initialize(true);
         update_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes", false);
         delete_option(Webhook_Manager::OPTION_LAST_SYNC_ERROR);
         delete_option(Webhook_Manager::OPTION_LAST_OAUTH_ERROR);
@@ -1067,6 +1080,7 @@ class Plugin
         if (!$result) {
             return Shipping_Mapper::error("configuration_not_ready");
         }
+        (new Shipping_Sync())->initialize(true);
         return (new Shipping_Publisher())->queue($settings["listing_source_id"]);
     }
 
@@ -1989,7 +2003,26 @@ class Plugin
     {
         $state = (new Shipping_Publisher())->get_status($source);
         echo '<h2>' . esc_html__("Shipping import", "aura-historia-partner-connect") . '</h2>';
-        echo '<p>' . esc_html__("Import supported shipping settings and item classes in the background. This also resumes interrupted shipping work.", "aura-historia-partner-connect") . '</p>';
+        echo '<p>' . esc_html__("Shipping changes refresh automatically in the background. Import shipping repairs missed changes and resumes interrupted work.", "aura-historia-partner-connect") . '</p>';
+        $queue = (new Shipping_Sync())->status();
+        $oldest = $queue["oldest_pending"];
+        if (in_array($state["status"] ?? "", ["queued", "running", "partial", "failed", "needs_review"], true)) {
+            $oldest = $oldest ? min($oldest, $state["queued_at"] ?? $oldest) : ($state["queued_at"] ?? 0);
+        }
+        if ($oldest) {
+            echo '<p>' . sprintf(
+                /* translators: %s: oldest pending shipping work time. */
+                esc_html__('Oldest pending shipping work: %s. If this does not advance, check WooCommerce Scheduled Actions and the server cron runner.', "aura-historia-partner-connect"),
+                esc_html($this->format_admin_timestamp($oldest))
+            ) . '</p>';
+        }
+        if ($queue["error"]) {
+            echo '<p><code>' . esc_html($queue["error"]) . '</code></p>';
+        }
+        $cleanup = get_option(Shipping_Publisher::OPTION_CLEANUP, []);
+        if (is_array($cleanup) && $cleanup && !in_array($cleanup["result"] ?? "", ["committed", "not_published"], true)) {
+            echo '<p>' . esc_html__("Previous shipping cleanup was not confirmed. Review retained assertions in Aura Historia; they have no automatic expiry. Import shipping acquires current terms for this connection.", "aura-historia-partner-connect") . '</p>';
+        }
         if ("failed" === $this->get_query_param("ahpc_shipping")) {
             $this->render_inline_notice("error", esc_html__("Shipping could not be queued. Check the connection and import status before trying again.", "aura-historia-partner-connect"));
         } elseif ("queued" === $this->get_query_param("ahpc_shipping")) {
@@ -2000,6 +2033,13 @@ class Plugin
             "failed" => __("Failed — retry needed", "aura-historia-partner-connect"), "needs_review" => __("Needs review", "aura-historia-partner-connect")];
         echo '<p><strong>' . esc_html($labels[$state["status"] ?? ""] ?? __("Not queued", "aura-historia-partner-connect")) . '</strong></p>';
         if ($state) {
+            if (!empty($state["committed_at"])) {
+                echo '<p>' . sprintf(
+                    /* translators: %s: last confirmed shipping write time. */
+                    esc_html__('Last confirmed API write: %s. Search indexing completes separately.', "aura-historia-partner-connect"),
+                    esc_html($this->format_admin_timestamp($state["committed_at"]))
+                ) . '</p>';
+            }
             echo '<p>' . sprintf(
                 /* translators: 1: processed products, 2: pending components, 3: protected manual components. */
                 esc_html__('Processed products: %1$d. Deferred components: %2$d. Protected manual edits: %3$d.', "aura-historia-partner-connect"),

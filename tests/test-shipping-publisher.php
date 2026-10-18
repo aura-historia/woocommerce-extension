@@ -8,6 +8,8 @@
 use AuraHistoria\PartnerConnect\Shipping_Acquisition;
 use AuraHistoria\PartnerConnect\Shipping_Mapper;
 use AuraHistoria\PartnerConnect\Shipping_Publisher;
+use AuraHistoria\PartnerConnect\Shipping_Sync;
+use AuraHistoria\PartnerConnect\Plugin;
 use AuraHistoria\PartnerConnect\Product_Backfill;
 use AuraHistoria\PartnerConnect\Webhook_Manager;
 use GuzzleHttp\Client;
@@ -27,6 +29,7 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
     private $versions = [];
     private $listing_bodies = [];
     private $default_revision = 1;
+    private $default_profile = null;
     private $missing = [];
     private $ownership = [];
     private $lose_response = false;
@@ -51,6 +54,7 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
         update_option("woocommerce_currency", "EUR");
         update_option("woocommerce_ship_to_countries", "all");
         update_option("woocommerce_allowed_countries", "all");
+        update_option(Webhook_Manager::OPTION_NEEDS_SYNC, "no", false);
         add_filter("ahpc_backend_base_url", [$this, "base_url"]);
         add_filter("ahpc_backend_guzzle_client", [$this, "http_client"]);
         add_filter("pre_http_request", [$this, "block_outbound"], 10, 3);
@@ -137,8 +141,8 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
                 return $this->reply(["error" => "SHIPPING_IMPORT_OWNERSHIP_CONFLICT"], 409);
             }
             $revision = ($this->profile["managementRevision"] ?? 0) + 1;
-            $content = str_ends_with($path, "/restore") ? $this->profile["content"] : $body["content"];
-            $this->profile = ["shippingProfileId" => self::PROFILE, "listingSourceId" => self::SOURCE, "managementRevision" => $revision, "termsRevision" => $revision, "lifecycle" => "ACTIVE", "content" => $content];
+            $content = str_ends_with($path, "/restore") || "DELETE" === $method ? $this->profile["content"] : $body["content"];
+            $this->profile = ["shippingProfileId" => self::PROFILE, "listingSourceId" => self::SOURCE, "managementRevision" => $revision, "termsRevision" => $revision, "lifecycle" => "DELETE" === $method ? "RETIRED" : "ACTIVE", "content" => $content];
             $this->receipts[$key] = [(string) $request->getBody(), $this->profile];
             if ($this->lose_response) {
                 $this->lose_response = false;
@@ -152,8 +156,9 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
             }
             if ("GET" !== $method) {
                 $this->default_revision++;
+                $this->default_profile = "DELETE" === $method ? null : self::PROFILE;
             }
-            return $this->reply(["listingSourceId" => self::SOURCE, "revision" => $this->default_revision, "shippingProfileId" => "GET" === $method ? null : self::PROFILE, "eligibility" => null]);
+            return $this->reply(["listingSourceId" => self::SOURCE, "revision" => $this->default_revision, "shippingProfileId" => $this->default_profile, "eligibility" => null]);
         }
         if (preg_match('~/by-source-id/([0-9]+)/delivery$~', $path, $match)) {
             $id = $match[1];
@@ -201,7 +206,7 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
         $zone->save();
         $this->zones[] = $zone;
         $instance = $zone->add_shipping_method("flat_rate");
-        update_option("woocommerce_flat_rate_" . $instance . "_settings", ["cost" => $cost, "type" => "class", "tax_status" => "none"]);
+        update_option("woocommerce_flat_rate_" . $instance . "_settings", ["title" => "Flat rate", "cost" => $cost, "type" => "class", "tax_status" => "none"]);
         return $zone;
     }
 
@@ -211,7 +216,7 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
         $state = $publisher->get_status(self::SOURCE);
         $this->assertNotEmpty($state["wake"]);
         as_unschedule_all_actions(Shipping_Publisher::ACTION_HOOK, [self::SOURCE, $state["wake"]], Shipping_Publisher::ACTION_GROUP);
-        $publisher->process(self::SOURCE, $state["wake"]);
+        do_action(Shipping_Publisher::ACTION_HOOK, self::SOURCE, $state["wake"]);
         return $publisher->get_status(self::SOURCE);
     }
 
@@ -551,6 +556,63 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
         $this->assertCount($count, $this->writes());
     }
 
+    public function test_failed_local_recheck_retains_pending_removal_and_schedules_retry()
+    {
+        global $wpdb;
+        $product = $this->product();
+        $this->start_ongoing();
+        $product->set_status("trash");
+        $product->save();
+        $this->drain_changes();
+        $unavailable = function () {
+            return new Client(["handler" => HandlerStack::create(function ($request) {
+                if ("GET" !== $request->getMethod()) {
+                    return Create::rejectionFor(new ConnectException("offline", $request));
+                }
+                return Create::promiseFor($this->backend($request));
+            })]);
+        };
+        add_filter("ahpc_backend_guzzle_client", $unavailable, 20);
+        try { $pending = $this->tick()["pending"]; } finally { remove_filter("ahpc_backend_guzzle_client", $unavailable, 20); }
+        $this->assertSame("remove_selection", $pending["kind"]);
+        $failed_read = static function ($sql) use ($wpdb, $product) {
+            return str_contains($sql, "SELECT * FROM {$wpdb->posts} WHERE ID = " . $product->get_id())
+                ? "SELECT * FROM ahpc_missing_shipping_test_table" : $sql;
+        };
+        $suppressed = $wpdb->suppress_errors(true);
+        add_filter("query", $failed_read);
+        try { $state = $this->tick(); } finally {
+            remove_filter("query", $failed_read);
+            $wpdb->suppress_errors($suppressed);
+        }
+        $this->assertSame($pending, $state["pending"]);
+        $this->assertSame("ahpc_shipping_removal_not_confirmed", $state["last_error"]);
+        $this->assertTrue(as_has_scheduled_action(Shipping_Publisher::ACTION_HOOK, [self::SOURCE, $state["wake"]], Shipping_Publisher::ACTION_GROUP));
+        $this->assertSame("complete", $this->finish()["status"]);
+    }
+
+    public function test_rescheduling_a_published_product_clears_owned_shipping_until_republication()
+    {
+        $product = $this->product();
+        $this->start_ongoing();
+        $product->set_date_created(time() + DAY_IN_SECONDS);
+        $product->set_status("future");
+        $product->save();
+        $this->assertSame("future", get_post_status($product->get_id()));
+        $this->drain_changes();
+        $this->assertSame("complete", $this->finish()["status"]);
+        foreach (["selection", "inputs"] as $component) {
+            $field = "selection" === $component ? "selection" : "rateInputs";
+            $this->assertSame("CLEAR", $this->listing_bodies[$product->get_id()][$component]["delivery"]["value"][$field]["state"]);
+        }
+        $product->set_date_created(time());
+        $product->set_status("publish");
+        $product->save();
+        $this->drain_changes();
+        $this->assertSame("complete", $this->finish()["status"]);
+        $this->assertSame("SET", $this->listing_bodies[$product->get_id()]["selection"]["delivery"]["value"]["selection"]["state"]);
+    }
+
     public static function removal_progress()
     {
         return [[0], [1]];
@@ -685,5 +747,429 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
         $this->assertArrayNotHasKey("observation", json_decode((string) $restores[0]->getBody(), true)["import"]);
         $this->assertSame(self::PROFILE, $publisher->get_status(self::SOURCE)["profile_id"]);
         $this->assertSame("ACTIVE", $this->profile["lifecycle"]);
+    }
+
+    private function drain_changes()
+    {
+        $binding = Shipping_Sync::binding();
+        as_unschedule_all_actions(Shipping_Sync::ACTION_HOOK, null, Shipping_Publisher::ACTION_GROUP);
+        do_action(Shipping_Sync::ACTION_HOOK, $binding["source"], $binding["generation"]);
+    }
+
+    private function start_ongoing()
+    {
+        (new Shipping_Sync())->initialize(true);
+        $this->drain_changes();
+        $this->assertSame("complete", $this->finish()["status"]);
+    }
+
+    private function dirty_scopes()
+    {
+        global $wpdb;
+        $binding = Shipping_Sync::binding();
+        $prefix = Shipping_Sync::DIRTY_PREFIX . $binding["source"] . "_" . $binding["generation"] . "_";
+        $names = $wpdb->get_col($wpdb->prepare("SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s ORDER BY option_name", $wpdb->esc_like($prefix) . "%"));
+        return array_map(static function ($name) use ($prefix) { return substr($name, strlen($prefix)); }, $names);
+    }
+
+    public static function refresh_triggers()
+    {
+        return array_map(static function ($trigger) { return [$trigger]; }, ["zone_create", "zone_order", "zone_locations", "zone_delete", "fallback_method", "method_delete", "method_settings", "method_enablement", "rest_method_order", "class_create", "class_edit", "class_delete", "class_assignment", "product_virtual", "unit", "currency", "country_restriction", "tax"]);
+    }
+
+    /** @dataProvider refresh_triggers */
+    public function test_local_trigger_to_refresh_scope_matrix($trigger)
+    {
+        $zone = $this->zone();
+        $product = $this->product();
+        $term = wp_insert_term("Existing shipping class", "product_shipping_class");
+        $class_id = (int) $term["term_id"];
+        $this->classes[] = $class_id;
+        $methods = $zone->get_shipping_methods();
+        $method = reset($methods);
+        if (in_array($trigger, ["method_enablement", "rest_method_order"], true)) {
+            // Core's REST response expects the complete settings form, as
+            // saved by the admin, including dynamically added class fields.
+            $current = new WC_Shipping_Flat_Rate($method->get_instance_id());
+            $options = get_option($method->get_instance_option_key());
+            foreach ($current->get_instance_form_fields() as $key => $field) {
+                $options[$key] = $options[$key] ?? ($field["default"] ?? "");
+            }
+            update_option($method->get_instance_option_key(), $options);
+        }
+        $this->start_ongoing();
+        $before = count($this->requests);
+        $scope = "configuration";
+        switch ($trigger) {
+            case "zone_create": $this->zone("FR"); break;
+            case "zone_order": $zone->set_zone_order(10); $zone->save(); break;
+            case "zone_locations": $zone->set_zone_locations([]); $zone->add_location("FR", "country"); $zone->save(); break;
+            case "zone_delete": $zone->delete(true); break;
+            case "fallback_method": WC_Shipping_Zones::get_zone(0)->add_shipping_method("free_shipping"); break;
+            case "method_delete": $zone->delete_shipping_method($method->get_instance_id()); break;
+            case "method_settings": update_option($method->get_instance_option_key(), ["cost" => "95"]); break;
+            case "method_enablement":
+            case "rest_method_order":
+                $request = new WP_REST_Request("PUT", "/wc/v3/shipping/zones/" . $zone->get_id() . "/methods/" . $method->get_instance_id());
+                $request->set_param("method_enablement" === $trigger ? "enabled" : "order", "method_enablement" === $trigger ? false : 5);
+                $response = rest_get_server()->dispatch($request);
+                $this->assertLessThan(400, $response->get_status(), wp_json_encode($response->get_data()));
+                break;
+            case "class_create": $term = wp_insert_term("New shipping class", "product_shipping_class"); $this->classes[] = (int) $term["term_id"]; break;
+            case "class_edit": wp_update_term($class_id, "product_shipping_class", ["slug" => "changed-class"]); break;
+            case "class_delete": wp_delete_term($class_id, "product_shipping_class"); break;
+            case "class_assignment": wp_set_object_terms($product->get_id(), [$class_id], "product_shipping_class"); $scope = "item_" . $product->get_id(); break;
+            case "product_virtual": $product->set_virtual(true); $product->save(); $scope = "item_" . $product->get_id(); break;
+            case "unit": update_option("woocommerce_weight_unit", "kg" === get_option("woocommerce_weight_unit") ? "lbs" : "kg"); break;
+            case "currency": update_option("woocommerce_currency", "USD"); break;
+            case "country_restriction": update_option("woocommerce_ship_to_countries", "specific"); break;
+            case "tax": update_option("woocommerce_calc_taxes", "yes"); break;
+        }
+        $this->assertSame($before, count($this->requests), "Save hooks must not perform remote I/O.");
+        $this->assertContains($scope, $this->dirty_scopes());
+        // Currency changes also gate the existing signed webhook configuration.
+        update_option(Webhook_Manager::OPTION_NEEDS_SYNC, "no", false);
+        $this->drain_changes();
+        $this->assertSame("complete", $this->finish()["status"]);
+        $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH));
+    }
+
+    public function test_method_price_only_hook_flows_through_scheduler_mapper_and_typed_requests()
+    {
+        $zone = $this->zone("DE", "80");
+        $product = $this->product();
+        $this->start_ongoing();
+        $this->ownership = ["selection" => true];
+        $before = count($this->requests);
+        $methods = $zone->get_shipping_methods();
+        $method = reset($methods);
+        update_option($method->get_instance_option_key(), ["cost" => "95", "tax_status" => "none"]);
+        $this->assertSame($before, count($this->requests));
+        $this->assertTrue(as_has_scheduled_action(Shipping_Sync::ACTION_HOOK, null, Shipping_Publisher::ACTION_GROUP));
+        $this->drain_changes();
+        $state = $this->finish();
+        $this->assertSame(1, $state["protected"]);
+        $price = $this->profile["content"]["terms"]["shipping"]["coverage"]["zones"][0]["services"][0]["rate"]["price"];
+        $this->assertSame(9500, $price["amount"]["amount_minor"]);
+        $this->assertArrayHasKey("inputs", $this->listing_bodies[$product->get_id()]);
+        foreach ($this->listing_bodies[$product->get_id()] as $body) {
+            $this->assertSame(["state" => "UNCHANGED"], $body["delivery"]["value"]["collection"]);
+        }
+        $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH));
+    }
+
+    public function test_old_initial_retry_cannot_restore_80_after_hook_refresh_publishes_95()
+    {
+        $zone = $this->zone("DE", "80");
+        (new Shipping_Sync())->initialize(true);
+        $this->lose_response = true;
+        $this->drain_changes();
+        $old = $this->tick();
+        $this->assertNotNull($old["pending"]);
+        $methods = $zone->get_shipping_methods();
+        $method = reset($methods);
+        update_option($method->get_instance_option_key(), ["cost" => "95", "tax_status" => "none"]);
+        $this->drain_changes();
+        $this->assertTrue((new Shipping_Publisher())->queue(self::SOURCE));
+        $this->tick();
+        $writes = $this->writes();
+        $this->assertSame((string) $writes[0]->getBody(), (string) $writes[1]->getBody());
+        $this->assertSame("complete", $this->finish()["status"]);
+        $before = count($this->requests);
+        do_action(Shipping_Publisher::ACTION_HOOK, self::SOURCE, $old["wake"]);
+        $this->assertSame($before, count($this->requests));
+        $this->assertSame(9500, $this->profile["content"]["terms"]["shipping"]["coverage"]["zones"][0]["services"][0]["rate"]["price"]["amount"]["amount_minor"]);
+        $writes = $this->writes();
+        $last = json_decode((string) end($writes)->getBody(), true);
+        $this->assertGreaterThan($old["pending"]["arguments"][0]["import"]["sequence"], $last["import"]["sequence"]);
+    }
+
+    public function test_source_busy_retains_dirty_ticket_and_successful_scoped_work_does_not_scan_catalog()
+    {
+        $product = $this->product();
+        $this->start_ongoing();
+        $publisher = new Shipping_Publisher();
+        $this->assertTrue($publisher->acquire_source_lock(self::SOURCE));
+        $product->set_virtual(true);
+        $product->save();
+        $this->drain_changes();
+        $this->assertContains("item_" . $product->get_id(), $this->dirty_scopes());
+        $publisher->release_source_lock();
+        $before = count($this->writes());
+        $this->drain_changes();
+        $this->assertSame("complete", $this->finish()["status"]);
+        $this->assertCount($before + 2, $this->writes());
+        $this->assertSame([], $this->dirty_scopes());
+    }
+
+    public function test_new_hook_during_ticket_acknowledgement_is_not_lost()
+    {
+        $this->start_ongoing();
+        $sync = new Shipping_Sync();
+        $sync->configuration_changed();
+        $fired = false;
+        $filter = static function ($sql) use (&$fired, $sync) {
+            if (!$fired && str_starts_with($sql, "DELETE FROM") && str_contains($sql, Shipping_Sync::DIRTY_PREFIX) && str_contains($sql, "option_value")) {
+                $fired = true;
+                $sync->configuration_changed();
+            }
+            return $sql;
+        };
+        add_filter("query", $filter);
+        try { $this->drain_changes(); } finally { remove_filter("query", $filter); }
+        $this->assertTrue($fired);
+        $this->assertSame(["configuration"], $this->dirty_scopes());
+    }
+
+    public function test_periodic_reconciliation_finds_missed_settings_and_confirmed_item_removal()
+    {
+        global $wpdb;
+        $zone = $this->zone("DE", "80");
+        $product = $this->product();
+        $id = $product->get_id();
+        $this->start_ongoing();
+        $methods = $zone->get_shipping_methods();
+        $method = reset($methods);
+        // Deliberately bypass notifications to model plugin/direct storage gaps.
+        $wpdb->update($wpdb->options, ["option_value" => maybe_serialize(["cost" => "95", "tax_status" => "none"])], ["option_name" => $method->get_instance_option_key()]);
+        wp_cache_delete($method->get_instance_option_key(), "options");
+        wp_cache_delete("alloptions", "options");
+        $wpdb->update($wpdb->posts, ["post_status" => "draft"], ["ID" => $id]);
+        clean_post_cache($id);
+        $binding = Shipping_Sync::binding();
+        do_action(Shipping_Sync::RECONCILE_HOOK, $binding["source"], $binding["generation"]);
+        $actions = as_get_scheduled_actions(["hook" => Shipping_Sync::SWEEP_HOOK, "group" => Shipping_Publisher::ACTION_GROUP, "status" => ActionScheduler_Store::STATUS_PENDING]);
+        $this->assertNotEmpty($actions);
+        foreach ($actions as $action) {
+            do_action_ref_array(Shipping_Sync::SWEEP_HOOK, $action->get_args());
+        }
+        $this->drain_changes();
+        $this->assertSame("complete", $this->finish()["status"]);
+        $this->assertSame("CLEAR", $this->listing_bodies[$id]["inputs"]["delivery"]["value"]["rateInputs"]["state"]);
+        $this->assertFalse(get_option(Shipping_Sync::MEMBER_PREFIX . self::SOURCE . "_" . $id));
+        $this->assertSame(9500, $this->profile["content"]["terms"]["shipping"]["coverage"]["zones"][0]["services"][0]["rate"]["price"]["amount"]["amount_minor"]);
+        $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH));
+    }
+
+    public function test_unavailable_scheduler_retains_visible_dirty_work_without_browser_recovery()
+    {
+        $this->start_ongoing();
+        as_unschedule_all_actions(Shipping_Sync::ACTION_HOOK, null, Shipping_Publisher::ACTION_GROUP);
+        add_filter("pre_as_schedule_single_action", "__return_zero");
+        try { (new Shipping_Sync())->configuration_changed(); } finally { remove_filter("pre_as_schedule_single_action", "__return_zero"); }
+        $status = (new Shipping_Sync())->status();
+        $this->assertGreaterThan(0, $status["oldest_pending"]);
+        $this->assertSame("scheduling_failed", $status["error"]);
+        (new Shipping_Sync())->initialize();
+        $this->assertTrue(as_has_scheduled_action(Shipping_Sync::ACTION_HOOK, null, Shipping_Publisher::ACTION_GROUP));
+    }
+
+    public function test_shutdown_fences_work_and_records_committed_profile_retirement()
+    {
+        $this->zone();
+        $this->start_ongoing();
+        (new Shipping_Sync())->configuration_changed();
+        $this->drain_changes();
+        $old = (new Shipping_Publisher())->get_status(self::SOURCE);
+        Plugin::deactivate();
+        $this->assertFalse(Shipping_Sync::binding()["enabled"]);
+        $this->assertSame("ahpc_shipping_connection_changed", (new Shipping_Publisher())->queue(self::SOURCE)->get_error_code());
+        $this->assertFalse(as_has_scheduled_action(Shipping_Sync::ACTION_HOOK, null, Shipping_Publisher::ACTION_GROUP));
+        $this->assertSame("committed", get_option(Shipping_Publisher::OPTION_CLEANUP)["result"]);
+        $this->assertSame("RETIRED", $this->profile["lifecycle"]);
+        $before = count($this->requests);
+        do_action(Shipping_Publisher::ACTION_HOOK, self::SOURCE, $old["wake"]);
+        $this->assertSame($before, count($this->requests));
+        (new Shipping_Sync())->initialize(true);
+        $this->drain_changes();
+        $this->assertSame("complete", $this->finish()["status"]);
+        $this->assertSame("ACTIVE", $this->profile["lifecycle"]);
+        $this->assertNotSame($old["generation"], (new Shipping_Publisher())->get_status(self::SOURCE)["generation"]);
+    }
+
+    public function test_unreachable_shutdown_preserves_terms_without_expiry_and_reports_failure()
+    {
+        $this->zone();
+        $this->start_ongoing();
+        $profile = $this->profile;
+        $block = static function () { return new Client(["handler" => HandlerStack::create(static function ($request) { return Create::rejectionFor(new ConnectException("offline", $request)); })]); };
+        add_filter("ahpc_backend_guzzle_client", $block, 20);
+        try { Plugin::deactivate(); } finally { remove_filter("ahpc_backend_guzzle_client", $block, 20); }
+        $this->assertSame($profile, $this->profile);
+        $this->assertSame("unconfirmed", get_option(Shipping_Publisher::OPTION_CLEANUP)["result"]);
+        $this->assertFalse(Shipping_Sync::binding()["enabled"]);
+        $this->assertStringNotContainsString("expiresAt", wp_json_encode($this->profile));
+        $this->assertStringNotContainsString("freshUntil", wp_json_encode($this->profile));
+        $this->assertFalse(as_has_scheduled_action(Shipping_Publisher::ACTION_HOOK, null, Shipping_Publisher::ACTION_GROUP));
+    }
+
+    public function test_manual_shipping_repair_requires_capability_and_nonce()
+    {
+        wp_set_current_user(0);
+        $result = ahpc_plugin()->queue_manual_shipping();
+        $this->assertSame("ahpc_shipping_forbidden", $result->get_error_code());
+        wp_set_current_user(self::factory()->user->create(["role" => "administrator"]));
+        $this->expectException(WPDieException::class);
+        $_REQUEST["_wpnonce"] = "invalid";
+        try { ahpc_plugin()->handle_shipping_request(); } finally { unset($_REQUEST["_wpnonce"]); }
+    }
+
+    public function test_variation_changes_and_inherited_class_changes_refresh_only_parent_shipping()
+    {
+        $variable = new WC_Product_Variable();
+        $variable->set_status("publish");
+        $variable->set_name("Variable shipping fixture");
+        $variable->save();
+        $this->products[] = $variable;
+        $variation = new WC_Product_Variation();
+        $variation->set_parent_id($variable->get_id());
+        $variation->set_status("publish");
+        $variation->set_regular_price("100");
+        $variation->save();
+        $this->products[] = $variation;
+        WC_Product_Variable::sync($variable);
+        $term = wp_insert_term("Inherited shipping class", "product_shipping_class");
+        $this->classes[] = (int) $term["term_id"];
+        $this->start_ongoing();
+        $before = count($this->writes());
+        $variable->set_shipping_class_id($term["term_id"]);
+        $variable->save();
+        $variation->set_virtual(true);
+        $variation->save();
+        $this->assertSame(["item_" . $variable->get_id()], $this->dirty_scopes());
+        $this->drain_changes();
+        $this->assertSame("complete", $this->finish()["status"]);
+        $this->assertCount($before + 2, $this->writes());
+        $this->assertSame("SUPPRESS_INHERITANCE", $this->listing_bodies[$variable->get_id()]["selection"]["delivery"]["value"]["selection"]["value"]["kind"]);
+        $this->assertArrayNotHasKey($variation->get_id(), $this->listing_bodies);
+        $variation->delete(true);
+        $this->assertSame(["item_" . $variable->get_id()], $this->dirty_scopes());
+        $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH));
+    }
+
+    public function test_connection_change_fences_old_publisher_and_notification_actions()
+    {
+        $this->zone();
+        $this->start_ongoing();
+        (new Shipping_Sync())->configuration_changed();
+        $this->drain_changes();
+        $old_binding = Shipping_Sync::binding();
+        $old_state = (new Shipping_Publisher())->get_status(self::SOURCE);
+        $settings = get_option(Webhook_Manager::OPTION_SETTINGS);
+        $settings["listing_source_id"] = "ls_01jw7j4azge008000000000006";
+        update_option(Webhook_Manager::OPTION_SETTINGS, $settings, false);
+        $before = count($this->requests);
+        do_action(Shipping_Sync::ACTION_HOOK, self::SOURCE, $old_binding["generation"]);
+        do_action(Shipping_Publisher::ACTION_HOOK, self::SOURCE, $old_state["wake"]);
+        $this->assertSame($before, count($this->requests));
+        $this->assertNotSame($old_binding["generation"], Shipping_Sync::generation());
+        $this->assertSame("unconfirmed_connection_change", get_option(Shipping_Publisher::OPTION_CLEANUP)["result"]);
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+    }
+
+    public function test_current_token_rotation_retains_exact_pending_request_with_active_binding()
+    {
+        $this->zone();
+        (new Shipping_Sync())->initialize(true);
+        $this->drain_changes();
+        $this->lose_response = true;
+        $state = $this->tick();
+        $generation = Shipping_Sync::generation();
+        $settings = get_option(Webhook_Manager::OPTION_SETTINGS);
+        $settings["access_token"] = self::TOKEN . "rotated";
+        update_option(Webhook_Manager::OPTION_SETTINGS, $settings, false);
+        $this->tick();
+        $writes = $this->writes();
+        $this->assertSame((string) $writes[0]->getBody(), (string) $writes[1]->getBody());
+        $this->assertSame("Bearer " . $settings["access_token"], $writes[1]->getHeaderLine("Authorization"));
+        $this->assertSame($generation, Shipping_Sync::generation());
+        $this->assertNotEmpty($state["pending"]);
+    }
+
+    public function test_observed_authorization_failure_stops_jobs_and_requires_new_acquisition()
+    {
+        $this->start_ongoing();
+        (new Shipping_Sync())->configuration_changed();
+        $this->drain_changes();
+        $generation = Shipping_Sync::generation();
+        $deny = static function () { return new Client(["handler" => HandlerStack::create(static function () { return Create::promiseFor(new Response(403, ["Content-Type" => "application/json"], '{"error":"FORBIDDEN"}')); })]); };
+        add_filter("ahpc_backend_guzzle_client", $deny, 20);
+        try { $this->assertSame("failed", $this->tick()["status"]); } finally { remove_filter("ahpc_backend_guzzle_client", $deny, 20); }
+        $this->assertFalse(Shipping_Sync::binding()["enabled"]);
+        $this->assertSame("authorization_changed", (new Shipping_Publisher())->get_status(self::SOURCE)["last_error"]);
+        $this->assertNotSame($generation, Shipping_Sync::generation());
+        (new Shipping_Sync())->initialize(true);
+        update_option(Webhook_Manager::OPTION_NEEDS_SYNC, "no", false);
+        $this->drain_changes();
+        $this->assertSame("complete", $this->finish()["status"]);
+        $this->assertNull((new Shipping_Publisher())->get_status(self::SOURCE)["pending"]);
+    }
+
+    public function test_lifecycle_cleanup_preserves_manual_equal_value_profile_takeover()
+    {
+        $this->zone();
+        $this->start_ongoing();
+        $profile = $this->profile;
+        $this->ownership["profile"] = true;
+        Plugin::deactivate();
+        $this->assertSame($profile, $this->profile);
+        $report = get_option(Shipping_Publisher::OPTION_CLEANUP);
+        $this->assertSame("protected", $report["profile"]);
+        $this->assertSame("unconfirmed", $report["result"]);
+        $this->assertStringNotContainsString(self::TOKEN, wp_json_encode($report));
+    }
+
+    public function test_private_pending_content_stays_out_of_status_and_unreachable_uninstall_stops_local_work()
+    {
+        $this->zone();
+        $this->start_ongoing();
+        $profile = $this->profile;
+        (new Shipping_Sync())->configuration_changed();
+        $this->drain_changes();
+        $this->lose_response = true;
+        $this->assertNotNull($this->tick()["pending"]);
+        $render = new ReflectionMethod(Plugin::class, "render_shipping_status");
+        ob_start();
+        $render->invoke(ahpc_plugin(), self::SOURCE);
+        $html = ob_get_clean();
+        $this->assertStringContainsString("Oldest pending shipping work", $html);
+        foreach ([self::TOKEN, "signature-only", "requestKey", "acquiredAt", "expectedRevision", "woocommerce:shipping:core:v1"] as $private) {
+            $this->assertStringNotContainsString($private, $html);
+        }
+        // The preceding ambiguous write committed unchanged terms. Uninstall
+        // cannot invent a successful remote withdrawal when Aura is offline.
+        $profile = $this->profile;
+        $block = static function () { return new Client(["handler" => HandlerStack::create(static function ($request) { return Create::rejectionFor(new ConnectException("offline", $request)); })]); };
+        add_filter("ahpc_backend_guzzle_client", $block, 20);
+        if (!defined("WP_UNINSTALL_PLUGIN")) {
+            define("WP_UNINSTALL_PLUGIN", "aura-historia-partner-connect/aura-historia-partner-connect.php");
+        }
+        try { require dirname(__DIR__) . "/uninstall.php"; } finally { remove_filter("ahpc_backend_guzzle_client", $block, 20); }
+        $this->assertSame($profile, $this->profile);
+        $this->assertFalse(get_option(Shipping_Sync::OPTION_BINDING));
+        $this->assertFalse(get_option(Shipping_Publisher::OPTION_CLEANUP));
+        $this->assertSame([], (new Shipping_Publisher())->get_status(self::SOURCE));
+        foreach ([Shipping_Sync::ACTION_HOOK, Shipping_Sync::RECONCILE_HOOK, Shipping_Sync::SWEEP_HOOK, Shipping_Publisher::ACTION_HOOK] as $hook) {
+            $this->assertFalse(as_has_scheduled_action($hook, null, Shipping_Publisher::ACTION_GROUP));
+        }
+    }
+
+    public function test_running_reconciliation_cannot_recreate_jobs_after_lifecycle_stop()
+    {
+        $this->start_ongoing();
+        $ids = as_get_scheduled_actions(["hook" => Shipping_Sync::RECONCILE_HOOK, "group" => Shipping_Publisher::ACTION_GROUP,
+            "status" => ActionScheduler_Store::STATUS_PENDING, "per_page" => 1], "ids");
+        $this->assertCount(1, $ids);
+        $stop = static function ($id, $action) {
+            if (Shipping_Sync::RECONCILE_HOOK === $action->get_hook()) {
+                Shipping_Sync::stop();
+            }
+        };
+        add_action("action_scheduler_after_execute", $stop, 10, 2);
+        try { ActionScheduler::runner()->process_action($ids[0]); } finally { remove_action("action_scheduler_after_execute", $stop, 10); }
+        $this->assertSame(ActionScheduler_Store::STATUS_COMPLETE, ActionScheduler::store()->get_status($ids[0]));
+        $this->assertFalse(Shipping_Sync::binding()["enabled"]);
+        $this->assertFalse(as_has_scheduled_action(Shipping_Sync::RECONCILE_HOOK, null, Shipping_Publisher::ACTION_GROUP));
+        $this->assertFalse(as_has_scheduled_action(Shipping_Sync::ACTION_HOOK, null, Shipping_Publisher::ACTION_GROUP));
     }
 }
