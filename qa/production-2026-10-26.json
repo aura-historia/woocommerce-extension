@@ -1,0 +1,221 @@
+{
+  "date": "2026-10-26",
+  "decision": "BLOCKED: production backend defects prevent end-to-end sign-off",
+  "environment": {
+    "wordpress": "7.0",
+    "woocommerce": "11.2.1",
+    "php": "8.4.21",
+    "plugin": "0.3.0",
+    "local_url": "http://localhost:8888",
+    "production_api": "https://api.aura-historia.com",
+    "production_webapp": "https://aura-historia.com"
+  },
+  "local_fixes": [
+    {
+      "issue": "https://github.com/aura-historia/woocommerce-extension/issues/105",
+      "branch": "fix/105-compatible-local-wordpress",
+      "commits": [
+        "0faa208"
+      ],
+      "result": "WordPress 7.0 activates current WooCommerce; tracked local environment updated."
+    },
+    {
+      "issue": "https://github.com/aura-historia/woocommerce-extension/issues/106",
+      "branch": "fix/106-defer-woocommerce-bootstrap",
+      "commits": [
+        "e376d6a",
+        "4cb7e3f"
+      ],
+      "result": "Bootstrap waits for init at priority -1, before WooCommerce loads active webhook callbacks; regression and OAuth with debug display enabled pass."
+    },
+    {
+      "issue": "https://github.com/aura-historia/woocommerce-extension/issues/107",
+      "branch": "fix/107-auto-draft-shipping",
+      "commits": [
+        "f7c434a"
+      ],
+      "result": "A real auto-draft follows confirmed-unpublished removal/no-op behavior without publication retries."
+    }
+  ],
+  "external_issues": [
+    {
+      "issue": "https://github.com/aura-historia/backend/issues/2521",
+      "finding": "Production rejects the documented UNCONFIGURED source ingestion variant."
+    },
+    {
+      "issue": "https://github.com/aura-historia/webapp/issues/1179",
+      "finding": "The production admin source creation form defaults to and submits that rejected variant; reproduced HTTP 400 in the browser."
+    },
+    {
+      "issue": "https://github.com/aura-historia/backend/issues/2522",
+      "finding": "Signed updates acknowledged around 20:34 applied at 20:54:57, restored a listing already synchronously withdrawn at 20:54:26, and left its original title. The accepted 20:38 deletion did not prevent restoration. QA withdrew it again at 20:56:35."
+    },
+    {
+      "issue": "https://github.com/aura-historia/backend/issues/2523",
+      "finding": "A native child variation update creates a duplicate standalone listing with the parent title/permalink and a different price."
+    }
+  ],
+  "automated_validation": {
+    "wordpress_integration": {
+      "tests": 206,
+      "assertions": 4527,
+      "result": "PASS"
+    },
+    "production_api_contracts": {
+      "tests": 3,
+      "assertions": 46,
+      "result": "PASS"
+    },
+    "plugin_check": {
+      "version": "2.0.0",
+      "warnings": 0,
+      "errors": 0,
+      "result": "PASS"
+    },
+    "php_syntax": "PASS",
+    "git_diff_check": "PASS",
+    "release_credential_scan": "PASS"
+  },
+  "live_checks": [
+    {
+      "case": "OAuth consent, denial, successful broker callback and same-source reconnect",
+      "result": "PASS",
+      "evidence": "Real production client, granted test source, PKCE/broker exchange, HTTP 200 token exchange and 204 provider registration; denial preserved the existing connection."
+    },
+    {
+      "case": "Native product create/update/delete transport",
+      "result": "PASS",
+      "evidence": "Actual WooCommerce webhooks; bearer header present and HMAC matches the exact outgoing body; HTTP 204. Application of later updates/deletion fails separately (#2522)."
+    },
+    {
+      "case": "Initial catalog creation",
+      "result": "PASS",
+      "evidence": "Published simple, zero-price and virtual products materialized; draft omitted; descriptions intentionally excluded under existing issue #93."
+    },
+    {
+      "case": "Catalog batches across the 100-item boundary",
+      "result": "PASS_FOR_ADMISSION",
+      "evidence": "106 published products submitted in batches of 100 and 6. Simulated a lost successful 202 response after real admission; retry body SHA-256 and idempotency-key SHA-256 match exactly."
+    },
+    {
+      "case": "Full bulk ingestion completion",
+      "result": "NOT_CONFIRMED",
+      "evidence": "Before cleanup 104 canonical test records were observed including baseline and variation fixtures; source IDs 20-24 from the admitted bulk run had not materialized. HTTP 202 is admission only. Do not interpret the local completed status as complete ingestion."
+    },
+    {
+      "case": "Shipping policy and membership",
+      "result": "PASS_FOR_OBSERVED_WRITES",
+      "evidence": "Profile and source default published; simple membership and virtual suppression confirmed. A price-only edit through the WooCommerce modal changed the production rate from EUR 495 to 695 minor units. Class rates 100/250/500 per item, seller-order free-shipping threshold EUR 10000, restricted fallback geography, pickup confirmation and mixed variation-class PARTIAL inputs with both variation codes were read back from production."
+    },
+    {
+      "case": "Full bulk shipping traversal",
+      "result": "NOT_CONFIRMED",
+      "evidence": "The worker retained pending PRODUCT_LISTING_NOT_FOUND work while admitted catalog records were unavailable. Profile and variable-product writes succeeded; cleanup stopped remaining work."
+    },
+    {
+      "case": "Manual shipping ownership",
+      "result": "PASS",
+      "evidence": "An explicit manual profile replacement survived connector uninstall unchanged; the connector cleared its owned default. QA subsequently retired the manual fixture through the admin API."
+    },
+    {
+      "case": "Unsupported currency",
+      "result": "PASS",
+      "evidence": "BHD paused all three hooks and showed the supported-currency error; restoring EUR resumed the same managed hooks."
+    },
+    {
+      "case": "Webhook drift repair",
+      "result": "PASS",
+      "evidence": "Changed an owned endpoint and deleted the update webhook; the next bootstrap restored the endpoint and exactly three active hooks (IDs 1,4,3)."
+    },
+    {
+      "case": "Capabilities, nonces and credential visibility",
+      "result": "PASS",
+      "evidence": "Subscriber receives 403; shop manager receives 200; invalid action nonce receives 403; stored token absent from page HTML and release ZIP."
+    },
+    {
+      "case": "Release installation, deactivation, reactivation and uninstall",
+      "result": "PASS",
+      "evidence": "Installed and activated the built ZIP. Owned-profile deactivation retired the profile and cleared its default; reactivation restored its identity without a fresh initial catalog run. Uninstall left no settings, managed hooks or pending connector actions."
+    },
+    {
+      "case": "Public product page and provider handoff",
+      "result": "PARTIAL",
+      "evidence": "Production product page rendered, with history and provider link. Product and REST URLs used reserved public fixtures because production blocks loopback URLs; a publicly reachable real storefront/checkout was not tested."
+    }
+  ],
+  "cleanup": {
+    "withdrawn_records": 104,
+    "oauth_tokens_revoked": 2,
+    "revoked_token_check": "HTTP 401",
+    "qa_partnership": "DISSOLVED; memberships and grants removed",
+    "caller_source_grants": "Returned to original empty list",
+    "source_ingestion_methods": [],
+    "shipping_default": null,
+    "shipping_profile": "RETIRED after manual-preservation test",
+    "local_settings_exist": false,
+    "managed_webhook_count": 0,
+    "pending_connector_actions": 0,
+    "retained_source": "ls_01m5wxsr5detbtqkk38ngcm0r1",
+    "retained_party": "pty_01m5wxsr4beb4rascckfaj4mhg",
+    "retained_partnership": "psh_01m5wxv4k1ezc8pw9cvsr1k29m",
+    "retention_reason": "Production rejects physical deletion of a used source/party with protected listing, raw-ingestion and partnership history. Source renamed QA RETIRED WooCommerce 20261026 and all ingestion configurations removed. Listings are withdrawn, not physically erased.",
+    "final_verification": "Zero active test listings in repeated administrator reads after 20:56:35; monitor results recorded below.",
+    "late_reactivation_withdrawals": 1,
+    "history_timeline": [
+      {
+        "utc": "20:54:26.926942",
+        "event": "QA synchronous withdrawal"
+      },
+      {
+        "utc": "20:54:57.162859",
+        "event": "Delayed price change and RESTORED to IN_STOCK"
+      },
+      {
+        "utc": "20:54:57.201639",
+        "event": "Delayed OUT_OF_STOCK update"
+      },
+      {
+        "utc": "20:56:35.154229",
+        "event": "QA monitor withdrawal"
+      }
+    ],
+    "verification": [
+      {
+        "utc": "2026-10-26T20:56:35Z",
+        "active_found": 1,
+        "late_withdrawals": [
+          {
+            "id": "pl_01m5wym3hxe1vsktsacg89ajvt",
+            "status": 204
+          }
+        ]
+      },
+      {
+        "utc": "2026-10-26T20:57:05Z",
+        "active_found": 0,
+        "late_withdrawals": []
+      },
+      {
+        "utc": "2026-10-26T20:57:35Z",
+        "active_found": 0,
+        "late_withdrawals": []
+      },
+      {
+        "utc": "2026-10-26T20:58:05Z",
+        "active_found": 0,
+        "late_withdrawals": []
+      },
+      {
+        "utc": "2026-10-26T20:58:36Z",
+        "active_found": 0,
+        "late_withdrawals": []
+      }
+    ]
+  },
+  "limits": [
+    "No claim of 100% compatibility or production readiness. Backend blockers require fixes and another real flow run.",
+    "The full supported WordPress/WooCommerce/PHP version matrix was not run locally.",
+    "Reused local Action Scheduler storage required its normal migration before group CLI execution.",
+    "Only QA-owned production records were mutated; other repositories were inspected and received issues, not code changes."
+  ]
+}
