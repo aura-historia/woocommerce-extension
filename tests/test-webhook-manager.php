@@ -525,7 +525,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $this->assertSame("code", $query["response_type"]);
         $this->assertSame("S256", $query["code_challenge_method"]);
         $this->assertSame(\AuraHistoria\PartnerConnect\Plugin::OAUTH_SCOPE, $query["scope"]);
-        $this->assertSame("true", $query["requires_partner_shop_id"]);
+        $this->assertSame("true", $query["requires_listing_source_id"]);
         $this->assertNotEmpty($query["code_challenge"]);
         $this->assertNotEmpty($query["state"]);
 
