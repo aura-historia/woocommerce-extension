@@ -219,7 +219,7 @@ Depending on the action, the plugin may send:
 - `GET/POST https://api.aura-historia.com/v1/listing-sources/{listingSourceId}/shipping-profiles`
 - `GET/PUT/DELETE https://api.aura-historia.com/v1/listing-sources/{listingSourceId}/shipping-profiles/{shippingProfileId}` and `POST .../{shippingProfileId}/restore`
 - `GET/PUT/DELETE https://api.aura-historia.com/v1/listing-sources/{listingSourceId}/shipping-default`
-- `GET/PUT https://api.aura-historia.com/v1/listing-sources/{listingSourceId}/product-listings/by-source-id/{sourceListingId}/delivery`
+- `GET/PATCH https://api.aura-historia.com/v1/listing-sources/{listingSourceId}/product-listings/by-source-id/{sourceListingId}/delivery`
 
 ### Service policies
 
@@ -279,7 +279,7 @@ Tests can also override the URL via the `ahpc_backend_base_url` filter.
 
 The plugin bundles the production public OAuth client ID `oc_01m5vyvraxecksre2zepjcza88`; installation needs no merchant credentials. The matching secret belongs only to the production webapp broker. For stage or local development, register a separate WooCommerce OAuth client and override `AHPC_OAUTH_CLIENT_ID`. Configure the same client ID and its matching client secret in that environment's webapp OAuth redirect broker. Register the broker redirect URI and authorize `product-listings:read product-listings:write listing-sources:read listing-sources:write`. Shipping needs the read scopes for identity/revision recovery; older connections may need **Reconnect with Aura Historia** to grant them. Ensure the broker selects a ListingSource and sends an `ls_` ID in its `listing_source_id` callback field; an old Shop UUID is rejected. The broker redirect URI defaults to `https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce` for production; configure the stage URI separately.
 
-An absent or malformed client ID disables connection rather than sending a fabricated value. Both `oc_` OAuth client IDs and `ls_` ListingSource IDs must be canonical lowercase UUIDv7 TypeIDs (including the RFC UUID variant); neither old UUID Shop IDs nor noncanonical uppercase IDs are accepted.
+An explicitly empty or malformed client ID disables connection. Without an override, the plugin uses the bundled production client ID. Both `oc_` OAuth client IDs and `ls_` ListingSource IDs must be canonical lowercase UUIDv7 TypeIDs (including the RFC UUID variant); neither old UUID Shop IDs nor noncanonical uppercase IDs are accepted.
 
 Using `wp-config.php`:
 
@@ -326,7 +326,20 @@ The repository uses `@wordpress/env` and the checked-in `.wp-env.json`:
 - installs WordPress and WooCommerce locally
 - enables `WP_DEBUG`
 - enables `AHPC_FORCE_SYNC_DELIVERY=true` for synchronous local webhook delivery
-- overrides `AHPC_BACKEND_BASE_URL` to `https://api.stage.aura-historia.com` for local development safety; set `AHPC_OAUTH_CLIENT_ID` to a real registered stage client before testing a connection
+- overrides `AHPC_BACKEND_BASE_URL` to `https://api.stage.aura-historia.com` for local development safety
+- explicitly leaves `AHPC_OAUTH_CLIENT_ID` empty so the stage environment cannot inherit the bundled production client
+
+Before testing a stage connection, set its registered public client ID in `.wp-env.override.json`, then run `npm run env:update`:
+
+```json
+{
+  "config": {
+    "AHPC_OAUTH_CLIENT_ID": "<actual registered stage oc_ TypeID>"
+  }
+}
+```
+
+The ID must match the stage webapp broker's client. Keep the matching secret in that broker.
 
 If you need a different port, create a local `.wp-env.override.json` file.
 
@@ -351,7 +364,7 @@ composer install
 npm run test:contracts
 ```
 
-These checks cover `/v1` request paths, non-expiring OAuth responses, bearer authorization, batch retry keys and shipping fixture serialization. They do not replace the WooCommerce integration suite below.
+These checks cover `/v1` request paths, non-expiring OAuth responses, bearer authorization, batch retry keys, shipping publication requests and fixture serialization. They do not replace the WooCommerce integration suite below.
 
 The test suite runs inside `wp-env` and uses mocked outbound HTTP.
 

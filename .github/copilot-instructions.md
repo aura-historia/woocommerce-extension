@@ -58,10 +58,12 @@ When changing functionality, preserve these invariants:
 
 ## Backend integration rules
 
-- PUT the generated signing secret and store locale to `/api/v1/listing-sources/{listingSourceId}/ingestion-configurations/woocommerce` before activating delivery.
-- The plugin must send webhook deliveries to `/api/v1/webhooks/woocommerce/{listingSourceId}`.
+- PUT the generated signing secret and store locale to `/v1/listing-sources/{listingSourceId}/ingestion-configurations/woocommerce` before activating delivery.
+- The plugin must send webhook deliveries to `/v1/webhooks/woocommerce/{listingSourceId}`.
 - The backend access token is a separate credential from the WooCommerce webhook secret.
 - Validate the OAuth access token and required scopes before saving.
+- Request ListingSource selection with `requires_listing_source_id=true` and consume the broker's `listing_source_id` callback parameter.
+- The bundled public OAuth client ID is for production. Stage and local connections require a separately configured client ID matching their webapp broker; keep client secrets in the broker only.
 - Validate canonical UUIDv7 `ls_` ListingSource and `oc_` OAuth client TypeIDs with the shared validator.
 - The plugin should add the access token to the webhook bearer `Authorization` header as safely as possible.
 - Prefer adding the access token to the webhook bearer `Authorization` header late in the WordPress HTTP stack if that avoids leaking the header into WooCommerce delivery logs.
