@@ -587,7 +587,7 @@ class Plugin
         $third_party_exchange_code = $this->get_query_param(
             "third_party_exchange_code",
         );
-        $listing_source_id = $this->get_query_param("partner_shop_id");
+        $listing_source_id = $this->get_query_param("listing_source_id");
         $oauth_error = $this->get_query_param("error");
 
         if ("" === $third_party_exchange_code && "" === $oauth_error) {
@@ -714,7 +714,7 @@ class Plugin
                 "response_type" => "code",
                 "code_challenge_method" => "S256",
                 "scope" => self::OAUTH_SCOPE,
-                "requires_partner_shop_id" => "true",
+                "requires_listing_source_id" => "true",
                 "state" => $encoded_state,
             ],
             $authorize_url,
@@ -725,7 +725,7 @@ class Plugin
      * Completes the OAuth callback by exchanging the broker code and storing
      * connection settings locally.
      *
-     * @param string $listing_source_id          Listing Source ID returned in the broker's partner_shop_id parameter.
+     * @param string $listing_source_id          Listing Source ID returned in the broker's listing_source_id parameter.
      * @param string $third_party_exchange_code  Short-lived one-time exchange code.
      * @param string $client_state               CSRF state forwarded by the broker.
      * @return true|WP_Error

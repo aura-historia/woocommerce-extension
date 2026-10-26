@@ -179,7 +179,7 @@ class Test_AHPC_Internal_Api_Configuration extends WP_UnitTestCase
         $id = "ls_01jw7j4azge008000000000003";
         $this->assertTrue($client->put_woocommerce_listing_source_ingestion_configuration($id, "test-token", "test-secret", "EUR", "de"));
         $this->assertTrue($client->put_woocommerce_listing_source_ingestion_configuration($id, "test-token", "test-secret", null, null));
-        $this->assertSame("/api/v1/listing-sources/{$id}/ingestion-configurations/woocommerce", $history[0]["request"]->getUri()->getPath());
+        $this->assertSame("/v1/listing-sources/{$id}/ingestion-configurations/woocommerce", $history[0]["request"]->getUri()->getPath());
         $this->assertSame("Bearer test-token", $history[0]["request"]->getHeaderLine("Authorization"));
         $this->assertSame(["webhookSecret" => "test-secret", "currency" => "EUR", "language" => "de"], json_decode((string) $history[0]["request"]->getBody(), true));
         $this->assertSame(["webhookSecret" => "test-secret", "currency" => null, "language" => null], json_decode((string) $history[1]["request"]->getBody(), true));
@@ -194,7 +194,7 @@ class Test_AHPC_Internal_Api_Configuration extends WP_UnitTestCase
         $id = "ls_01jw7j4azge008000000000003";
         $payloads = [["sourceListingId" => "sku-1", "url" => "https://example.com/1", "images" => []], ["sourceListingId" => "sku-2", "url" => "https://example.com/2", "images" => []]];
         $this->assertSame(["accepted_count" => 1, "failures" => [["index" => 1, "error" => "ENQUEUE_UNCONFIRMED", "retryable" => true, "source_listing_id" => "sku-2"]], "submission_id" => "plis1:submission.42"], $client->post_async_partner_product_listings($id, "test-token", $payloads, "catalog-1"));
-        $this->assertSame("/api/v1/listing-sources/{$id}/product-listings/async", $history[0]["request"]->getUri()->getPath());
+        $this->assertSame("/v1/listing-sources/{$id}/product-listings/async", $history[0]["request"]->getUri()->getPath());
         $this->assertSame("catalog-1", $history[0]["request"]->getHeaderLine("Idempotency-Key"));
         $this->assertSame($payloads, json_decode((string) $history[0]["request"]->getBody(), true));
         $this->assertSame("plis1_empty", $client->post_async_partner_product_listings($id, "test-token", [], "catalog-empty")["submission_id"]);
@@ -317,7 +317,7 @@ class Test_AHPC_Internal_Api_Configuration extends WP_UnitTestCase
     public function test_oauth_exchange_requires_uuid_v7_independently_of_listing_source_id()
     {
         $history = [];
-        $this->mock_backend([new Response(200, ["Content-Type" => "application/json"], wp_json_encode(["access_token" => "test-token", "token_type" => "BEARER", "scope" => "product-listings:write"]))], $history);
+        $this->mock_backend([new Response(200, ["Content-Type" => "application/json"], wp_json_encode(["access_token" => "test-token", "token_type" => "Bearer", "scope" => "product-listings:write"]))], $history);
         $client = new Backend_Api_Client("https://example.com");
         $this->assertWPError($client->oauth_token_by_third_party_code("550e8400-e29b-41d4-a716-446655440000"));
         $this->assertWPError($client->oauth_token_by_third_party_code("ls_01jw7j4azge008000000000003"));

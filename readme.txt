@@ -69,14 +69,14 @@ Service endpoints:
 
 * `GET https://aura-historia.com/oauth/authorize`
 * `GET https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce`
-* `GET https://api.aura-historia.com/api/v1/oauth/tokens/by-third-party-code/{thirdPartyCode}`
-* `PUT https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/ingestion-configurations/woocommerce`
-* `POST https://api.aura-historia.com/api/v1/webhooks/woocommerce/{listingSourceId}`
-* `POST https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/product-listings/async`
-* `GET/POST https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/shipping-profiles`
-* `GET/PUT/DELETE https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/shipping-profiles/{shippingProfileId}` and `POST .../{shippingProfileId}/restore`
-* `GET/PUT/DELETE https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/shipping-default`
-* `GET/PUT https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/product-listings/by-source-id/{sourceListingId}/delivery`
+* `GET https://api.aura-historia.com/v1/oauth/tokens/by-third-party-code/{thirdPartyCode}`
+* `PUT https://api.aura-historia.com/v1/listing-sources/{listingSourceId}/ingestion-configurations/woocommerce`
+* `POST https://api.aura-historia.com/v1/webhooks/woocommerce/{listingSourceId}`
+* `POST https://api.aura-historia.com/v1/listing-sources/{listingSourceId}/product-listings/async`
+* `GET/POST https://api.aura-historia.com/v1/listing-sources/{listingSourceId}/shipping-profiles`
+* `GET/PUT/DELETE https://api.aura-historia.com/v1/listing-sources/{listingSourceId}/shipping-profiles/{shippingProfileId}` and `POST .../{shippingProfileId}/restore`
+* `GET/PUT/DELETE https://api.aura-historia.com/v1/listing-sources/{listingSourceId}/shipping-default`
+* `GET/PATCH https://api.aura-historia.com/v1/listing-sources/{listingSourceId}/product-listings/by-source-id/{sourceListingId}/delivery`
 
 Service provider and policies:
 
@@ -93,7 +93,7 @@ Service provider and policies:
 4. Go to `WooCommerce > Aura Historia`.
 5. Approve the Aura Historia OAuth connection when prompted.
 
-A real registered canonical UUIDv7 `oc_` OAuth client ID must be supplied via `AHPC_OAUTH_CLIENT_ID` (constant or environment variable); none is bundled. Configure the same client ID and its matching secret in the webapp redirect broker, register the broker redirect URI, and grant `product-listings:read product-listings:write listing-sources:read listing-sources:write`. Reconnect older connections to grant the read scopes shipping needs for identity/revision recovery. The broker must return an `ls_` ListingSource ID in its external `partner_shop_id` callback field; UUID Shop IDs are rejected. The API uses `https://api.aura-historia.com` in production and `https://api.stage.aura-historia.com` for stage. After OAuth completes, the plugin configures WooCommerce ingestion and syncs the managed webhooks.
+The production public OAuth client ID is bundled; merchants do not need to configure it. For stage or local development, supply a separate registered canonical UUIDv7 `oc_` client ID via `AHPC_OAUTH_CLIENT_ID` (constant or environment variable). Keep the API URL and broker redirect URI in that same environment. Configure the same client ID and its matching secret in the webapp redirect broker, register the broker redirect URI, and grant `product-listings:read product-listings:write listing-sources:read listing-sources:write`. Reconnect older connections to grant the read scopes shipping needs for identity/revision recovery. The broker must return an `ls_` ListingSource ID in its external `listing_source_id` callback field; UUID Shop IDs are rejected. The API uses `https://api.aura-historia.com` in production and `https://api.stage.aura-historia.com` for stage. After OAuth completes, the plugin configures WooCommerce ingestion and syncs the managed webhooks.
 
 == Frequently Asked Questions ==
 
@@ -146,6 +146,7 @@ Rescheduling a published product for future publication clears its owned shippin
 == Changelog ==
 
 = 0.2.0 =
+* Bundles the production OAuth client ID and uses the production `/v1` API contract.
 * The plugin now auto-configures with Aura Historia on installation. No more manual insertion of credentials needed. Just install, activate, and approve the OAuth connection when prompted.
 * Adds background initial/manual shipping imports with conservative local mapping, resumable retries and protection for manual Aura edits.
 * Refreshes shipping after local changes and bounded periodic reconciliation, with durable retry scopes, connection fencing and recorded lifecycle cleanup.

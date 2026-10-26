@@ -20,7 +20,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
     const SOURCE_ID = "ls_01jw7j4azge008000000000003";
     const OTHER_SOURCE_ID = "ls_01jw7j4azge00800000000000g";
     const TOKEN = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
-    const ENDPOINT = "https://example.com/api/v1/listing-sources/" . self::SOURCE_ID . "/product-listings/async";
+    const ENDPOINT = "https://example.com/v1/listing-sources/" . self::SOURCE_ID . "/product-listings/async";
 
     /** @var ClientInterface|null */
     private $backend_client;

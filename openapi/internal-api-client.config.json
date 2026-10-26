@@ -1,7 +1,7 @@
 {
   "source": {
     "repositoryUrl": "https://github.com/aura-historia/backend",
-    "commit": "8f39fcd549ebc49608bb2722bb219e623c6742e2",
+    "commit": "223705d48d4040d42faade2274d9dca2fa8cbd7d",
     "specPath": "docs/swagger.yaml"
   },
   "generator": {
@@ -24,7 +24,7 @@
     "getProductListingDelivery",
     "changeProductListingDelivery"
   ],
-  "schemas": ["DeliveryAssertionEvidence"],
+  "schemas": [],
   "namespace": "AuraHistoria\\PartnerConnect\\InternalApi",
   "modelPackage": "Model",
   "filteredSpecPath": "openapi/internal-api.filtered.yaml",

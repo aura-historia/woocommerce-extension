@@ -15,6 +15,7 @@
     "release:zip": "sh ./build-release.sh",
     "plugin:check": "npm run release:zip && node scripts/run-plugin-check.js build-release/aura-historia-partner-connect",
     "phpunit": "node scripts/run-phpunit.js",
+    "test:contracts": "vendor/bin/phpunit -c phpunit-contract.xml.dist",
     "test": "npm run composer:install && npm run phpunit"
   },
   "devDependencies": {
