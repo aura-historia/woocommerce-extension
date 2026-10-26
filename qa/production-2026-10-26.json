@@ -159,7 +159,7 @@
     "retained_party": "pty_01m5wxsr4beb4rascckfaj4mhg",
     "retained_partnership": "psh_01m5wxv4k1ezc8pw9cvsr1k29m",
     "retention_reason": "Production rejects physical deletion of a used source/party with protected listing, raw-ingestion and partnership history. Source renamed QA RETIRED WooCommerce 20261026 and all ingestion configurations removed. Listings are withdrawn, not physically erased.",
-    "final_verification": "Zero active test listings in repeated administrator reads after 20:56:35; monitor results recorded below.",
+    "final_verification": "Zero active test listings on five consecutive administrator reads from 20:57:05 through 20:59:05 UTC.",
     "late_reactivation_withdrawals": 1,
     "history_timeline": [
       {
@@ -207,6 +207,11 @@
       },
       {
         "utc": "2026-10-26T20:58:36Z",
+        "active_found": 0,
+        "late_withdrawals": []
+      },
+      {
+        "utc": "2026-10-26T20:59:06Z",
         "active_found": 0,
         "late_withdrawals": []
       }
