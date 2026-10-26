@@ -184,6 +184,14 @@ class Plugin
      */
     public function bootstrap_woocommerce()
     {
+        // WooCommerce loads before init. Its webhook objects and our status
+        // labels trigger translation loading, so wait until both WordPress
+        // locale setup and WooCommerce initialization have completed.
+        if (!did_action("init")) {
+            add_action("init", [$this, "bootstrap_woocommerce"], 20);
+            return;
+        }
+
         if ($this->woocommerce_bootstrapped) {
             return;
         }

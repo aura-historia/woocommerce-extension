@@ -2348,6 +2348,30 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH));
     }
 
+    public function test_woocommerce_bootstrap_waits_for_init_before_syncing()
+    {
+        global $wp_actions;
+
+        $plugin = new Plugin();
+        update_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes", false);
+        $init_count = $wp_actions["init"] ?? 0;
+        unset($wp_actions["init"]);
+
+        try {
+            $plugin->bootstrap_woocommerce();
+            $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+            $this->assertSame([], (new Webhook_Manager())->get_webhook_ids());
+            $this->assertSame(20, has_action("init", [$plugin, "bootstrap_woocommerce"]));
+        } finally {
+            $wp_actions["init"] = $init_count;
+            remove_action("init", [$plugin, "bootstrap_woocommerce"], 20);
+        }
+
+        $plugin->bootstrap_woocommerce();
+        $this->assertSame("no", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        $this->assertCount(3, (new Webhook_Manager())->get_webhook_ids());
+    }
+
     public function test_currency_and_wplang_changes_pause_then_reconcile_without_resetting_backfill()
     {
         $id = "ls_01jw7j4azge008000000000003";
