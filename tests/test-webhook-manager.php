@@ -2361,10 +2361,10 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             $plugin->bootstrap_woocommerce();
             $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
             $this->assertSame([], (new Webhook_Manager())->get_webhook_ids());
-            $this->assertSame(20, has_action("init", [$plugin, "bootstrap_woocommerce"]));
+            $this->assertSame(-1, has_action("init", [$plugin, "bootstrap_woocommerce"]));
         } finally {
             $wp_actions["init"] = $init_count;
-            remove_action("init", [$plugin, "bootstrap_woocommerce"], 20);
+            remove_action("init", [$plugin, "bootstrap_woocommerce"], -1);
         }
 
         $plugin->bootstrap_woocommerce();
