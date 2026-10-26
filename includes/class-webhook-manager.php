@@ -149,7 +149,7 @@ class Webhook_Manager
         }
 
         return $base_url .
-            "/api/v1/webhooks/woocommerce/" .
+            "/v1/webhooks/woocommerce/" .
             rawurlencode($listing_source_id);
     }
 

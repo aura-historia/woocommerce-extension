@@ -13,7 +13,7 @@
 /**
  * Aura Historia API Reference
  *
- * ## Overview  The Aura Historia API powers the Aura Historia antiques platform and its partner-facing integrations. It exposes product discovery, listing source discovery, personalization, partner onboarding, and integration workflows on top of Aura Historia's serverless AWS platform.  This reference is designed for two audiences: - **Internal developers** building Aura Historia product-listings, operational tooling, and backoffice workflows - **External partners and integrators** synchronizing inventory, consuming platform data, or   integrating with delegated access  ## Core API domains  - **ProductListings and listing-sources** — search, retrieve, and explore product-listings, related product-listings, product   history, and listing source data - **Personalization** — manage watchlists, saved search filters, and user notifications - **Partner workflows** — submit partnership applications, maintain partnerships, ingest catalog data   in batches, and receive WooCommerce webhooks - **Identity and access** — manage user accounts, Aura Historia access tokens, and OAuth 2.0   clients and token flows - **Billing** — create Stripe checkout, billing-portal, and subscription-management sessions  ## Authentication model  The API uses more than one authentication scheme depending on the route:  - **`BearerAuth`** — Cognito **access** JWT bearer tokens for authenticated user, admin, and   partner-user workflows. Cognito ID tokens are not accepted as API credentials. - **`AccessTokenAuth`** — Aura Historia opaque bearer access tokens created via   `/api/v1/me/access-tokens` or OAuth 2.0, primarily intended for partner automations and server-to-server   ingestion scenarios.  When a route lists multiple security schemes, any one of the listed schemes may be accepted. Some read endpoints can also be called without authentication, while a valid user token may enrich the response with personalized state such as watchlist, notification, or search-filter metadata.  ## Data and response conventions  - **PATCH:** an omitted request member remains unchanged. A documented nullable PATCH member   accepts `null` to clear its value; `null` for any other member returns `400 BAD_BODY_VALUE`.   Use `[]`, not `null`, to replace a non-null collection with an empty collection. Empty HTTP   bodies are invalid, `{}` is a valid object-PATCH no-op, and the partner-product PATCH `[]`   remains a valid empty batch. Responses may omit absent optional values. - Product detail, watchlist, and saved-search match reads accept optional **`language`** and   **`currency`** parameters. Currency defaults to `EUR`. Detail pricing contains the seller's source   amounts, converted display amounts, and FX valuation metadata. Active product-listings use the latest persisted   snapshot; sold product-listings use their immutable sale snapshot. Product history preserves immutable source values and accepts optional `currency` for historical FX display projections.   History text is not localized. - Request-wide errors are returned as **`application/problem+json`** using a consistent RFC 9457-style structure   with `status`, `title`, `error`, optional `source`, and optional `detail` - Many list and search endpoints use **cursor-based pagination** via `searchAfter` - Origin API responses include server-generated `X-Request-Id` and `X-Correlation-Id` headers. Clients may send `X-Correlation-Id` to preserve a trace only when it is a 1–128-character ASCII value containing letters, digits, `.`, `_`, or `-`; invalid values are replaced. Both headers are CORS-exposed; CloudFront removes them from viewer responses on the six cache-enabled discovery behaviors so shared cache hits cannot replay origin IDs. - Requests are limited to 1 MiB and time out after 30 seconds. - `POST /api/v1/webhooks/loops` is limited to 64 KiB and has a 10-second processing budget; it requires a valid Loops signature but no Aura bearer. - `GET /api/v1/health` is a process liveness check. `GET /api/v1/ready` returns `204` only when the configured PostgreSQL and OpenSearch dependencies are reachable; it otherwise returns `503`. - WooCommerce webhook ingestion responds with **`204 No Content`** after signed validation. A mapped raw-capture command receives `204` only after confirmed shared FIFO admission; authorized ignored create/update status events are no-op `204`. Queue admission is not raw capture, provider receipt persistence, canonical normalization, or search visibility. Capture conflicts are handled by the consumer, not returned synchronously; existing partner Product batch writes remain synchronous.  ## Environment endpoints  - **Development:** `https://api.stage.aura-historia.com` - **Production:** `https://api.aura-historia.com`  ## Notes for integrators  - Treat Aura Historia identifiers such as `listingSourceId`, `productListingId`, `eventId`, `userSearchFilterId`,   and `partnershipApplicationId` as opaque values - For partner product ingestion, `sourceListingId` is the partner-controlled identifier and should   remain stable within a listing source - Endpoints marked `deprecated` or `x-disabled` are retained for reference only and should not be   used for new integrations
+ * ## Overview  The Aura Historia API powers the Aura Historia antiques platform and its partner-facing integrations. It exposes product discovery, listing source discovery, personalization, partner onboarding, and integration workflows on top of Aura Historia's serverless AWS platform.  This reference is designed for two audiences: - **Internal developers** building Aura Historia product-listings, operational tooling, and backoffice workflows - **External partners and integrators** synchronizing inventory, consuming platform data, or   integrating with delegated access  ## Core API domains  - **ProductListings and listing-sources** — search, retrieve, and explore product-listings, related product-listings, product   history, and listing source data - **Personalization** — manage watchlists, saved search filters, and user notifications - **Partner workflows** — submit partnership applications, maintain partnerships, ingest catalog data   in batches, and receive WooCommerce webhooks - **Identity and access** — manage user accounts, Aura Historia access tokens, and OAuth 2.0   clients and token flows - **Billing** — create Stripe checkout, billing-portal, and subscription-management sessions  ## Authentication model  The API uses more than one authentication scheme depending on the route:  - **`BearerAuth`** — Cognito **access** JWT bearer tokens for authenticated user, admin, and   partner-user workflows. Cognito ID tokens are not accepted as API credentials. - **`AccessTokenAuth`** — Aura Historia opaque bearer access tokens created via   `/v1/me/access-tokens` or OAuth 2.0, primarily intended for partner automations and server-to-server   ingestion scenarios.  When a route lists multiple security schemes, any one of the listed schemes may be accepted. Some read endpoints can also be called without authentication, while a valid user token may enrich the response with personalized state such as watchlist, notification, or search-filter metadata. Aura Historia access tokens receive only the sections their read scopes permit; see `ProductListingUserStateData`.  ## MCP interface  The separate `https://mcp.aura-historia.com/v1` Streamable HTTP endpoint accepts opaque Aura access tokens only. Public calls may omit credentials; invalid supplied credentials receive HTTP 401, protected operations require their declared scopes, and insufficient grants receive HTTP 403 with the complete required scope set. Credential-free protected-resource metadata is served on the MCP host at `/.well-known/oauth-protected-resource` and `/.well-known/oauth-protected-resource/v1`. See [the MCP contract](https://github.com/aura-historia/backend/blob/develop/docs/mcp.md) for protocol and discovery details.  ## Data and response conventions  - **PATCH:** an omitted request member remains unchanged. A documented nullable PATCH member   accepts `null` to clear its value; `null` for any other member returns `400 BAD_BODY_VALUE`.   Use `[]`, not `null`, to replace a non-null collection with an empty collection. Empty HTTP   bodies are invalid, `{}` is a valid object-PATCH no-op, and the partner-product PATCH `[]`   remains a valid empty batch. Responses may omit absent optional values. - Product detail, watchlist, and saved-search match reads accept optional **`language`** and   **`currency`** parameters. Currency defaults to `EUR`. Detail pricing contains the seller's source   amounts, converted display amounts, and FX valuation metadata. Active product-listings use the latest persisted   snapshot; sold product-listings use their immutable sale snapshot. Product history preserves immutable source values and accepts optional `currency` for historical FX display projections.   History text is not localized. - Request-wide REST errors are returned as **`application/problem+json`** using a consistent RFC 9457-style structure   with `status`, `title`, `error`, optional `source`, and optional `detail`. OAuth protocol errors instead return `application/json` with a standard OAuth `error` - Many list and search endpoints use **cursor-based pagination** via `searchAfter` - Origin API responses include server-generated `X-Request-Id` and `X-Correlation-Id` headers. Clients may send `X-Correlation-Id` to preserve a trace only when it is a 1–128-character ASCII value containing letters, digits, `.`, `_`, or `-`; invalid values are replaced. Both headers are CORS-exposed; CloudFront removes them from viewer responses on the six cache-enabled discovery behaviors so shared cache hits cannot replay origin IDs. - Request bodies are limited to 1 MiB and requests time out after 30 seconds. A declared `Content-Length` above 1 MiB is rejected at the edge with `413` (`BAD_BODY_VALUE`, JSON body) before authentication or route handling. - `POST /v1/webhooks/loops` is limited to 64 KiB and has a 10-second processing budget; it requires a valid Loops signature but no Aura bearer. - `GET /v1/health` is a process liveness check. `GET /v1/ready` returns `204` only when the configured PostgreSQL and OpenSearch dependencies are reachable; it otherwise returns `503`. - WooCommerce webhook ingestion responds with **`204 No Content`** after signed validation. A mapped raw-capture command receives `204` only after confirmed shared FIFO admission; authorized ignored create/update status events are no-op `204`. Queue admission is not raw capture, provider receipt persistence, canonical normalization, or search visibility. Capture conflicts are handled by the consumer, not returned synchronously; existing partner Product batch writes remain synchronous.  ## Environment endpoints  - **Development:** `https://api.stage.aura-historia.com` - **Production:** `https://api.aura-historia.com`  ## Notes for integrators  - Treat Aura Historia identifiers such as `listingSourceId`, `productListingId`, `eventId`, `userSearchFilterId`,   and `partnershipApplicationId` as opaque values - For partner product ingestion, `sourceListingId` is the partner-controlled identifier and should   remain stable within a listing source - Endpoints marked `deprecated` or `x-disabled` are retained for reference only and should not be   used for new integrations
  *
  * The version of the OpenAPI document: 1.0.0
  * Generated by: https://openapi-generator.tech
@@ -37,7 +37,7 @@ use \AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
  * OAuthTokenResponseData Class Doc Comment
  *
  * @category Class
- * @description Token response returned by &#x60;POST /api/v1/oauth/token&#x60; and &#x60;GET /api/v1/oauth/tokens/by-third-party-code/{thirdPartyCode}&#x60;. The &#x60;access_token&#x60; is an Aura Historia bearer access token. &#x60;expires_in&#x60; is omitted (&#x60;null&#x60;) for non-expiring tokens. &#x60;third_party_exchange_code&#x60; is only present on the direct token exchange response.
+ * @description Token response returned by &#x60;POST /v1/oauth/token&#x60; and &#x60;GET /v1/oauth/tokens/by-third-party-code/{thirdPartyCode}&#x60;. The &#x60;access_token&#x60; is an Aura Historia bearer access token. &#x60;expires_in&#x60; is omitted for non-expiring tokens. &#x60;third_party_exchange_code&#x60; is only present on the direct token exchange response.
  * @package  AuraHistoria\PartnerConnect\InternalApi
  * @author   OpenAPI Generator team
  * @link     https://openapi-generator.tech
@@ -61,7 +61,7 @@ class OAuthTokenResponseData implements ModelInterface, ArrayAccess, \JsonSerial
      */
     protected static $openAPITypes = [
         'access_token' => 'string',
-        'token_type' => '\AuraHistoria\PartnerConnect\InternalApi\Model\AccessTokenTypeData',
+        'token_type' => 'string',
         'expires_in' => 'int',
         'scope' => 'string',
         'third_party_exchange_code' => 'string'
@@ -90,7 +90,7 @@ class OAuthTokenResponseData implements ModelInterface, ArrayAccess, \JsonSerial
     protected static array $openAPINullables = [
         'access_token' => false,
         'token_type' => false,
-        'expires_in' => true,
+        'expires_in' => false,
         'scope' => false,
         'third_party_exchange_code' => false
     ];
@@ -255,6 +255,19 @@ class OAuthTokenResponseData implements ModelInterface, ArrayAccess, \JsonSerial
         return self::$openAPIModelName;
     }
 
+    public const TOKEN_TYPE_BEARER = 'Bearer';
+
+    /**
+     * Gets allowable values of the enum
+     *
+     * @return string[]
+     */
+    public function getTokenTypeAllowableValues()
+    {
+        return [
+            self::TOKEN_TYPE_BEARER,
+        ];
+    }
 
     /**
      * Associative array for storing property values
@@ -311,6 +324,15 @@ class OAuthTokenResponseData implements ModelInterface, ArrayAccess, \JsonSerial
         if ($this->container['token_type'] === null) {
             $invalidProperties[] = "'token_type' can't be null";
         }
+        $allowedValues = $this->getTokenTypeAllowableValues();
+        if (!is_null($this->container['token_type']) && !in_array($this->container['token_type'], $allowedValues, true)) {
+            $invalidProperties[] = sprintf(
+                "invalid value '%s' for 'token_type', must be one of '%s'",
+                $this->container['token_type'],
+                implode("', '", $allowedValues)
+            );
+        }
+
         if (!is_null($this->container['expires_in']) && ($this->container['expires_in'] < 0)) {
             $invalidProperties[] = "invalid value for 'expires_in', must be bigger than or equal to 0.";
         }
@@ -363,7 +385,7 @@ class OAuthTokenResponseData implements ModelInterface, ArrayAccess, \JsonSerial
     /**
      * Gets token_type
      *
-     * @return \AuraHistoria\PartnerConnect\InternalApi\Model\AccessTokenTypeData
+     * @return string
      */
     public function getTokenType()
     {
@@ -373,7 +395,7 @@ class OAuthTokenResponseData implements ModelInterface, ArrayAccess, \JsonSerial
     /**
      * Sets token_type
      *
-     * @param \AuraHistoria\PartnerConnect\InternalApi\Model\AccessTokenTypeData $token_type token_type
+     * @param string $token_type token_type
      *
      * @return self
      */
@@ -381,6 +403,16 @@ class OAuthTokenResponseData implements ModelInterface, ArrayAccess, \JsonSerial
     {
         if (is_null($token_type)) {
             throw new \InvalidArgumentException('non-nullable token_type cannot be null');
+        }
+        $allowedValues = $this->getTokenTypeAllowableValues();
+        if (!in_array($token_type, $allowedValues, true)) {
+            throw new \InvalidArgumentException(
+                sprintf(
+                    "Invalid value '%s' for 'token_type', must be one of '%s'",
+                    $token_type,
+                    implode("', '", $allowedValues)
+                )
+            );
         }
         $this->container['token_type'] = $token_type;
 
@@ -400,24 +432,17 @@ class OAuthTokenResponseData implements ModelInterface, ArrayAccess, \JsonSerial
     /**
      * Sets expires_in
      *
-     * @param int|null $expires_in Seconds until the access token expires. `null` when the token does not expire.
+     * @param int|null $expires_in Seconds until expiry; omitted when the token does not expire.
      *
      * @return self
      */
     public function setExpiresIn($expires_in)
     {
         if (is_null($expires_in)) {
-            array_push($this->openAPINullablesSetToNull, 'expires_in');
-        } else {
-            $nullablesSetToNull = $this->getOpenAPINullablesSetToNull();
-            $index = array_search('expires_in', $nullablesSetToNull);
-            if ($index !== FALSE) {
-                unset($nullablesSetToNull[$index]);
-                $this->setOpenAPINullablesSetToNull($nullablesSetToNull);
-            }
+            throw new \InvalidArgumentException('non-nullable expires_in cannot be null');
         }
 
-        if (!is_null($expires_in) && ($expires_in < 0)) {
+        if (($expires_in < 0)) {
             throw new \InvalidArgumentException('invalid value for $expires_in when calling OAuthTokenResponseData., must be bigger than or equal to 0.');
         }
 
@@ -466,7 +491,7 @@ class OAuthTokenResponseData implements ModelInterface, ArrayAccess, \JsonSerial
     /**
      * Sets third_party_exchange_code
      *
-     * @param string|null $third_party_exchange_code Optional one-time exchange code returned by `POST /api/v1/oauth/token`. It can be redeemed once via `GET /api/v1/oauth/tokens/by-third-party-code/{thirdPartyCode}` within 60 seconds to obtain the same access token.
+     * @param string|null $third_party_exchange_code Optional one-time exchange code returned by `POST /v1/oauth/token`. It can be redeemed once via `GET /v1/oauth/tokens/by-third-party-code/{thirdPartyCode}` within 60 seconds to obtain the same access token.
      *
      * @return self
      */

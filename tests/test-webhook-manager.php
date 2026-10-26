@@ -317,7 +317,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
     protected function mock_oauth_token_response(
         $access_token,
         $scope = \AuraHistoria\PartnerConnect\Plugin::OAUTH_SCOPE,
-        $token_type = "BEARER",
+        $token_type = "Bearer",
     ) {
         return new Response(
             200,
@@ -325,7 +325,6 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             wp_json_encode([
                 "access_token" => $access_token,
                 "token_type" => $token_type,
-                "expires_in" => null,
                 "scope" => $scope,
             ]),
         );
@@ -620,7 +619,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $this->assertTrue((new Product_Backfill())->is_backfill_scheduled());
 
         $oauth_requests = $this->get_backend_requests_for_url(
-            "https://example.com/api/v1/oauth/tokens/by-third-party-code/" .
+            "https://example.com/v1/oauth/tokens/by-third-party-code/" .
                 $exchange_code,
         );
         $this->assertCount(1, $oauth_requests);
@@ -634,7 +633,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         );
 
         $registration_requests = $this->get_backend_requests_for_url(
-            "https://example.com/api/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
+            "https://example.com/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
         );
         $this->assertCount(1, $registration_requests);
         $this->assertSame(
@@ -816,7 +815,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             $this->assertSame($topic, $webhook->get_topic());
             $this->assertSame("active", $webhook->get_status());
             $this->assertSame(
-                "https://example.com/api/v1/webhooks/woocommerce/" . $listing_source_id,
+                "https://example.com/v1/webhooks/woocommerce/" . $listing_source_id,
                 $webhook->get_delivery_url(),
             );
             $this->assertSame("test-secret", $webhook->get_secret());
@@ -825,7 +824,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         }
 
         $registration_requests = $this->get_backend_requests_for_url(
-            "https://example.com/api/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
+            "https://example.com/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
         );
 
         $this->assertCount(1, $registration_requests);
@@ -850,7 +849,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             array_filter($this->http_requests, static function ($request) use (
                 $listing_source_id,
             ) {
-                return "https://example.com/api/v1/webhooks/woocommerce/" .
+                return "https://example.com/v1/webhooks/woocommerce/" .
                     $listing_source_id ===
                     $request["url"];
             }),
@@ -1085,7 +1084,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             array_filter($this->http_requests, static function ($request) use (
                 $listing_source_id,
             ) {
-                return "https://example.com/api/v1/webhooks/woocommerce/" .
+                return "https://example.com/v1/webhooks/woocommerce/" .
                     $listing_source_id ===
                     $request["url"];
             }),
@@ -1144,14 +1143,14 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
 
             $this->assertSame("active", $webhook->get_status());
             $this->assertSame(
-                "https://example.com/api/v1/webhooks/woocommerce/" . $listing_source_id,
+                "https://example.com/v1/webhooks/woocommerce/" . $listing_source_id,
                 $webhook->get_delivery_url(),
             );
             $this->assertSame("updated-secret", $webhook->get_secret());
         }
 
         $registration_requests = $this->get_backend_requests_for_url(
-            "https://example.com/api/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
+            "https://example.com/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
         );
 
         $this->assertCount(2, $registration_requests);
@@ -1191,13 +1190,13 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             $webhook = new WC_Webhook($webhook_id);
             $this->assertSame("paused", $webhook->get_status());
             $this->assertSame(
-                "https://example.com/api/v1/webhooks/woocommerce/" . $listing_source_id,
+                "https://example.com/v1/webhooks/woocommerce/" . $listing_source_id,
                 $webhook->get_delivery_url(),
             );
         }
 
         $registration_requests = $this->get_backend_requests_for_url(
-            "https://example.com/api/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
+            "https://example.com/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
         );
 
         $this->assertSame([], $registration_requests);
@@ -1607,7 +1606,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $manager->sync_webhooks();
 
         $registration_requests = $this->get_backend_requests_for_url(
-            "https://example.com/api/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
+            "https://example.com/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
         );
 
         $this->assertCount(1, $registration_requests);
@@ -1688,7 +1687,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         remove_all_filters("locale");
 
         $registration_requests = $this->get_backend_requests_for_url(
-            "https://example.com/api/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
+            "https://example.com/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
         );
 
         $this->assertCount(1, $registration_requests);
@@ -1729,7 +1728,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         remove_all_filters("locale");
 
         $registration_requests = $this->get_backend_requests_for_url(
-            "https://example.com/api/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
+            "https://example.com/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
         );
 
         $this->assertCount(1, $registration_requests);
@@ -2341,7 +2340,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         ]))]);
         (new Product_Backfill())->process_batch($id, 1);
         $requests = $this->get_backend_requests_for_url(
-            "https://example.com/api/v1/listing-sources/" . $id . "/product-listings/async",
+            "https://example.com/v1/listing-sources/" . $id . "/product-listings/async",
         );
         $this->assertCount(1, $requests);
         $this->assertSame("manual-retry-key", $requests[0]["request"]->getHeaderLine("Idempotency-Key"));
@@ -2388,7 +2387,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
             $this->assertTrue($manager->maybe_sync_webhooks());
             $requests = $this->get_backend_requests_for_url(
-                "https://example.com/api/v1/listing-sources/" . $id . "/ingestion-configurations/woocommerce",
+                "https://example.com/v1/listing-sources/" . $id . "/ingestion-configurations/woocommerce",
             );
             $this->assertCount(1, $requests);
             $body = json_decode((string) $requests[0]["request"]->getBody(), true);

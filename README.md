@@ -109,10 +109,10 @@ It is **not** a general-purpose WooCommerce webhook manager.
 2. If the store is not connected yet, the settings page starts the Aura Historia OAuth flow automatically; the Connect button is available as a fallback.
 3. Aura Historia redirects back to the plugin settings page with a selected `ls_` ListingSource ID and a short-lived third-party exchange code. The broker may use the external callback field `partner_shop_id`, but its value must be an `ls_` ID.
 4. The plugin exchanges that code for an Aura Historia access token and stores the ListingSource ID and token locally.
-5. The plugin generates a WooCommerce webhook signing secret and applies that exact secret, store currency, and language via `PUT /api/v1/listing-sources/{listingSourceId}/ingestion-configurations/woocommerce` before enabling delivery.
+5. The plugin generates a WooCommerce webhook signing secret and applies that exact secret, store currency, and language via `PUT /v1/listing-sources/{listingSourceId}/ingestion-configurations/woocommerce` before enabling delivery.
 6. The plugin stages the three managed WooCommerce webhooks paused with the desired signing secret before updating Aura Historia, then activates them only after provider configuration succeeds. Changes to WooCommerce currency or WordPress site language pause delivery immediately and require another provider sync. Unsupported store currencies leave the webhooks paused until corrected.
-7. WooCommerce sends unchanged, signed live webhook bodies to `POST /api/v1/webhooks/woocommerce/{listingSourceId}` with bearer authorization injected late.
-8. After provider/webhook configuration succeeds, the plugin schedules an initial full CREATE backfill once per ListingSource. If setup or queueing fails, the initial run remains pending and retries on a later healthy bootstrap. Returning to a previously started source does not replay it automatically. Batches of up to 100 go to `POST /api/v1/listing-sources/{listingSourceId}/product-listings/async`; HTTP `202` means admission, not completed creation. Routine webhook repairs never start a new CREATE run unless that source's first run is still pending. The manual action resumes a pending batch with its original payload and idempotency key, leaves queued work alone, and starts a fresh run only when idle.
+7. WooCommerce sends unchanged, signed live webhook bodies to `POST /v1/webhooks/woocommerce/{listingSourceId}` with bearer authorization injected late.
+8. After provider/webhook configuration succeeds, the plugin schedules an initial full CREATE backfill once per ListingSource. If setup or queueing fails, the initial run remains pending and retries on a later healthy bootstrap. Returning to a previously started source does not replay it automatically. Batches of up to 100 go to `POST /v1/listing-sources/{listingSourceId}/product-listings/async`; HTTP `202` means admission, not completed creation. Routine webhook repairs never start a new CREATE run unless that source's first run is still pending. The manual action resumes a pending batch with its original payload and idempotency key, leaves queued work alone, and starts a fresh run only when idle.
 9. A separate shipping job acquires local settings, publishes the common profile and source default, then attaches existing catalog listings and scoped class/variation inputs. **Import shipping** resumes interrupted work or requests a fresh acquisition. It does not restart catalog creation. Neither job needs an open wp-admin page.
 
 ## Shipping support
@@ -170,7 +170,7 @@ Profile identity is `woocommerce:shipping:core:v1` within the authenticated sour
 
 `Shipping_Sync` calls `queue($source)` for policy/full refresh, `queue_items($source, $product_ids)` for up to 100 scoped item refreshes, and `queue_item_removal($source, $product_id)` for confirmed removals. These enqueue identities and acquire facts inside the worker; outside captures never receive a newer sequence. A busy source retains its dirty ticket for retry. Dirty in-flight targets receive another acquisition. Global configuration changes revisit the bounded product scope, with repeated configuration churn stopping for review after five restarts.
 
-Every successful new acquisition supplies its actual microsecond `acquiredAt` and `observation: {}`. Exact retries retain their original body, keys, sequence and time. Assertions have no expiry/keepalive. No `freshUntil`/`expiresAt` is sent; evidence uses only `verifiedAt`. A complete profile replacement explicitly removes obsolete zones/methods. `queue_item_removal()` rechecks confirmed local absence/unpublication and clears only owned selection/input components, with no observation. Missing pages, failed reads and unsupported products never imply removal. No arbitrary metadata creates item shipping overrides.
+Every successful new acquisition supplies its actual microsecond `acquiredAt` and `observation: {}`. Exact retries retain their original body, keys, sequence and time. Assertions have no expiry/keepalive. No `freshUntil`/`expiresAt` is sent; protected evidence links use `reference` and `assertion`. A complete profile replacement explicitly removes obsolete zones/methods. `queue_item_removal()` rechecks confirmed local absence/unpublication and clears only owned selection/input components, with no observation. Missing pages, failed reads and unsupported products never imply removal. No arbitrary metadata creates item shipping overrides.
 
 Source changes, explicit reconnects and deactivation fence old workers and cancel local shipping actions. Reconnect/reactivation starts a new local acquisition, retaining monotonic source ordering without relabeling old requests. Changes to the configured API target/signing context also fence old captures. Valid token rotation alone keeps the immutable retry. Expired/canceled lock holders cannot checkpoint over newer work.
 
@@ -180,7 +180,7 @@ No new webhook, extension callback, reverse backend access, provider domain, Woo
 
 ### Generated client provenance
 
-The client and filtered spec are pinned to backend commit [`8f39fcd549ebc49608bb2722bb219e623c6742e2`](https://github.com/aura-historia/backend/commit/8f39fcd549ebc49608bb2722bb219e623c6742e2) (PR #2146), generated with official OpenAPI Generator **7.22.0**. `tests/fixtures/shipping-imports.json` is copied from that revision; WooCommerce fixtures exercise the real PHP mapper. Later contract changes require review before updating the pin.
+The client and filtered spec are pinned to backend commit [`223705d48d4040d42faade2274d9dca2fa8cbd7d`](https://github.com/aura-historia/backend/commit/223705d48d4040d42faade2274d9dca2fa8cbd7d) (production release from 2026-10-25), generated with official OpenAPI Generator **7.22.0**. `tests/fixtures/shipping-imports.json` is copied from that revision; WooCommerce fixtures exercise the real PHP mapper. Later contract changes require review before updating the pin.
 
 The generation script normalizes discriminated unions without changing their allowed branches, dispatches to the concrete generated PHP models, and preserves explicit empty objects, empty component maps and acquisition microseconds. Regenerate with `npm run openapi:generate`. An official CLI JAR of exactly the pinned version can be selected with `AHPC_OPENAPI_GENERATOR_JAR`; `AHPC_OPENAPI_SPEC_PATH` can select a locally retrieved copy of the pinned upstream spec for authenticated/offline generation.
 
@@ -212,14 +212,14 @@ Depending on the action, the plugin may send:
 
 - `GET https://aura-historia.com/oauth/authorize`
 - `GET https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce`
-- `GET https://api.aura-historia.com/api/v1/oauth/tokens/by-third-party-code/{thirdPartyCode}`
-- `PUT https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/ingestion-configurations/woocommerce`
-- `POST https://api.aura-historia.com/api/v1/webhooks/woocommerce/{listingSourceId}`
-- `POST https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/product-listings/async`
-- `GET/POST https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/shipping-profiles`
-- `GET/PUT/DELETE https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/shipping-profiles/{shippingProfileId}` and `POST .../{shippingProfileId}/restore`
-- `GET/PUT/DELETE https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/shipping-default`
-- `GET/PUT https://api.aura-historia.com/api/v1/listing-sources/{listingSourceId}/product-listings/by-source-id/{sourceListingId}/delivery`
+- `GET https://api.aura-historia.com/v1/oauth/tokens/by-third-party-code/{thirdPartyCode}`
+- `PUT https://api.aura-historia.com/v1/listing-sources/{listingSourceId}/ingestion-configurations/woocommerce`
+- `POST https://api.aura-historia.com/v1/webhooks/woocommerce/{listingSourceId}`
+- `POST https://api.aura-historia.com/v1/listing-sources/{listingSourceId}/product-listings/async`
+- `GET/POST https://api.aura-historia.com/v1/listing-sources/{listingSourceId}/shipping-profiles`
+- `GET/PUT/DELETE https://api.aura-historia.com/v1/listing-sources/{listingSourceId}/shipping-profiles/{shippingProfileId}` and `POST .../{shippingProfileId}/restore`
+- `GET/PUT/DELETE https://api.aura-historia.com/v1/listing-sources/{listingSourceId}/shipping-default`
+- `GET/PUT https://api.aura-historia.com/v1/listing-sources/{listingSourceId}/product-listings/by-source-id/{sourceListingId}/delivery`
 
 ### Service policies
 
@@ -277,7 +277,7 @@ Tests can also override the URL via the `ahpc_backend_base_url` filter.
 
 ### Configure the OAuth client and broker
 
-The plugin does **not** ship a production or stage OAuth client ID. Before connecting, register a WooCommerce OAuth client in each environment and configure its **actual** `oc_` TypeID as `AHPC_OAUTH_CLIENT_ID` in the plugin deployment. Configure the same client ID and its matching client secret in that environment's webapp OAuth redirect broker. Register the broker redirect URI and authorize `product-listings:read product-listings:write listing-sources:read listing-sources:write`. Shipping needs the read scopes for identity/revision recovery; older connections may need **Reconnect with Aura Historia** to grant them. Ensure the broker selects a ListingSource and sends an `ls_` ID in its `partner_shop_id` callback field; an old Shop UUID is rejected. The broker redirect URI defaults to `https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce` for production; configure the stage URI separately.
+The plugin bundles the production public OAuth client ID `oc_01m5vyvraxecksre2zepjcza88`; installation needs no merchant credentials. The matching secret belongs only to the production webapp broker. For stage or local development, register a separate WooCommerce OAuth client and override `AHPC_OAUTH_CLIENT_ID`. Configure the same client ID and its matching client secret in that environment's webapp OAuth redirect broker. Register the broker redirect URI and authorize `product-listings:read product-listings:write listing-sources:read listing-sources:write`. Shipping needs the read scopes for identity/revision recovery; older connections may need **Reconnect with Aura Historia** to grant them. Ensure the broker selects a ListingSource and sends an `ls_` ID in its `partner_shop_id` callback field; an old Shop UUID is rejected. The broker redirect URI defaults to `https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce` for production; configure the stage URI separately.
 
 An absent or malformed client ID disables connection rather than sending a fabricated value. Both `oc_` OAuth client IDs and `ls_` ListingSource IDs must be canonical lowercase UUIDv7 TypeIDs (including the RFC UUID variant); neither old UUID Shop IDs nor noncanonical uppercase IDs are accepted.
 
@@ -344,6 +344,15 @@ If you need a different port, create a local `.wp-env.override.json` file.
 
 ## Testing
 
+The generated production API contract can be checked locally without WordPress, Docker or network access:
+
+```sh
+composer install
+npm run test:contracts
+```
+
+These checks cover `/v1` request paths, non-expiring OAuth responses, bearer authorization, batch retry keys and shipping fixture serialization. They do not replace the WooCommerce integration suite below.
+
 The test suite runs inside `wp-env` and uses mocked outbound HTTP.
 
 Coverage focuses on the plugin's main contract, including:
@@ -400,12 +409,17 @@ npm run release:zip
 The release build:
 
 - creates a clean plugin tree in `build-release/`
-- installs production Composer dependencies into that tree
+- copies an explicit allowlist of runtime files, excluding local configuration and credentials
+- installs production Composer dependencies from the committed lock file into that tree
 - removes development-only files from the artifact
 - excludes the WordPress.org directory assets kept in `assets/`
 - writes `aura-historia-partner-connect.zip` to the project root
 
 For WordPress.org submission, use the clean release tree or equivalent release contents rather than the raw development repository checkout.
+
+The production OAuth registration and broker credentials are provisioned. Deploy the accompanying webapp OAuth changes before testing this ZIP: the chooser must return an `ls_` ListingSource ID and the broker must use `/v1/oauth/token`. The broker uses the production client secret through its server-side Worker binding; never include that secret in the plugin.
+
+Before publishing `0.2.0`, complete the deferred real-store connection check: consent and callback, provider configuration, three active signed product webhooks, initial catalog admission, shipping publication and disconnect/deactivation cleanup. The release-preparation checks deliberately do not install WordPress or execute that flow. A matching Git version tag triggers the WordPress.org deployment workflow; `WP_ORG_USERNAME` and `WP_ORG_PASSWORD` must be configured in repository secrets.
 
 ## License
 

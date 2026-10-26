@@ -11,28 +11,12 @@ ZIP_PATH="$PROJECT_ROOT/$PLUGIN_SLUG.zip"
 rm -rf "$BUILD_DIR" "$ZIP_PATH"
 mkdir -p "$BUILD_DIR"
 
-rsync -a "$PROJECT_ROOT/" "$RELEASE_DIR/" \
-  --exclude .git \
-  --exclude .github \
-  --exclude .tmp-openapi-inspect \
-  --exclude assets \
-  --exclude build-release \
-  --exclude "$PLUGIN_SLUG.zip" \
-  --exclude node_modules \
-  --exclude vendor \
-  --exclude tests \
-  --exclude scripts \
-  --exclude openapi \
-  --exclude build-release.sh \
-  --exclude .wp-env.json \
-  --exclude .wp-env.override.json \
-  --exclude .phpunit.result.cache \
-  --exclude package.json \
-  --exclude package-lock.json \
-  --exclude phpunit.xml.dist \
-  --exclude README.md \
-  --exclude .gitignore \
-  --exclude .gitattributes
+# Ship only runtime files. Local configuration, credentials and new development
+# files must never enter the release merely because an exclusion was forgotten.
+mkdir -p "$RELEASE_DIR"
+for runtime_path in aura-historia-partner-connect.php uninstall.php includes languages readme.txt LICENSE composer.json composer.lock; do
+  cp -R "$PROJECT_ROOT/$runtime_path" "$RELEASE_DIR/"
+done
 
 (
   cd "$RELEASE_DIR"

@@ -9,7 +9,6 @@ use AuraHistoria\PartnerConnect\Shipping_Mapper;
 use AuraHistoria\PartnerConnect\InternalApi\ObjectSerializer;
 use AuraHistoria\PartnerConnect\InternalApi\Model\CreateShippingProfileData;
 use AuraHistoria\PartnerConnect\InternalApi\Model\ProductListingDeliveryCommandData;
-use AuraHistoria\PartnerConnect\InternalApi\Model\DeliveryAssertionEvidence;
 
 class Test_AHPC_Shipping_Mapper extends WP_UnitTestCase
 {
@@ -83,7 +82,7 @@ class Test_AHPC_Shipping_Mapper extends WP_UnitTestCase
         return json_decode(wp_json_encode(ObjectSerializer::sanitizeForSerialization(ObjectSerializer::deserialize(wp_json_encode($body), $model, []))));
     }
 
-    public function test_merged_backend_fixtures_and_evidence_have_no_expiry_protocol()
+    public function test_merged_backend_shipping_fixtures_roundtrip()
     {
         $fixtures = json_decode(file_get_contents(__DIR__ . "/fixtures/shipping-imports.json"));
         foreach (["create", "providerCreate"] as $key) {
@@ -95,9 +94,6 @@ class Test_AHPC_Shipping_Mapper extends WP_UnitTestCase
             $out = $this->roundtrip($fixtures->$key, ProductListingDeliveryCommandData::class);
             $this->assertEquals($fixtures->$key->delivery, $out->delivery);
         }
-        $evidence = $this->roundtrip(["verifiedAt" => "2026-10-15T10:00:00.123456Z"], DeliveryAssertionEvidence::class);
-        $this->assertSame(["verifiedAt"], array_keys(get_object_vars($evidence)));
-        $this->assertStringContainsString(".123456", $evidence->verifiedAt);
         $this->assertSame("object", \AuraHistoria\PartnerConnect\InternalApi\Model\ShippingImportWriteData::openAPITypes()["observation"]);
         $spec = file_get_contents(dirname(__DIR__) . "/openapi/internal-api.filtered.yaml");
         $this->assertStringContainsString("maximum: 9223372036854775807", $spec);
