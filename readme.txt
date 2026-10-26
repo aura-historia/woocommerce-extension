@@ -2,7 +2,7 @@
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.2
-Stable tag: 0.2.0
+Stable tag: 0.3.0
 Contributors: aurahistoria
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -145,7 +145,7 @@ Rescheduling a published product for future publication clears its owned shippin
 
 == Changelog ==
 
-= 0.2.0 =
+= 0.3.0 =
 * Bundles the production OAuth client ID and uses the production `/v1` API contract.
 * The plugin now auto-configures with Aura Historia on installation. No more manual insertion of credentials needed. Just install, activate, and approve the OAuth connection when prompted.
 * Adds background initial/manual shipping imports with conservative local mapping, resumable retries and protection for manual Aura edits.
