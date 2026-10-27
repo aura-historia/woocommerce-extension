@@ -261,7 +261,7 @@ class Shipping_Publisher
         }
         wp_cache_delete($item_id, "posts");
         $post = get_post($item_id);
-        return !$wpdb->last_error && (!$post || ("product" === $post->post_type && in_array($post->post_status, ["trash", "draft", "private", "pending", "future"], true)));
+        return !$wpdb->last_error && (!$post || ("product" === $post->post_type && in_array($post->post_status, ["trash", "auto-draft", "draft", "private", "pending", "future"], true)));
     }
 
     /** Scoped membership refresh; facts are acquired inside the same worker. */

@@ -591,6 +591,24 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
         $this->assertSame("complete", $this->finish()["status"]);
     }
 
+    public function test_new_product_auto_draft_does_not_retry_shipping_publication()
+    {
+        $this->start_ongoing();
+        $id = wp_insert_post(["post_type" => "product", "post_status" => "auto-draft", "post_title" => "Auto Draft"]);
+        $this->assertGreaterThan(0, $id);
+        $this->products[] = wc_get_product($id);
+        $this->missing[$id] = true;
+        $this->assertTrue(Shipping_Publisher::confirmed_removed($id));
+
+        $this->drain_changes();
+        $state = $this->finish();
+        $this->assertSame("complete", $state["status"]);
+        $this->assertSame([], $state["deferred"]);
+        $this->assertSame("", $state["last_error"]);
+        $this->assertArrayNotHasKey($id, $this->listing_bodies);
+        $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH));
+    }
+
     public function test_rescheduling_a_published_product_clears_owned_shipping_until_republication()
     {
         $product = $this->product();

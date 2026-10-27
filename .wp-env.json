@@ -1,6 +1,6 @@
 {
   "$schema": "https://schemas.wp.org/trunk/wp-env.json",
-  "core": "WordPress/WordPress#6.9.4",
+  "core": "WordPress/WordPress#7.0",
   "phpVersion": "8.4",
   "plugins": [
     "https://downloads.wordpress.org/plugin/woocommerce.latest-stable.zip",

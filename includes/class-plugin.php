@@ -184,6 +184,14 @@ class Plugin
      */
     public function bootstrap_woocommerce()
     {
+        // Wait for WordPress locale setup, then sync before WooCommerce's
+        // init callback loads active webhooks into this request. Loading them
+        // first could retain stale endpoints or secrets after a repair.
+        if (!did_action("init")) {
+            add_action("init", [$this, "bootstrap_woocommerce"], -1);
+            return;
+        }
+
         if ($this->woocommerce_bootstrapped) {
             return;
         }
