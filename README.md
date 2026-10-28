@@ -351,6 +351,7 @@ If you need a different port, create a local `.wp-env.override.json` file.
 - `npm run env:destroy` — remove the environment entirely
 - `npm run wp -- plugin list` — run WP-CLI commands inside the environment
 - `npm test` — run the WordPress integration test suite
+- `npm run test:e2e` — run the Playwright browser tests against the development site
 - `npm run plugin:check` — build the release artifact and run WordPress Plugin Check (PCP) against the shipped plugin contents
 - `npm run release:zip` — build the distributable plugin ZIP
 - `npm run openapi:generate` — regenerate the typed internal API client
@@ -384,6 +385,15 @@ Run the suite with:
 
 ```sh
 npm test
+```
+
+### Browser tests
+
+Playwright tests in `tests/e2e/` drive the rendered settings page in Chromium against the running development site. They cover the automatic OAuth start, its loop protection and the manual Connect fallback. The tests capture the OAuth authorization redirect, so no request reaches Aura Historia. They need a disconnected store without a stored OAuth error, and a valid `oc_` `AHPC_OAUTH_CLIENT_ID`, for example set in `.wp-env.override.json`:
+
+```sh
+npx playwright install chromium
+npm run test:e2e
 ```
 
 ### Plugin Check (PCP)

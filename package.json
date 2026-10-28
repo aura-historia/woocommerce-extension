@@ -16,9 +16,11 @@
     "plugin:check": "npm run release:zip && node scripts/run-plugin-check.js build-release/aura-historia-partner-connect",
     "phpunit": "node scripts/run-phpunit.js",
     "test:contracts": "vendor/bin/phpunit -c phpunit-contract.xml.dist",
+    "test:e2e": "playwright test -c tests/e2e/playwright.config.js",
     "test": "npm run composer:install && npm run phpunit"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@wordpress/env": "^12.0.0",
     "yaml": "^2.9.1"
   }
