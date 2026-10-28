@@ -9,4 +9,3 @@ npm-debug.log
 build-release/**
 aura-historia-partner-connect.zip
 /test-results/
-/tests/e2e/.auth/

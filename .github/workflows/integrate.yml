@@ -217,7 +217,7 @@ jobs:
 
       # The format-valid test client ID enables automatic OAuth start. The tests
       # capture its authorization redirect, so it never reaches Aura Historia.
-      - name: Configure environment versions
+      - name: Configure environment versions and OAuth client
         env:
           WP_CORE: "WordPress/WordPress#7.0"
           WC_ZIP: "https://downloads.wordpress.org/plugin/woocommerce.latest-stable.zip"
@@ -246,6 +246,15 @@ jobs:
 
       - name: Run browser tests
         run: npm run test:e2e
+
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: test-results/e2e
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Print wp-env logs on failure
         if: failure()

@@ -1,7 +1,24 @@
 // @ts-check
 
+const BASE_URL = process.env.WP_BASE_URL || "http://localhost:8888";
 const SETTINGS_PATH = "/wp-admin/admin.php?page=aura-historia-partner-connect";
 const AUTO_START_KEY = "ahpcOauthAutoStart";
+
+/**
+ * Answers browser requests to other origins, such as the admin bar Gravatar,
+ * with an empty response, so the tests make no outbound requests.
+ *
+ * @param {import("@playwright/test").Page} page Page to restrict.
+ * @return {Promise<void>}
+ */
+async function blockExternalRequests(page) {
+    const origin = new URL(BASE_URL).origin;
+
+    await page.route(
+        (url) => url.origin !== origin,
+        (route) => route.fulfill({ status: 204 }),
+    );
+}
 
 /**
  * Whether a URL is the plugin settings page.
@@ -30,7 +47,7 @@ function isOauthStartUrl(url) {
  * Records OAuth start submissions and uncaught page errors.
  *
  * Each start is sent to WordPress, but its redirect is captured instead of
- * followed, so no request reaches Aura Historia.
+ * followed, so no request reaches Aura Historia. Other origins are blocked.
  *
  * @param {import("@playwright/test").Page} page Page to observe.
  * @return {Promise<{
@@ -44,6 +61,7 @@ async function observeOauthStarts(page) {
     /** @type {Error[]} */
     const errors = [];
 
+    await blockExternalRequests(page);
     await page.route(isOauthStartUrl, async (route) => {
         const request = route.request();
         const body = new URLSearchParams(request.postData() || "");
@@ -87,7 +105,9 @@ function readAutoStartMarker(page) {
 
 module.exports = {
     AUTO_START_KEY,
+    BASE_URL,
     SETTINGS_PATH,
+    blockExternalRequests,
     isOauthStartUrl,
     isSettingsUrl,
     observeOauthStarts,

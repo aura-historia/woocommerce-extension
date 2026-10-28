@@ -1401,7 +1401,6 @@ class Plugin
 						var storageKey = "ahpcOauthAutoStart";
 						var form = document.getElementById("ahpc-oauth-start-form");
 						var storage;
-						var started = false;
 
 						if (!form) {
 							return;
@@ -1423,11 +1422,11 @@ class Plugin
 							// The button named "submit" shadows form.submit, so call the
 							// native method directly.
 							HTMLFormElement.prototype.submit.call(form);
-							started = true;
-						} finally {
-							if (!started) {
-								storage.removeItem(storageKey);
-							}
+						} catch (error) {
+							// Only a submission the browser rejects is retried on the next
+							// visit. A sent request counts as the tab's attempt.
+							storage.removeItem(storageKey);
+							throw error;
 						}
 					})();
 				</script>

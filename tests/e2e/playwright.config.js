@@ -1,6 +1,8 @@
 // @ts-check
+const os = require("node:os");
 const path = require("node:path");
 const { defineConfig, devices } = require("@playwright/test");
+const { BASE_URL } = require("./helpers");
 
 module.exports = defineConfig({
     testDir: __dirname,
@@ -13,8 +15,9 @@ module.exports = defineConfig({
     forbidOnly: !!process.env.CI,
     reporter: process.env.CI ? [["github"], ["list"]] : "list",
     use: {
-        baseURL: process.env.WP_BASE_URL || "http://localhost:8888",
-        storageState: path.join(__dirname, ".auth/admin.json"),
+        baseURL: BASE_URL,
+        // Keep the admin session outside the plugin folder that wp-env serves.
+        storageState: path.join(os.tmpdir(), "ahpc-e2e-admin.json"),
         trace: "retain-on-failure",
     },
     projects: [

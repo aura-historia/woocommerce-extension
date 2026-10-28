@@ -498,39 +498,10 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
     }
 
     /**
-     * It submits the OAuth start form natively because its button is named submit.
-     *
-     * The browser behavior itself is covered by tests/e2e/oauth-auto-start.spec.js.
-     *
-     * @return void
-     */
-    public function test_render_settings_page_auto_start_bypasses_named_submit_control()
-    {
-        update_option(
-            Webhook_Manager::OPTION_SETTINGS,
-            [
-                "listing_source_id" => "",
-                "access_token" => "",
-                "secret" => "test-secret",
-            ],
-            false,
-        );
-
-        $output = $this->render_plugin_settings_page();
-
-        $this->assertMatchesRegularExpression(
-            '/<form id="ahpc-oauth-start-form"[^>]*>(?:(?!<\/form>).)*name="submit"/s',
-            $output,
-        );
-        $this->assertStringContainsString(
-            "HTMLFormElement.prototype.submit.call(form)",
-            $output,
-        );
-        $this->assertStringNotContainsString("form.submit()", $output);
-    }
-
-    /**
      * It skips OAuth auto-start after a failed attempt and for connected stores.
+     *
+     * The browser behavior of the auto-start script is covered by
+     * tests/e2e/oauth-auto-start.spec.js.
      *
      * @return void
      */

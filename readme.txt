@@ -91,7 +91,7 @@ Service provider and policies:
 2. Install Aura Historia Partner Connect via the WordPress Plugin Directory.
 3. Activate the plugin.
 4. Go to `WooCommerce > Aura Historia`.
-5. Approve the Aura Historia OAuth connection when prompted.
+5. Approve the Aura Historia OAuth connection when prompted. If the approval page does not open automatically, click Connect with Aura Historia.
 
 The production public OAuth client ID is bundled; merchants do not need to configure it. For stage or local development, supply a separate registered canonical UUIDv7 `oc_` client ID via `AHPC_OAUTH_CLIENT_ID` (constant or environment variable). Keep the API URL and broker redirect URI in that same environment. Configure the same client ID and its matching secret in the webapp redirect broker, register the broker redirect URI, and grant `product-listings:read product-listings:write listing-sources:read listing-sources:write`. Reconnect older connections to grant the read scopes shipping needs for identity/revision recovery. The broker must return an `ls_` ListingSource ID in its external `listing_source_id` callback field; UUID Shop IDs are rejected. The API uses `https://api.aura-historia.com` in production and `https://api.stage.aura-historia.com` for stage. After OAuth completes, the plugin configures WooCommerce ingestion and syncs the managed webhooks.
 

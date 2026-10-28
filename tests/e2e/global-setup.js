@@ -1,6 +1,6 @@
 // @ts-check
 const { chromium } = require("@playwright/test");
-const { SETTINGS_PATH } = require("./helpers");
+const { SETTINGS_PATH, blockExternalRequests } = require("./helpers");
 
 /**
  * Logs in as the wp-env administrator and checks that the settings page will
@@ -16,6 +16,7 @@ module.exports = async function globalSetup(config) {
     try {
         const page = await browser.newPage({ baseURL });
 
+        await blockExternalRequests(page);
         await page.goto("/wp-login.php");
         await page.locator("#user_login").fill(process.env.WP_USERNAME || "admin");
         await page.locator("#user_pass").fill(process.env.WP_PASSWORD || "password");

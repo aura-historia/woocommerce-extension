@@ -14,15 +14,17 @@ const OAUTH_SCOPE =
 const CONNECT_BUTTON = { name: "Connect with Aura Historia" };
 
 /**
- * Loads the settings page and waits until no automatic start can still be pending.
+ * Loads the settings page and checks that it has not navigated away.
+ *
+ * An unexpected automatic start can still be in flight after this returns, so
+ * callers finish with a manual start and assert the exact start count.
  *
  * @param {import("@playwright/test").Page} page Page to navigate.
  * @param {string}                         path Settings page path.
  * @return {Promise<void>}
  */
-async function openSettingsWithoutAutoStart(page, path = SETTINGS_PATH) {
+async function openSettings(page, path = SETTINGS_PATH) {
     await page.goto(path);
-    await page.waitForLoadState("networkidle");
     await expect(page).toHaveURL(isSettingsUrl);
 }
 
@@ -79,8 +81,7 @@ test("first visit starts OAuth once even though the form has a control named sub
     );
 
     // Returning in the same tab must not start OAuth again.
-    await openSettingsWithoutAutoStart(page);
-    expect(starts).toHaveLength(1);
+    await openSettings(page);
     expect(await readAutoStartMarker(page)).toBe("1");
     expect(
         await page
@@ -88,21 +89,20 @@ test("first visit starts OAuth once even though the form has a control named sub
             .evaluate((form) => /** @type {any} */ (form).submit instanceof HTMLInputElement),
     ).toBe(true);
 
-    // The manual button still starts OAuth.
+    // The manual button still starts OAuth, and it is the only further start.
     await page.getByRole("button", CONNECT_BUTTON).click();
     await expectOauthStarts(observed, 2);
     expect(starts[1].status).toBe(302);
 });
 
 test("an OAuth failure return does not start OAuth automatically", async ({ page }) => {
-    const { starts, errors } = await observeOauthStarts(page);
+    const observed = await observeOauthStarts(page);
 
-    await openSettingsWithoutAutoStart(page, `${SETTINGS_PATH}&ahpc_oauth=failed`);
-
-    expect(starts).toEqual([]);
-    expect(errors).toEqual([]);
+    await openSettings(page, `${SETTINGS_PATH}&ahpc_oauth=failed`);
     expect(await readAutoStartMarker(page)).toBeNull();
-    await expect(page.getByRole("button", CONNECT_BUTTON)).toBeVisible();
+
+    await page.getByRole("button", CONNECT_BUTTON).click();
+    await expectOauthStarts(observed, 1);
 });
 
 test("a failed automatic start is not recorded and is retried on the next visit", async ({
@@ -123,7 +123,7 @@ test("a failed automatic start is not recorded and is retried on the next visit"
         };
     });
 
-    await openSettingsWithoutAutoStart(page);
+    await openSettings(page);
 
     expect(observed.errors.map((error) => error.message)).toEqual([
         "Simulated submit failure",
@@ -148,8 +148,7 @@ test("without session storage OAuth waits for the manual button", async ({ page 
         });
     });
 
-    await openSettingsWithoutAutoStart(page);
-    await expectOauthStarts(observed, 0);
+    await openSettings(page);
 
     await page.getByRole("button", CONNECT_BUTTON).click();
     await expectOauthStarts(observed, 1);
