@@ -1571,8 +1571,8 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
                 '<div class="notice notice-' . $type . ' inline"><p>' . $message,
                 $output,
             );
-            // Admission is asynchronous; no notice claims completed ingestion.
-            $this->assertStringContainsString("for asynchronous processing in the background", $output);
+            // The single rendered outcome keeps the asynchronous-admission wording.
+            $this->assertSame(1, substr_count($output, "for asynchronous processing in the background"));
 
             foreach ($notices as $other_outcome => [, $other_message]) {
                 if ($other_outcome !== $outcome) {
