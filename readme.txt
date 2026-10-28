@@ -119,7 +119,7 @@ The plugin first stages all managed webhooks paused with the desired signing sec
 
 = Does this plugin backfill existing products? =
 
-Yes. Once configuration succeeds, the plugin schedules an initial backfill once per canonical lowercase UUIDv7 `ls_` ListingSource ID. If setup or queueing fails, it keeps that first run pending for a later healthy request. It submits published products in background batches of up to 100 to the async ProductListings API. A `202` confirms queue admission, not completed creation or immediate search visibility. Retries reuse the same ordered request and idempotency key; a product-ID cursor prevents skips when earlier products are removed. Routine webhook repairs never start a fresh CREATE run. The manual action safely resumes pending work without changing its snapshot/key, leaves already queued work alone, or starts a new full run only when idle.
+Yes. Once configuration succeeds, the plugin schedules an initial backfill once per canonical lowercase UUIDv7 `ls_` ListingSource ID. If setup or queueing fails, it keeps that first run pending for a later healthy request. It submits published products in background batches of up to 100 to the async ProductListings API. A `202` confirms queue admission, not completed creation or immediate search visibility. Retries reuse the same ordered request and idempotency key; a product-ID cursor prevents skips when earlier products are removed. Routine webhook repairs never start a fresh CREATE run. The manual action safely resumes pending work without changing its snapshot/key, leaves already queued work alone, or starts a new full run only when idle, and its confirmation states which one happened.
 
 = What happens when the plugin is disabled? =
 

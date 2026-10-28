@@ -68,6 +68,15 @@ class Product_Backfill
      */
     const STATUS_FAILED = "failed";
 
+    /** Start outcome: an idle source queued a fresh full catalog run. */
+    const START_FRESH = "started";
+
+    /** Start outcome: a retained interrupted batch was requeued unchanged. */
+    const START_RESUMED = "resumed";
+
+    /** Start outcome: queued or running work was left unchanged. */
+    const START_ALREADY_QUEUED = "already_queued";
+
     /**
      * Number of products per batch sent to the backend.
      */
@@ -196,7 +205,7 @@ class Product_Backfill
      * started, so the caller may retry after action_scheduler_init.
      *
      * @param string $listing_source_id Listing source TypeID.
-     * @return bool Whether work is already queued or was successfully queued.
+     * @return string|false A START_* outcome, or false when nothing is queued.
      */
     public function start_or_resume_backfill($listing_source_id)
     {
@@ -1049,12 +1058,12 @@ class Product_Backfill
      * Queues only missing work, retaining any uncertain or in-flight snapshot.
      *
      * @param string $listing_source_id Listing source TypeID.
-     * @return bool Whether work is queued.
+     * @return string|false A START_* outcome, or false when nothing is queued.
      */
     private function start_or_resume_backfill_now($listing_source_id)
     {
         if (as_has_scheduled_action(self::ACTION_HOOK, null, self::ACTION_GROUP)) {
-            return true;
+            return self::START_ALREADY_QUEUED;
         }
 
         $snapshot = get_option(self::OPTION_BATCH, false);
@@ -1107,14 +1116,17 @@ class Product_Backfill
             return false;
         }
 
-        if (false === $snapshot && $action_id) {
-            $this->reset_admission_status();
-        }
-        if ($action_id) {
-            $this->record_scheduled();
+        if (!$action_id) {
+            // A concurrent request queued the work first; it was left unchanged.
+            return self::START_ALREADY_QUEUED;
         }
 
-        return true;
+        if (false === $snapshot) {
+            $this->reset_admission_status();
+        }
+        $this->record_scheduled();
+
+        return false === $snapshot ? self::START_FRESH : self::START_RESUMED;
     }
 
     /**

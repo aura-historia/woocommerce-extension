@@ -968,7 +968,7 @@ class Plugin
         if (!is_wp_error($result)) {
             $redirect_url = add_query_arg(
                 "ahpc_backfill",
-                "queued",
+                $result,
                 $redirect_url,
             );
         } else {
@@ -997,7 +997,7 @@ class Plugin
     /**
      * Resumes pending work, or queues a fresh full run only when idle.
      *
-     * @return true|WP_Error
+     * @return string|WP_Error A Product_Backfill::START_* outcome.
      */
     public function queue_manual_backfill()
     {
@@ -1054,7 +1054,8 @@ class Plugin
             return $sync_result;
         }
 
-        if (!(new Product_Backfill())->start_or_resume_backfill($settings["listing_source_id"])) {
+        $outcome = (new Product_Backfill())->start_or_resume_backfill($settings["listing_source_id"]);
+        if (!$outcome) {
             return new WP_Error(
                 "ahpc_backfill_failed",
                 __(
@@ -1069,7 +1070,7 @@ class Plugin
         if (is_wp_error($backfill_result)) {
             return $backfill_result;
         }
-        return true;
+        return $outcome;
     }
 
     /** Queues a separate manual shipping run after the normal configuration gate. */
@@ -1272,11 +1273,27 @@ class Plugin
     ); ?>
 			<?php endif; ?>
 
-			<?php if ("queued" === $backfill_request_status): ?>
+			<?php if (Product_Backfill::START_FRESH === $backfill_request_status): ?>
 				<?php $this->render_inline_notice(
         "success",
         esc_html__(
-            "A fresh product backfill was queued. Existing listings will be submitted for asynchronous processing in the background.",
+            "A fresh full product backfill was queued. Existing listings will be submitted for asynchronous processing in the background.",
+            "aura-historia-partner-connect",
+        ),
+    ); ?>
+			<?php elseif (Product_Backfill::START_RESUMED === $backfill_request_status): ?>
+				<?php $this->render_inline_notice(
+        "success",
+        esc_html__(
+            "The interrupted product backfill was resumed with its saved batch unchanged; no fresh run was started. Remaining listings will be submitted for asynchronous processing in the background.",
+            "aura-historia-partner-connect",
+        ),
+    ); ?>
+			<?php elseif (Product_Backfill::START_ALREADY_QUEUED === $backfill_request_status): ?>
+				<?php $this->render_inline_notice(
+        "info",
+        esc_html__(
+            "A product backfill is already queued or running, so it was left unchanged and no fresh run was started. Its listings are submitted for asynchronous processing in the background.",
             "aura-historia-partner-connect",
         ),
     ); ?>

@@ -159,11 +159,11 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             "retry_attempt" => 1,
         ];
         update_option(Product_Backfill::OPTION_BATCH, $snapshot, false);
-        $this->assertTrue($backfill->start_or_resume_backfill(self::SOURCE_ID));
+        $this->assertSame(Product_Backfill::START_RESUMED, $backfill->start_or_resume_backfill(self::SOURCE_ID));
         $args = [self::SOURCE_ID, 1, "retry-" . hash("sha256", "saved-key:1")];
         $this->assertTrue((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, $args, Product_Backfill::ACTION_GROUP));
         $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
-        $this->assertTrue($backfill->start_or_resume_backfill(self::SOURCE_ID));
+        $this->assertSame(Product_Backfill::START_ALREADY_QUEUED, $backfill->start_or_resume_backfill(self::SOURCE_ID));
         $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
 
         as_unschedule_all_actions(Product_Backfill::ACTION_HOOK, null, Product_Backfill::ACTION_GROUP);
@@ -183,8 +183,8 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         $backfill = new Product_Backfill();
         try {
             $this->mock_responses([$this->admission(1), $this->admission(1)]);
-            $this->assertTrue($backfill->start_or_resume_backfill(self::SOURCE_ID));
-            $this->assertTrue($backfill->start_or_resume_backfill(self::SOURCE_ID));
+            $this->assertSame(Product_Backfill::START_FRESH, $backfill->start_or_resume_backfill(self::SOURCE_ID));
+            $this->assertSame(Product_Backfill::START_ALREADY_QUEUED, $backfill->start_or_resume_backfill(self::SOURCE_ID));
             $this->assertTrue((bool) as_has_scheduled_action(
                 Product_Backfill::ACTION_HOOK, [self::SOURCE_ID, 1], Product_Backfill::ACTION_GROUP,
             ));
@@ -193,7 +193,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             as_unschedule_all_actions(Product_Backfill::ACTION_HOOK, null, Product_Backfill::ACTION_GROUP);
             $backfill->process_batch(self::SOURCE_ID, 2);
             $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH, false));
-            $this->assertTrue($backfill->start_or_resume_backfill(self::SOURCE_ID));
+            $this->assertSame(Product_Backfill::START_FRESH, $backfill->start_or_resume_backfill(self::SOURCE_ID));
             $backfill->process_batch(self::SOURCE_ID, 1);
             $this->assertNotSame($first_key, $this->request(1)->getHeaderLine("Idempotency-Key"));
         } finally {
