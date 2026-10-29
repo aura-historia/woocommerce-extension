@@ -140,6 +140,20 @@ class Plugin
             11,
             2,
         );
+        // WooCommerce resolves topic hooks when it loads active webhooks on
+        // init, so this must be registered before then.
+        add_filter(
+            "woocommerce_webhook_topic_hooks",
+            [Webhook_Manager::class, "add_permanent_deletion_hook"],
+            10,
+            2,
+        );
+        add_action(
+            "deleted_post",
+            [Webhook_Manager::class, "announce_permanent_deletion"],
+            10,
+            2,
+        );
         add_action("woocommerce_loaded", [$this, "bootstrap_woocommerce"]);
         add_action("update_option_woocommerce_currency", [$this, "on_store_locale_option_updated"], 10, 2);
         add_action("update_option_WPLANG", [$this, "on_store_locale_option_updated"], 10, 2);
