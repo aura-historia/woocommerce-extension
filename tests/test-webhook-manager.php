@@ -42,6 +42,13 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
     protected $http_requests = [];
 
     /**
+     * Response code of mocked WordPress HTTP requests, such as deliveries.
+     *
+     * @var int
+     */
+    protected $http_response_code = 200;
+
+    /**
      * Guzzle client injected into the generated backend API client during tests.
      *
      * @var ClientInterface|null
@@ -444,7 +451,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             "args" => $args,
         ];
 
-        return $this->mock_json_response(200, "");
+        return $this->mock_json_response($this->http_response_code, "");
     }
 
     /**
@@ -2602,6 +2609,262 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         foreach ($manager->get_webhook_ids() as $webhook_id) {
             $this->assertSame("paused", (new WC_Webhook($webhook_id))->get_status());
         }
+    }
+
+    /**
+     * Connects the store, syncs the managed webhooks and boots the plugin's
+     * drift handlers, as on a request after a successful sync.
+     *
+     * @return array<string,int>
+     */
+    protected function sync_and_watch_managed_webhooks()
+    {
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => "ls_01jw7j4azge00800000000000g",
+            "access_token" => "aurahistoria_abcdefghijk_verylongtokenvalue",
+            "secret" => "test-secret",
+        ], false);
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+        (new Plugin())->boot();
+        $this->assertSame("no", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+
+        return $manager->get_webhook_ids();
+    }
+
+    /**
+     * Creates a published product a managed webhook can deliver.
+     *
+     * @return int
+     */
+    protected function create_delivery_product()
+    {
+        $product = new WC_Product_Simple();
+        $product->set_name("Webhook bookkeeping fixture");
+        $product->set_status("publish");
+
+        return $product->save();
+    }
+
+    /**
+     * Asserts that the next request finds nothing to sync and sends no PUT.
+     *
+     * @param array<string,int> $ids Managed webhook IDs.
+     * @return void
+     */
+    protected function assert_next_request_does_not_sync($ids)
+    {
+        $this->assertSame("no", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        $this->assertTrue((new Webhook_Manager())->maybe_sync_webhooks());
+        $this->assertSame([], $this->backend_http_requests);
+        foreach ($ids as $webhook_id) {
+            $this->assertSame("active", (new WC_Webhook($webhook_id))->get_status());
+        }
+    }
+
+    public function test_successful_delivery_keeps_managed_webhooks_in_sync()
+    {
+        $product_id = $this->create_delivery_product();
+        $ids = $this->sync_and_watch_managed_webhooks();
+        $webhook = new WC_Webhook($ids["product.updated"]);
+        $webhook->set_failure_count(2);
+        $webhook->save();
+        $saves = did_action("woocommerce_webhook_updated");
+
+        $this->http_response_code = 204;
+        $webhook->deliver($product_id);
+
+        // WooCommerce saved the webhook to reset its failure count.
+        $this->assertSame($saves + 1, did_action("woocommerce_webhook_updated"));
+        $this->assertSame(0, (new WC_Webhook($ids["product.updated"]))->get_failure_count());
+        $this->assert_next_request_does_not_sync($ids);
+    }
+
+    public function test_failed_delivery_below_disable_threshold_keeps_managed_webhooks_in_sync()
+    {
+        $product_id = $this->create_delivery_product();
+        $ids = $this->sync_and_watch_managed_webhooks();
+        $webhook = new WC_Webhook($ids["product.updated"]);
+        $saves = did_action("woocommerce_webhook_updated");
+
+        $this->http_response_code = 500;
+        $webhook->deliver($product_id);
+        $webhook->deliver($product_id);
+
+        $this->assertSame($saves + 2, did_action("woocommerce_webhook_updated"));
+        $this->assertSame(2, (new WC_Webhook($ids["product.updated"]))->get_failure_count());
+        $this->assert_next_request_does_not_sync($ids);
+    }
+
+    public function test_delivery_bookkeeping_alone_never_requires_sync()
+    {
+        $ids = $this->sync_and_watch_managed_webhooks();
+
+        foreach ($ids as $webhook_id) {
+            $webhook = new WC_Webhook($webhook_id);
+            $webhook->set_failure_count(3);
+            $webhook->set_pending_delivery(true);
+            $webhook->set_date_modified(time() - HOUR_IN_SECONDS);
+            $webhook->save();
+        }
+
+        $this->assert_next_request_does_not_sync($ids);
+    }
+
+    public function test_auto_disabled_managed_webhook_is_repaired()
+    {
+        $product_id = $this->create_delivery_product();
+        $ids = $this->sync_and_watch_managed_webhooks();
+        $webhook = new WC_Webhook($ids["product.updated"]);
+        $max_failures = static function () {
+            return 0;
+        };
+
+        $this->http_response_code = 500;
+        add_filter("woocommerce_max_webhook_delivery_failures", $max_failures);
+        try {
+            $webhook->deliver($product_id);
+            $this->assertSame("no", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+            $webhook->deliver($product_id);
+        } finally {
+            remove_filter("woocommerce_max_webhook_delivery_failures", $max_failures);
+        }
+
+        $this->assertSame("disabled", (new WC_Webhook($ids["product.updated"]))->get_status());
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        $this->assertTrue((new Webhook_Manager())->maybe_sync_webhooks());
+        $this->assertCount(1, $this->backend_http_requests);
+        $this->assertSame("active", (new WC_Webhook($ids["product.updated"]))->get_status());
+    }
+
+    public function test_changed_managed_field_requires_sync_and_is_repaired()
+    {
+        $ids = $this->sync_and_watch_managed_webhooks();
+        $other_admin_id = self::factory()->user->create(["role" => "administrator"]);
+        $manager = new Webhook_Manager();
+        $synced = new WC_Webhook($ids["product.updated"]);
+        $edits = [
+            "name" => "Renamed by the merchant",
+            "topic" => "order.created",
+            "status" => "paused",
+            "delivery_url" => "https://merchant.example/webhooks",
+            "secret" => "merchant-secret",
+            "user_id" => $other_admin_id,
+            "api_version" => "wp_api_v2",
+        ];
+
+        foreach ($edits as $field => $value) {
+            $webhook = new WC_Webhook($ids["product.updated"]);
+            $webhook->{"set_" . $field}($value);
+            $webhook->save();
+            $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC), $field);
+
+            $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+            $this->assertTrue($manager->maybe_sync_webhooks(), $field);
+            $this->assertCount(1, $this->backend_http_requests, $field);
+            $this->assertSame($ids, $manager->get_webhook_ids(), $field);
+            $repaired = new WC_Webhook($ids["product.updated"]);
+            $this->assertSame($synced->{"get_" . $field}("edit"), $repaired->{"get_" . $field}("edit"), $field);
+            $this->assertSame("active", $repaired->get_status(), $field);
+            $this->assertSame("no", get_option(Webhook_Manager::OPTION_NEEDS_SYNC), $field);
+        }
+    }
+
+    public function test_deleted_managed_webhook_requires_sync()
+    {
+        $ids = $this->sync_and_watch_managed_webhooks();
+
+        (new WC_Webhook($ids["product.deleted"]))->delete(true);
+
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->maybe_sync_webhooks());
+        $this->assertCount(1, $this->backend_http_requests);
+        $recreated_ids = $manager->get_webhook_ids();
+        $this->assertNotSame($ids["product.deleted"], $recreated_ids["product.deleted"]);
+        $this->assertSame("active", (new WC_Webhook($recreated_ids["product.deleted"]))->get_status());
+    }
+
+    public function test_unrelated_merchant_webhook_never_requires_sync()
+    {
+        $product_id = $this->create_delivery_product();
+        $ids = $this->sync_and_watch_managed_webhooks();
+        $webhook = new WC_Webhook();
+        $webhook->set_name("Merchant product feed");
+        $webhook->set_topic("product.updated");
+        $webhook->set_user_id($this->admin_user_id);
+        $webhook->set_delivery_url("https://merchant.example/feed");
+        $webhook->set_secret("merchant-secret");
+        $webhook->set_status("active");
+        $webhook->save();
+
+        $webhook->deliver($product_id);
+        $this->http_response_code = 500;
+        $webhook->deliver($product_id);
+        $webhook->set_delivery_url("https://merchant.example/other-feed");
+        $webhook->set_status("paused");
+        $webhook->save();
+        $webhook->delete(true);
+
+        $this->assert_next_request_does_not_sync($ids);
+    }
+
+    public function test_same_named_copy_requires_sync_only_when_it_would_be_adopted()
+    {
+        global $wpdb;
+
+        $product_id = $this->create_delivery_product();
+        $ids = $this->sync_and_watch_managed_webhooks();
+        $manager = new Webhook_Manager();
+        $copy = new WC_Webhook();
+        $copy->set_name($manager->get_webhook_name("product.updated"));
+        $copy->set_topic("product.updated");
+        $copy->set_user_id($this->admin_user_id);
+        $copy->set_delivery_url("https://merchant.example/copy");
+        $copy->set_secret("merchant-secret");
+        $copy->set_status("active");
+        $copy->save();
+
+        // The sync leaves a copy alone while the tracked webhook exists.
+        $copy->deliver($product_id);
+        $this->assert_next_request_does_not_sync($ids);
+
+        // Without the tracked webhook, the sync adopts the copy instead.
+        $wpdb->delete($wpdb->prefix . "wc_webhooks", ["webhook_id" => $ids["product.updated"]], ["%d"]);
+        wp_cache_delete($ids["product.updated"], "webhooks");
+        $copy->deliver($product_id);
+
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        $this->assertTrue($manager->maybe_sync_webhooks());
+        $this->assertSame($copy->get_id(), $manager->get_webhook_ids()["product.updated"]);
+        $adopted = new WC_Webhook($copy->get_id());
+        $this->assertSame("test-secret", $adopted->get_secret());
+        $this->assertSame("active", $adopted->get_status());
+    }
+
+    public function test_activating_managed_webhook_before_connection_requires_sync()
+    {
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => "",
+            "access_token" => "",
+            "secret" => "test-secret",
+        ], false);
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+        (new Plugin())->boot();
+        $webhook = new WC_Webhook($manager->get_webhook_ids()["product.created"]);
+        $this->assertSame("paused", $webhook->get_status());
+
+        $webhook->set_failure_count(1);
+        $webhook->save();
+        $this->assertSame("no", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+
+        $webhook->set_status("active");
+        $webhook->save();
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        $this->assertTrue($manager->maybe_sync_webhooks());
+        $this->assertSame("paused", (new WC_Webhook($webhook->get_id()))->get_status());
     }
 
     public function test_uninstall_cleans_connection_markers_snapshot_actions_and_managed_webhooks()
