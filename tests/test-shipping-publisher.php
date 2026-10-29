@@ -34,6 +34,10 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
     private $ownership = [];
     private $lose_response = false;
     private $conflict_once = false;
+    private $unreachable = [];
+    private $lose_delivery = false;
+    private $check_versions = false;
+    private $reject = [];
     private $zones = [];
     private $products = [];
     private $classes = [];
@@ -169,9 +173,18 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
             if ("GET" === $method) {
                 return $this->reply(["productListingId" => self::LISTING, "expectedVersion" => $version, "delivery" => null]);
             }
+            if (!empty($this->unreachable[$id])) {
+                throw new ConnectException("write not received", $request);
+            }
             $component = "UNCHANGED" !== $body["delivery"]["value"]["selection"]["state"] ? "selection" : "inputs";
             if (!empty($this->ownership[$component])) {
                 return $this->reply(["error" => "SHIPPING_IMPORT_OWNERSHIP_CONFLICT"], 409);
+            }
+            if (($body["delivery"]["value"]["selection"]["value"]["kind"] ?? null) === ($this->reject[$id] ?? false)) {
+                return $this->reply(["error" => "VALIDATION_FAILED"], 422);
+            }
+            if ($this->check_versions && $body["expectedVersion"] !== $version) {
+                return $this->reply(["error" => "SHIPPING_IMPORT_OUT_OF_ORDER"], 409);
             }
             if ($this->conflict_once) {
                 $this->conflict_once = false;
@@ -180,7 +193,13 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
             }
             $this->listing_bodies[$id][$component] = $body;
             $this->versions[$id] = $version + 1;
-            return $this->reply(["productListingId" => self::LISTING, "expectedVersion" => $version + 1, "outcome" => "CHANGED"]);
+            $result = ["productListingId" => self::LISTING, "expectedVersion" => $version + 1, "outcome" => "CHANGED"];
+            if ($this->lose_delivery) {
+                $this->lose_delivery = false;
+                $this->receipts[$key] = [(string) $request->getBody(), $result];
+                throw new ConnectException("response lost", $request);
+            }
+            return $this->reply($result);
         }
         $this->fail("Unexpected request: " . $method . " " . $path);
     }
@@ -232,6 +251,33 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
     private function writes()
     {
         return array_values(array_filter($this->requests, static function ($request) { return "GET" !== $request->getMethod(); }));
+    }
+
+    private function item_writes($id)
+    {
+        return array_values(array_filter($this->writes(), static function ($request) use ($id) { return str_ends_with($request->getUri()->getPath(), "/by-source-id/" . $id . "/delivery"); }));
+    }
+
+    /** External and grouped products are outside the supported shipping types. */
+    private function unsupported($product)
+    {
+        $product->set_name("Unsupported shipping fixture");
+        $product->set_status("publish");
+        $product->save();
+        $this->products[] = $product;
+        return $product;
+    }
+
+    /** Logical components of deferred entries, optionally only those without an exact request. */
+    private static function deferred_components(array $state, $request_less = false)
+    {
+        $entries = array_filter($state["deferred"], static function ($entry) use ($request_less) { return !$request_less || empty($entry["pending"]); });
+        return array_values(array_map(static function ($entry) { return $entry["item_id"] . ":" . $entry["component"]; }, $entries));
+    }
+
+    private static function import(array $request)
+    {
+        return end($request["arguments"])["import"];
     }
 
     public function test_local_api_acquisition_orders_zones_and_includes_zero_without_rest_keys()
@@ -360,6 +406,298 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
         $this->assertSame("complete", $this->finish()["status"]);
         $this->assertArrayHasKey($first->get_id(), $this->listing_bodies);
         $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH));
+    }
+
+    public function test_refreshes_keep_one_entry_per_unsupported_component_while_supported_items_continue()
+    {
+        $zone = $this->zone("DE", "80");
+        $supported = $this->product();
+        $external = $this->unsupported(new WC_Product_External());
+        $grouped = $this->unsupported(new WC_Product_Grouped());
+        $components = [];
+        foreach ([$external, $grouped] as $product) {
+            array_push($components, $product->get_id() . ":selection", $product->get_id() . ":inputs");
+        }
+        $publisher = new Shipping_Publisher();
+        $this->assertTrue($publisher->queue(self::SOURCE));
+        $state = $this->finish();
+        $this->assertSame("partial", $state["status"]);
+        $this->assertSame("ahpc_shipping_unsupported_product_type", $state["last_error"]);
+        $this->assertSame($components, self::deferred_components($state));
+        $sequence = $this->listing_bodies[$supported->get_id()]["inputs"]["import"]["sequence"];
+        foreach (["manual", "configuration", "during traversal"] as $refresh) {
+            if ("configuration" === $refresh) {
+                $methods = $zone->get_shipping_methods();
+                $method = reset($methods);
+                update_option($method->get_instance_option_key(), ["cost" => "95", "type" => "class", "tax_status" => "none"]);
+            }
+            $this->assertTrue($publisher->queue(self::SOURCE));
+            if ("during traversal" === $refresh) {
+                $limit = 60;
+                do {
+                    $state = $this->tick();
+                } while ($state["item_id"] !== $external->get_id() && --$limit > 0);
+                // Replay is over; the restarted traversal revisits retained components.
+                $this->assertSame([$external->get_id(), 0], [$state["item_id"], $state["retry_remaining"]]);
+                $this->assertTrue($publisher->queue(self::SOURCE));
+                $this->assertTrue($publisher->get_status(self::SOURCE)["refresh_requested"]);
+            }
+            $state = $this->finish(100);
+            $this->assertSame("partial", $state["status"], $refresh);
+            $this->assertSame($components, self::deferred_components($state), $refresh);
+            $this->assertSame([null, null, null, null], array_column($state["deferred"], "pending"), $refresh);
+            $current = $this->listing_bodies[$supported->get_id()]["inputs"]["import"]["sequence"];
+            $this->assertGreaterThan($sequence, $current, $refresh);
+            $sequence = $current;
+        }
+        $this->assertSame(9500, $this->profile["content"]["terms"]["shipping"]["coverage"]["zones"][0]["services"][0]["rate"]["price"]["amount"]["amount_minor"]);
+        $this->assertArrayNotHasKey($external->get_id(), $this->listing_bodies);
+        $this->assertArrayNotHasKey($grouped->get_id(), $this->listing_bodies);
+    }
+
+    public function test_uncertain_requests_survive_refreshes_and_rotation_before_current_facts_are_reacquired()
+    {
+        $this->zone();
+        $supported = $this->product();
+        $uncertain = $this->product();
+        $external = $this->unsupported(new WC_Product_External());
+        $this->check_versions = true;
+        $this->unreachable[$uncertain->get_id()] = true;
+        $publisher = new Shipping_Publisher();
+        $this->assertTrue($publisher->queue(self::SOURCE));
+        $state = $this->finish();
+        $this->assertSame("partial", $state["status"]);
+        $components = [];
+        foreach ([$uncertain, $external] as $product) {
+            array_push($components, $product->get_id() . ":selection", $product->get_id() . ":inputs");
+        }
+        $this->assertSame($components, self::deferred_components($state));
+        $retained = array_values(array_filter(array_column($state["deferred"], "pending")));
+        $this->assertSame(["selection", "inputs"], array_column($retained, "kind"));
+        $settings = get_option(Webhook_Manager::OPTION_SETTINGS);
+        $settings["access_token"] = self::TOKEN . "rotated";
+        update_option(Webhook_Manager::OPTION_SETTINGS, $settings, false);
+        $sent = count($this->item_writes($uncertain->get_id()));
+        $this->assertTrue($publisher->queue(self::SOURCE));
+        $state = $this->finish(100);
+        // Replay resent each exact request with the current token. Traversal
+        // sent nothing new for components still waiting on them; no component
+        // took another slot.
+        $this->assertSame("partial", $state["status"]);
+        $this->assertSame($components, self::deferred_components($state));
+        $this->assertSame(array_map("wp_json_encode", $retained), array_map("wp_json_encode", array_values(array_filter(array_column($state["deferred"], "pending")))));
+        $writes = array_slice($this->item_writes($uncertain->get_id()), $sent);
+        $this->assertCount(2 * Shipping_Publisher::MAX_ATTEMPTS, $writes);
+        foreach ($writes as $write) {
+            $this->assertSame("Bearer " . self::TOKEN . "rotated", $write->getHeaderLine("Authorization"));
+        }
+        foreach ($retained as $request) {
+            $bodies = $this->bodies_for($uncertain->get_id(), $request);
+            $this->assertCount(2 * Shipping_Publisher::MAX_ATTEMPTS, $bodies);
+            $this->assertSame(array_fill(0, count($bodies), $bodies[0]), $bodies);
+        }
+        // A scoped refresh does not acquire a component behind its retained request either.
+        $sent = count($this->item_writes($uncertain->get_id()));
+        $this->assertTrue($publisher->queue_items(self::SOURCE, [$uncertain->get_id()]));
+        $state = $this->finish();
+        $this->assertSame([], $state["targets"]);
+        $this->assertSame($components, self::deferred_components($state));
+        $this->assertCount($sent, $this->item_writes($uncertain->get_id()));
+        $this->unreachable = [];
+        $this->assertTrue($publisher->queue(self::SOURCE));
+        $state = $this->finish(100);
+        $this->assertSame("partial", $state["status"]);
+        $this->assertSame(array_slice($components, 2), self::deferred_components($state));
+        // The selection request committed on its exact replay, which made the
+        // retained inputs request stale: it was rejected and that component was
+        // reacquired. Only then did traversal acquire current facts for both.
+        $writes = array_map(static function ($write) { return json_decode((string) $write->getBody(), true)["import"]; }, array_slice($this->item_writes($uncertain->get_id()), $sent));
+        $this->assertCount(5, $writes);
+        $this->assertSame([self::import($retained[0])["requestKey"], self::import($retained[1])["requestKey"]], array_column(array_slice($writes, 0, 2), "requestKey"));
+        $this->assertCount(5, array_unique(array_column($writes, "requestKey")));
+        $sequences = array_column($writes, "sequence");
+        $ordered = $sequences;
+        sort($ordered);
+        $this->assertSame($ordered, $sequences);
+        $this->assertCount(5, array_unique($sequences));
+        $this->assertSame(array_slice($sequences, 3), [$this->listing_bodies[$uncertain->get_id()]["selection"]["import"]["sequence"], $this->listing_bodies[$uncertain->get_id()]["inputs"]["import"]["sequence"]]);
+        $this->assertArrayHasKey("inputs", $this->listing_bodies[$supported->get_id()]);
+    }
+
+    /** Every sent body carrying the exact request's key. */
+    private function bodies_for($id, array $request)
+    {
+        $key = self::import($request)["requestKey"];
+        $bodies = array_map(static function ($write) { return (string) $write->getBody(); }, $this->item_writes($id));
+        return array_values(array_filter($bodies, static function ($body) use ($key) { return json_decode($body, true)["import"]["requestKey"] === $key; }));
+    }
+
+    public function test_interrupted_replay_keeps_its_entry_when_duplicate_checkpoints_are_compacted()
+    {
+        $this->zone();
+        $listed = $this->product();
+        $external = $this->unsupported(new WC_Product_External());
+        $this->missing[$listed->get_id()] = true;
+        $publisher = new Shipping_Publisher();
+        $this->assertTrue($publisher->queue(self::SOURCE));
+        $state = $this->finish();
+        $components = [$listed->get_id() . ":selection", $listed->get_id() . ":inputs", $external->get_id() . ":selection", $external->get_id() . ":inputs"];
+        $this->assertSame($components, self::deferred_components($state));
+        // The catalog listing now exists, but the first replayed write loses its response.
+        $this->missing = [];
+        $this->lose_delivery = true;
+        $this->assertTrue($publisher->queue(self::SOURCE));
+        $limit = 10;
+        do {
+            $state = $this->tick();
+        } while (empty($state["pending"]) && --$limit > 0);
+        $this->assertTrue($state["replaying"]);
+        $this->assertSame([$listed->get_id(), "selection"], [$state["pending"]["item_id"], $state["pending"]["kind"]]);
+        $in_flight = $state["pending"];
+        // The worker stops before its retry runs, on a checkpoint carrying the
+        // duplicate request-less entries that release 0.3.0 accumulated.
+        as_unschedule_all_actions(Shipping_Publisher::ACTION_HOOK, null, Shipping_Publisher::ACTION_GROUP);
+        $state["deferred"] = array_merge($state["deferred"], $state["deferred"]);
+        update_option(Shipping_Publisher::state_option(self::SOURCE), $state, false);
+        $this->assertTrue($publisher->queue(self::SOURCE));
+        $resumed = $publisher->get_status(self::SOURCE);
+        $this->assertSame($components, self::deferred_components($resumed));
+        $this->assertSame(4, $resumed["retry_remaining"]);
+        $this->assertSame(wp_json_encode($in_flight), wp_json_encode($resumed["pending"]));
+        $state = $this->finish(100);
+        $this->assertSame("partial", $state["status"]);
+        $this->assertSame(array_slice($components, 2), self::deferred_components($state));
+        $key = self::import($in_flight)["requestKey"];
+        $sent = array_values(array_filter($this->item_writes($listed->get_id()), static function ($write) use ($key) { return str_contains((string) $write->getBody(), $key); }));
+        $this->assertCount(2, $sent);
+        $this->assertSame((string) $sent[0]->getBody(), (string) $sent[1]->getBody());
+        foreach (["selection", "inputs"] as $component) {
+            $this->assertGreaterThan(self::import($in_flight)["sequence"], $this->listing_bodies[$listed->get_id()][$component]["import"]["sequence"]);
+        }
+    }
+
+    public function test_definitely_rejected_request_is_not_retained_so_corrected_facts_publish()
+    {
+        $this->zone();
+        $product = $this->product();
+        $this->reject[$product->get_id()] = "EXPLICIT";
+        $publisher = new Shipping_Publisher();
+        $this->assertTrue($publisher->queue(self::SOURCE));
+        $state = $this->finish();
+        $this->assertSame("partial", $state["status"]);
+        // The backend answered, so nothing committed: keep the component only.
+        $this->assertSame([$product->get_id() . ":selection"], self::deferred_components($state));
+        $this->assertSame([null], array_column($state["deferred"], "pending"));
+        // The merchant corrects the product; only the corrected body is accepted.
+        $product->set_virtual(true);
+        $product->save();
+        $this->assertTrue($publisher->queue(self::SOURCE));
+        $this->assertSame("complete", $this->finish()["status"]);
+        $this->assertSame(["state" => "SET", "value" => ["kind" => "SUPPRESS_INHERITANCE"]], $this->listing_bodies[$product->get_id()]["selection"]["delivery"]["value"]["selection"]);
+    }
+
+    public function test_traversal_request_fills_a_request_less_entry_instead_of_taking_a_slot()
+    {
+        $this->zone();
+        $product = $this->product();
+        $this->missing[$product->get_id()] = true;
+        $publisher = new Shipping_Publisher();
+        $this->assertTrue($publisher->queue(self::SOURCE));
+        $limit = 20;
+        do {
+            $state = $this->tick();
+        } while (!$state["deferred"] && --$limit > 0);
+        $this->assertSame([$product->get_id() . ":selection"], self::deferred_components($state, true));
+        // A refresh requested mid-run restarts traversal without a replay pass.
+        // The listing exists now, but writes for it never arrive.
+        $this->missing = [];
+        $this->unreachable[$product->get_id()] = true;
+        $this->assertTrue($publisher->queue(self::SOURCE));
+        $state = $this->finish();
+        $this->assertSame("partial", $state["status"]);
+        $this->assertSame([$product->get_id() . ":selection", $product->get_id() . ":inputs"], self::deferred_components($state));
+        $writes = $this->item_writes($product->get_id());
+        $this->assertCount(2 * Shipping_Publisher::MAX_ATTEMPTS, $writes);
+        foreach ($state["deferred"] as $index => $entry) {
+            $this->assertSame(self::import($entry["pending"])["requestKey"], json_decode((string) $writes[$index * Shipping_Publisher::MAX_ATTEMPTS]->getBody(), true)["import"]["requestKey"]);
+        }
+    }
+
+    public function test_interrupted_replay_at_full_capacity_resends_its_request_without_reacquiring()
+    {
+        $this->zone();
+        $product = $this->product();
+        $this->unreachable[$product->get_id()] = true;
+        $publisher = new Shipping_Publisher();
+        $this->assertTrue($publisher->queue(self::SOURCE));
+        $limit = 10;
+        do {
+            $state = $this->tick();
+        } while (empty($state["pending"]) && --$limit > 0);
+        $request = $state["pending"];
+        $this->assertSame([$product->get_id(), "selection"], [$request["item_id"], $request["kind"]]);
+        // A worker died while replaying this request at the head of a full list.
+        // Exact requests retained for other listings fill the rest of the bound.
+        as_unschedule_all_actions(Shipping_Publisher::ACTION_HOOK, null, Shipping_Publisher::ACTION_GROUP);
+        $state["deferred"] = [["item_id" => $product->get_id(), "component" => "selection", "pending" => $request]];
+        for ($id = 1; count($state["deferred"]) < Shipping_Publisher::MAX_DEFERRED; $id++) {
+            $other = $request;
+            $other["item_id"] = PHP_INT_MAX - $id;
+            $other["arguments"][0] = (string) $other["item_id"];
+            $other["arguments"][1]["import"]["requestKey"] = "wc-shipping-retained-" . $id;
+            $state["deferred"][] = ["item_id" => $other["item_id"], "component" => "selection", "pending" => $other];
+        }
+        $state["replaying"] = true;
+        update_option(Shipping_Publisher::state_option(self::SOURCE), $state, false);
+        $this->assertTrue($publisher->queue(self::SOURCE));
+        $queued = $publisher->get_status(self::SOURCE);
+        $this->assertEmpty($queued["held_pending"] ?? null);
+        $this->assertSame(wp_json_encode($request), wp_json_encode($queued["pending"]));
+        $state = $this->finish(150);
+        $this->assertSame("partial", $state["status"]);
+        // The interrupted request still owns its component's only entry. No
+        // other request was acquired for that component while it stayed open.
+        $this->assertSame([$product->get_id() . ":selection", $product->get_id() . ":inputs"], self::deferred_components($state));
+        $this->assertSame(wp_json_encode($request), wp_json_encode($state["deferred"][0]["pending"]));
+        $selection = array_values(array_filter($this->item_writes($product->get_id()), static function ($write) {
+            return "UNCHANGED" !== json_decode((string) $write->getBody(), true)["delivery"]["value"]["selection"]["state"];
+        }));
+        $this->assertCount(1 + Shipping_Publisher::MAX_ATTEMPTS, $selection);
+        foreach ($selection as $write) {
+            $this->assertSame(self::import($request)["requestKey"], json_decode((string) $write->getBody(), true)["import"]["requestKey"]);
+        }
+    }
+
+    public function test_full_deferred_capacity_reuses_retained_components_and_stops_at_a_distinct_failure()
+    {
+        $this->zone();
+        $external = $this->unsupported(new WC_Product_External());
+        $supported = $this->product();
+        $uncertain = $this->product();
+        $this->unreachable[$uncertain->get_id()] = true;
+        $publisher = new Shipping_Publisher();
+        $this->assertTrue($publisher->queue(self::SOURCE));
+        // Retained work from earlier runs already fills the bound.
+        $state = $publisher->get_status(self::SOURCE);
+        for ($id = 1; count($state["deferred"]) < Shipping_Publisher::MAX_DEFERRED - 2; $id++) {
+            $state["deferred"][] = ["item_id" => PHP_INT_MAX - $id, "component" => "selection", "pending" => null];
+        }
+        foreach (["selection", "inputs"] as $component) {
+            $state["deferred"][] = ["item_id" => $external->get_id(), "component" => $component, "pending" => null];
+        }
+        update_option(Shipping_Publisher::state_option(self::SOURCE), $state, false);
+        $state = $this->finish();
+        $this->assertSame("partial", $state["status"]);
+        $this->assertCount(Shipping_Publisher::MAX_DEFERRED, $state["deferred"]);
+        $this->assertArrayHasKey("inputs", $this->listing_bodies[$supported->get_id()]);
+        // A distinct uncertain write needs a new slot: stop at its exact checkpoint.
+        $this->assertSame([$uncertain->get_id(), "selection", $supported->get_id()], [$state["item_id"], $state["component"], $state["cursor"]]);
+        $sent = array_map(static function ($write) { return (string) $write->getBody(); }, $this->item_writes($uncertain->get_id()));
+        $this->assertCount(Shipping_Publisher::MAX_ATTEMPTS, $sent);
+        $this->assertCount(1, array_unique($sent));
+        $wire = json_decode($sent[0], true)["import"];
+        $this->assertSame([self::import($state["pending"])["requestKey"], self::import($state["pending"])["sequence"]], [$wire["requestKey"], $wire["sequence"]]);
+        $this->assertNotContains($uncertain->get_id(), array_column($state["deferred"], "item_id"));
     }
 
     public function test_manual_component_ownership_preserves_other_item_inputs()
