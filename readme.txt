@@ -2,7 +2,7 @@
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.2
-Stable tag: 0.3.0
+Stable tag: 0.3.1
 Contributors: aurahistoria
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -144,6 +144,16 @@ No WooCommerce REST key/secret is needed or exported; the backend never calls th
 Rescheduling a published product for future publication clears its owned shipping components until it is published again. A failed local removal recheck retains the original request and bounded retries; only confirmed restoration cancels a pending removal.
 
 == Changelog ==
+
+= 0.3.1 =
+* Withdraws the Aura Historia listing when a product is permanently deleted, including forced REST/CRUD deletes, Empty Trash, the scheduled Trash purge and sites with Trash disabled.
+* Repairs the managed webhooks only on real drift. Routine WooCommerce delivery bookkeeping no longer pauses and re-syncs all three webhooks, and reactivating an auto-disabled webhook resets its failure count.
+* A removal refused because Trash already withdrew the listing no longer stalls shipping. Other products continue, the listing is never restored, and the settings page counts the affected products.
+* Keeps one deferred entry per unresolved shipping component, so periodic refreshes no longer fill the deferred limit with duplicates. Duplicates left by 0.3.0 are compacted.
+* Fixes the automatic OAuth start on the first settings page visit (`form.submit is not a function`).
+* The manual product backfill now states whether it started a fresh run, resumed interrupted work or left already queued work unchanged.
+* Opening a new product editor no longer queues failing shipping work for its auto-draft.
+* Starts WooCommerce integration at `init`, so early webhook synchronization no longer emits translation notices that break redirects.
 
 = 0.3.0 =
 * Bundles the production OAuth client ID and uses the production `/v1` API contract.
