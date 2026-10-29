@@ -1487,8 +1487,99 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $plugin = new Plugin();
         $result = $plugin->queue_manual_backfill();
 
-        $this->assertTrue($result);
+        $this->assertSame(Product_Backfill::START_FRESH, $result);
         $this->assertTrue($backfill->is_backfill_scheduled());
+        $this->assertSame(Product_Backfill::START_ALREADY_QUEUED, $plugin->queue_manual_backfill());
+    }
+
+    /**
+     * It reports a resumed interrupted batch, not a fresh run, after the manual action.
+     *
+     * @return void
+     */
+    public function test_manual_backfill_action_redirects_with_resumed_outcome()
+    {
+        $id = "ls_01jw7j4azge00800000000000g";
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "aurahistoria_abcdefghijk_verylongtokenvalue",
+            "secret" => "test-secret",
+        ], false);
+        $snapshot = [
+            "listing_source_id" => $id,
+            "page" => 1,
+            "product_count" => 1,
+            "payloads" => [["sourceListingId" => "123", "url" => "https://example.com/product", "images" => []]],
+            "idempotency_key" => "interrupted-key",
+            "retry_attempt" => 1,
+        ];
+        update_option(Product_Backfill::OPTION_BATCH, $snapshot, false);
+        as_unschedule_all_actions(Product_Backfill::ACTION_HOOK, null, Product_Backfill::ACTION_GROUP);
+
+        $allow_admin_host = static function ($hosts) {
+            $hosts[] = "merchant.example";
+            return $hosts;
+        };
+        $capture_redirect = static function ($location) {
+            throw new RuntimeException($location);
+        };
+        add_filter("allowed_redirect_hosts", $allow_admin_host);
+        add_filter("wp_redirect", $capture_redirect);
+        $_REQUEST["_wpnonce"] = wp_create_nonce("ahpc_queue_backfill");
+        $location = "";
+        try {
+            (new Plugin())->handle_backfill_request();
+        } catch (RuntimeException $redirect) {
+            $location = $redirect->getMessage();
+        } finally {
+            unset($_REQUEST["_wpnonce"]);
+            remove_filter("wp_redirect", $capture_redirect);
+            remove_filter("allowed_redirect_hosts", $allow_admin_host);
+        }
+
+        parse_str((string) wp_parse_url($location, PHP_URL_QUERY), $query);
+        $this->assertSame(Product_Backfill::START_RESUMED, $query["ahpc_backfill"] ?? "");
+        $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
+    }
+
+    /**
+     * It shows a distinct translatable notice for each manual backfill outcome.
+     *
+     * @return void
+     */
+    public function test_render_settings_page_shows_manual_backfill_outcome_notices()
+    {
+        $notices = [
+            Product_Backfill::START_FRESH => [
+                "success",
+                "A fresh full product backfill was queued.",
+            ],
+            Product_Backfill::START_RESUMED => [
+                "success",
+                "The interrupted product backfill was resumed with its saved batch unchanged; no fresh run was started.",
+            ],
+            Product_Backfill::START_ALREADY_QUEUED => [
+                "info",
+                "A product backfill is already queued or running, so it was left unchanged and no fresh run was started.",
+            ],
+        ];
+
+        foreach ($notices as $outcome => [$type, $message]) {
+            $output = $this->render_plugin_settings_page(["ahpc_backfill" => $outcome]);
+
+            $this->assertStringContainsString(
+                '<div class="notice notice-' . $type . ' inline"><p>' . $message,
+                $output,
+            );
+            // The single rendered outcome keeps the asynchronous-admission wording.
+            $this->assertSame(1, substr_count($output, "for asynchronous processing in the background"));
+
+            foreach ($notices as $other_outcome => [, $other_message]) {
+                if ($other_outcome !== $outcome) {
+                    $this->assertStringNotContainsString($other_message, $output);
+                }
+            }
+        }
     }
 
     /**
@@ -2325,7 +2416,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
 
         as_unschedule_all_actions(Product_Backfill::ACTION_HOOK, null, Product_Backfill::ACTION_GROUP);
         $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
-        $this->assertTrue($plugin->queue_manual_backfill());
+        $this->assertSame(Product_Backfill::START_RESUMED, $plugin->queue_manual_backfill());
         $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
         $this->assertTrue((bool) as_has_scheduled_action(
             Product_Backfill::ACTION_HOOK,
