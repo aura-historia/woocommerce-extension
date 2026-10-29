@@ -395,10 +395,12 @@ class Shipping_Publisher
             $state["committed_at"] = time();
             if (in_array($pending["kind"], ["selection", "inputs"], true)) {
                 global $wpdb;
+                // The listing accepted current facts, so this also replaces a
+                // withdrawn-listing marker left by an earlier refused removal.
                 // phpcs:ignore WordPress.DB.DirectDatabaseQuery.NoCaching -- The dynamic option and negative option caches are cleared by clear_option_cache() immediately below.
                 $indexed = $wpdb->query($wpdb->prepare(
-                    "INSERT IGNORE INTO {$wpdb->options} (option_name, option_value, autoload) SELECT %s, %s, 'no' FROM {$wpdb->options} AS lease WHERE lease.option_name = %s AND lease.option_value = %s",
-                    Shipping_Sync::MEMBER_PREFIX . $source . "_" . $pending["item_id"], (string) $pending["item_id"], $this->lock["name"], $this->lock["value"]
+                    "INSERT INTO {$wpdb->options} (option_name, option_value, autoload) SELECT %s, %s, 'no' FROM {$wpdb->options} AS lease WHERE lease.option_name = %s AND lease.option_value = %s ON DUPLICATE KEY UPDATE option_value = %s",
+                    Shipping_Sync::MEMBER_PREFIX . $source . "_" . $pending["item_id"], (string) $pending["item_id"], $this->lock["name"], $this->lock["value"], (string) $pending["item_id"]
                 ));
                 self::clear_option_cache(Shipping_Sync::MEMBER_PREFIX . $source . "_" . $pending["item_id"]);
                 $this->assert_lock($source);
@@ -810,7 +812,17 @@ class Shipping_Publisher
         }
         $pending = $state["pending"];
         $active_item = !empty($state["replaying"]) ? $state["deferred"][0] : (!empty($state["targeting"]) ? $state["targets"][0] : null);
-        $kind = $pending["kind"] ?? ($active_item["component"] ?? ("items" === $state["phase"] ? $state["component"] : $state["phase"]));
+        // A removal is prepared ahead of traversal; its failed acquisition
+        // belongs to that removal, never to the traversal checkpoint.
+        $removal = !empty($state["removing"]) && !empty($state["removals"]) ? $state["removals"][0] : null;
+        $kind = $pending["kind"] ?? ($removal ? "remove_" . $removal["component"] : ($active_item["component"] ?? ("items" === $state["phase"] ? $state["component"] : $state["phase"])));
+        // A withdrawn catalog listing is a lifecycle state, not a stale revision:
+        // a fresh revision alone cannot make this write succeed.
+        $withdrawn = 409 === ($data["response_code"] ?? 0) && "PRODUCT_LISTING_WITHDRAWN" === $code;
+        if ($withdrawn && str_starts_with($kind, "remove_")) {
+            $this->retain_withdrawn($state);
+            return;
+        }
         if ("SHIPPING_IMPORT_OWNERSHIP_CONFLICT" === $code) {
             if (in_array($kind, ["profile", "restore"], true)) {
                 $state["status"] = "needs_review";
@@ -824,7 +836,7 @@ class Shipping_Publisher
             $this->schedule($state);
             return;
         }
-        if (409 === ($data["response_code"] ?? 0)) {
+        if (409 === ($data["response_code"] ?? 0) && !$withdrawn) {
             // A definite rejection is not an uncertain response. Discard the old
             // payload; the next attempt reacquires local facts and remote state.
             $state["pending"] = null;
@@ -846,6 +858,9 @@ class Shipping_Publisher
             $this->schedule($state, self::RETRY_DELAY);
             return;
         }
+        // A published item's withdrawn listing, for example a restoration the
+        // catalog has not applied yet, waits like a missing listing: bounded
+        // retries, then only its component is retained for replay.
         $state["attempt"]++;
         if ($state["attempt"] < self::MAX_ATTEMPTS) {
             $this->schedule($state, self::RETRY_DELAY * $state["attempt"]);
@@ -880,6 +895,37 @@ class Shipping_Publisher
         }
         $state["status"] = "failed";
         $this->save($state);
+    }
+
+    /**
+     * Aura refused to clear an owned component because the catalog listing is
+     * withdrawn, and shipping never restores a listing to make that possible.
+     * Nothing committed: the previous assertion stays with the withdrawn
+     * listing. Mark its identity instead of claiming the removal, and continue
+     * with other products. A later local removal retries it; a committed
+     * acquisition after restoration replaces the marker.
+     */
+    private function retain_withdrawn(array &$state)
+    {
+        global $wpdb;
+        $removal = $state["removals"][0];
+        $name = Shipping_Sync::MEMBER_PREFIX . $state["source"] . "_" . $removal["id"];
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.NoCaching -- The dynamic option and negative option caches are cleared by clear_option_cache() immediately below.
+        $marked = $wpdb->query($wpdb->prepare(
+            "UPDATE {$wpdb->options} AS member INNER JOIN {$wpdb->options} AS lease ON lease.option_name = %s SET member.option_value = %s WHERE member.option_name = %s AND lease.option_value = %s",
+            $this->lock["name"], $removal["id"] . Shipping_Sync::MEMBER_WITHDRAWN, $name, $this->lock["value"]
+        ));
+        self::clear_option_cache($name);
+        $this->assert_lock($state["source"]);
+        if (false === $marked) {
+            throw new \RuntimeException("shipping_membership_checkpoint_failed");
+        }
+        array_shift($state["removals"]);
+        $state["pending"] = null;
+        $state["removing"] = false;
+        $state["attempt"] = 0;
+        $state["conflicts"] = 0;
+        $this->schedule($state);
     }
 
     /**

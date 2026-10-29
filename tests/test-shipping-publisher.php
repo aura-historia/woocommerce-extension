@@ -42,6 +42,7 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
     private $products = [];
     private $classes = [];
     private $receipts = [];
+    private $withdrawn = [];
 
     public static function wpSetUpBeforeClass($factory)
     {
@@ -62,6 +63,7 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
         add_filter("ahpc_backend_base_url", [$this, "base_url"]);
         add_filter("ahpc_backend_guzzle_client", [$this, "http_client"]);
         add_filter("pre_http_request", [$this, "block_outbound"], 10, 3);
+        add_filter("pre_http_request", [$this, "catalog"], 20, 3);
     }
 
     public function tearDown(): void
@@ -69,6 +71,7 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
         remove_filter("ahpc_backend_base_url", [$this, "base_url"]);
         remove_filter("ahpc_backend_guzzle_client", [$this, "http_client"]);
         remove_filter("pre_http_request", [$this, "block_outbound"], 10);
+        remove_filter("pre_http_request", [$this, "catalog"], 20);
         (new Webhook_Manager())->delete_webhooks();
         foreach ($this->zones as $zone) {
             $zone->delete(true);
@@ -95,6 +98,19 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
     public function block_outbound($preempt, $args, $url)
     {
         return new WP_Error("outbound_blocked", "Unexpected outbound request in shipping tests.");
+    }
+
+    /** Signed managed product deliveries: deletion withdraws the catalog listing, an update restores it. */
+    public function catalog($preempt, $args, $url)
+    {
+        if (Webhook_Manager::get_webhook_endpoint_url(self::SOURCE) !== $url) {
+            return $preempt;
+        }
+        $headers = array_change_key_case($args["headers"], CASE_LOWER);
+        $this->assertSame(base64_encode(hash_hmac("sha256", $args["body"], "signature-only", true)), $headers["x-wc-webhook-signature"]);
+        $this->assertSame("Bearer " . self::TOKEN, $headers["authorization"]);
+        $this->withdrawn[json_decode($args["body"], true)["id"]] = "product.deleted" === $headers["x-wc-webhook-topic"];
+        return ["headers" => [], "body" => "", "response" => ["code" => 202, "message" => "Accepted"], "cookies" => [], "filename" => null];
     }
 
     public function http_client($client)
@@ -134,6 +150,9 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
             $this->assertStringNotContainsString("signature-only", (string) $request->getBody());
             $this->assertStringNotContainsString(self::TOKEN, (string) $request->getBody());
         }
+        if (str_ends_with($path, "/ingestion-configurations/woocommerce") && "PUT" === $method) {
+            return new Response(204);
+        }
         if (str_ends_with($path, "/shipping-profiles") && "GET" === $method) {
             parse_str($request->getUri()->getQuery(), $query);
             $this->assertSame(Shipping_Mapper::OBJECT_KEY, $query["objectKey"]);
@@ -172,6 +191,10 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
             $version = $this->versions[$id] ?? 1;
             if ("GET" === $method) {
                 return $this->reply(["productListingId" => self::LISTING, "expectedVersion" => $version, "delivery" => null]);
+            }
+            // A withdrawn listing stays readable, but commands never change or restore it.
+            if (!empty($this->withdrawn[$id])) {
+                return $this->reply(["error" => "PRODUCT_LISTING_WITHDRAWN"], 409);
             }
             if (!empty($this->unreachable[$id])) {
                 throw new ConnectException("write not received", $request);
@@ -1000,6 +1023,127 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
         $this->assertArrayHasKey("observation", $body["inputs"]["import"]);
     }
 
+    public function test_trash_after_catalog_withdrawal_retains_refused_cleanup_while_unrelated_item_progresses()
+    {
+        $this->zone();
+        $trashed = $this->product();
+        $id = $trashed->get_id();
+        update_option(Webhook_Manager::OPTION_WEBHOOK_USER_ID, get_current_user_id(), false);
+        $this->assertTrue((new Webhook_Manager())->sync_webhooks());
+        $this->start_ongoing();
+        $member = Shipping_Sync::MEMBER_PREFIX . self::SOURCE . "_" . $id;
+        $this->assertSame((string) $id, get_option($member));
+        $imported = $this->listing_bodies[$id];
+        // An unrelated product waits inside a requested full traversal.
+        $unrelated = $this->product();
+        $publisher = new Shipping_Publisher();
+        $this->assertTrue($publisher->queue(self::SOURCE));
+        // Real Trash: the managed product.deleted delivery withdraws the listing first.
+        $this->catalog_request(static function () use ($trashed) { $trashed->delete(false); });
+        $this->assertSame("trash", get_post_status($id));
+        $this->assertTrue($this->withdrawn[$id]);
+        $sent = count($this->item_writes($id));
+        $this->drain_changes();
+        $state = $this->finish();
+        $this->assertSame("complete", $state["status"]);
+        $this->assertSame([], $state["removals"]);
+        $this->assertSame(0, $state["conflicts"]);
+        $this->assertSame(["state" => "SET", "value" => ["kind" => "EXPLICIT", "profile_id" => self::PROFILE]], $this->listing_bodies[$unrelated->get_id()]["selection"]["delivery"]["value"]["selection"]);
+        $this->assertSame("SET", $this->listing_bodies[$unrelated->get_id()]["inputs"]["delivery"]["value"]["rateInputs"]["state"]);
+        // One refused clear, not a revision-conflict loop. Nothing claims it
+        // committed: the identity stays retained with an explicit marker.
+        $refused = array_slice($this->item_writes($id), $sent);
+        $this->assertCount(1, $refused);
+        $this->assertSame(["state" => "CLEAR"], json_decode((string) $refused[0]->getBody(), true)["delivery"]["value"]["selection"]);
+        $this->assertSame($imported, $this->listing_bodies[$id]);
+        $this->assertSame($id . Shipping_Sync::MEMBER_WITHDRAWN, get_option($member));
+        $this->assertSame(1, (new Shipping_Sync())->status()["withdrawn"]);
+        $this->assertTrue($this->withdrawn[$id]);
+        foreach ($this->requests as $request) {
+            $this->assertStringNotContainsString("/product-listings/async", (string) $request->getUri());
+        }
+        $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH));
+        // Periodic reconciliation does not resend the refused clear.
+        $binding = Shipping_Sync::binding();
+        do_action(Shipping_Sync::RECONCILE_HOOK, $binding["source"], $binding["generation"]);
+        foreach (as_get_scheduled_actions(["hook" => Shipping_Sync::SWEEP_HOOK, "group" => Shipping_Publisher::ACTION_GROUP, "status" => ActionScheduler_Store::STATUS_PENDING]) as $action) {
+            do_action_ref_array(Shipping_Sync::SWEEP_HOOK, $action->get_args());
+        }
+        $this->assertSame(["configuration"], $this->dirty_scopes());
+        $this->drain_changes();
+        $this->assertSame("complete", $this->finish()["status"]);
+        $this->assertCount($sent + 1, $this->item_writes($id));
+        // Restore from Trash: the product.updated delivery restores the listing,
+        // and shipping reacquires both components.
+        $this->catalog_request(static function () use ($id) { wp_untrash_post($id); });
+        $this->products[] = wc_get_product($id);
+        $this->assertSame("publish", get_post_status($id));
+        $this->assertFalse($this->withdrawn[$id]);
+        $this->drain_changes();
+        $this->assertSame("complete", $this->finish()["status"]);
+        $body = $this->listing_bodies[$id];
+        $this->assertSame(["state" => "SET", "value" => ["kind" => "EXPLICIT", "profile_id" => self::PROFILE]], $body["selection"]["delivery"]["value"]["selection"]);
+        $this->assertGreaterThan($imported["inputs"]["import"]["sequence"], $body["inputs"]["import"]["sequence"]);
+        $this->assertArrayHasKey("observation", $body["inputs"]["import"]);
+        $this->assertSame((string) $id, get_option($member));
+        $this->assertSame(0, (new Shipping_Sync())->status()["withdrawn"]);
+    }
+
+    public function test_publication_to_a_withdrawn_listing_waits_like_catalog_lag_without_stalling_the_source()
+    {
+        $this->zone();
+        $lagging = $this->product();
+        $other = $this->product();
+        // Restored locally; the catalog has not applied the restoration yet.
+        $this->withdrawn[$lagging->get_id()] = true;
+        $publisher = new Shipping_Publisher();
+        $this->assertTrue($publisher->queue(self::SOURCE));
+        $state = $this->finish();
+        $this->assertSame("partial", $state["status"]);
+        $this->assertSame(0, $state["conflicts"]);
+        $this->assertSame([$lagging->get_id() . ":selection", $lagging->get_id() . ":inputs"], self::deferred_components($state));
+        $this->assertSame([null, null], array_column($state["deferred"], "pending"));
+        $this->assertArrayHasKey("inputs", $this->listing_bodies[$other->get_id()]);
+        // A lifecycle rejection retries boundedly and never restarts the shared profile.
+        $this->assertCount(2 * Shipping_Publisher::MAX_ATTEMPTS, $this->item_writes($lagging->get_id()));
+        $this->assertSame(1, $this->profile["managementRevision"]);
+        $this->withdrawn = [];
+        $this->assertTrue($publisher->queue(self::SOURCE));
+        $this->assertSame("complete", $this->finish()["status"]);
+        $this->assertArrayHasKey("inputs", $this->listing_bodies[$lagging->get_id()]);
+    }
+
+    public function test_failed_read_before_a_removal_request_fails_closed_without_touching_traversal()
+    {
+        global $wpdb;
+        $product = $this->product();
+        $id = $product->get_id();
+        $this->start_ongoing();
+        $sent = count($this->item_writes($id));
+        $product->set_status("trash");
+        $product->save();
+        $this->drain_changes();
+        $failed_read = static function ($sql) use ($wpdb, $id) {
+            return str_contains($sql, "SELECT * FROM {$wpdb->posts} WHERE ID = " . $id) ? "SELECT * FROM ahpc_missing_shipping_test_table" : $sql;
+        };
+        $suppressed = $wpdb->suppress_errors(true);
+        add_filter("query", $failed_read);
+        try { $state = $this->finish(); } finally {
+            remove_filter("query", $failed_read);
+            $wpdb->suppress_errors($suppressed);
+        }
+        // Absence was never confirmed: the unsent removal owns its failure.
+        $this->assertSame("failed", $state["status"]);
+        $this->assertSame("ahpc_shipping_removal_not_confirmed", $state["last_error"]);
+        $this->assertSame([["id" => $id, "component" => "selection"]], $state["removals"]);
+        $this->assertSame([], $state["deferred"]);
+        $this->assertSame([0, "selection"], [$state["item_id"], $state["component"]]);
+        $this->assertCount($sent, $this->item_writes($id));
+        $this->assertTrue((new Shipping_Publisher())->queue(self::SOURCE));
+        $this->assertSame("complete", $this->finish()["status"]);
+        $this->assertSame("CLEAR", $this->listing_bodies[$id]["inputs"]["delivery"]["value"]["rateInputs"]["state"]);
+    }
+
     public function test_cursor_survives_earlier_deletion_and_run_has_fixed_upper_bound()
     {
         $first = $this->product();
@@ -1103,6 +1247,33 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
         $this->assertArrayNotHasKey("observation", json_decode((string) $restores[0]->getBody(), true)["import"]);
         $this->assertSame(self::PROFILE, $publisher->get_status(self::SOURCE)["profile_id"]);
         $this->assertSame("ACTIVE", $this->profile["lifecycle"]);
+    }
+
+    /** One request with the managed webhooks enqueued and delivered at its end. */
+    private function catalog_request(callable $change)
+    {
+        $webhooks = [];
+        foreach (WC_Data_Store::load("webhook")->get_webhooks_ids("active") as $webhook_id) {
+            $webhook = new WC_Webhook($webhook_id);
+            $webhook->enqueue();
+            $webhooks[] = $webhook;
+        }
+        $GLOBALS["wc_queued_webhooks"] = [];
+        add_filter("woocommerce_webhook_deliver_async", "__return_false");
+        try {
+            $change();
+            wc_webhook_execute_queue();
+            // WooCommerce saves a delivered webhook; the next request's boot resynchronizes it.
+            $this->assertTrue((new Webhook_Manager())->maybe_sync_webhooks());
+        } finally {
+            remove_filter("woocommerce_webhook_deliver_async", "__return_false");
+            $GLOBALS["wc_queued_webhooks"] = [];
+            foreach ($webhooks as $webhook) {
+                foreach ($webhook->get_hooks() as $hook) {
+                    remove_action($hook, [$webhook, "process"]);
+                }
+            }
+        }
     }
 
     private function drain_changes()

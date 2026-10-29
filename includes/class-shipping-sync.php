@@ -22,6 +22,8 @@ class Shipping_Sync
     const OPTION_ERROR = "ahpc_shipping_queue_error";
     const DIRTY_PREFIX = "ahpc_shipping_dirty_";
     const MEMBER_PREFIX = "ahpc_shipping_member_";
+    /** Membership value suffix: Aura refused the removal because the listing is withdrawn. */
+    const MEMBER_WITHDRAWN = ":withdrawn";
     const INTERVAL = 21600;
     const PAGE_SIZE = 20;
 
@@ -375,7 +377,9 @@ class Shipping_Sync
         }
         foreach ($rows as $row) {
             $id = (int) $row["option_value"];
-            if (Shipping_Publisher::confirmed_removed($id)) {
+            // A removal refused for a withdrawn listing was not missed. Scanning
+            // it again would only resend the refused clear; local changes still do.
+            if (!str_ends_with($row["option_value"], self::MEMBER_WITHDRAWN) && Shipping_Publisher::confirmed_removed($id)) {
                 $this->mark("item_" . $id);
             }
             $cursor = (int) $row["option_id"];
@@ -387,9 +391,14 @@ class Shipping_Sync
 
     public function status()
     {
+        global $wpdb;
         $binding = self::binding();
         $rows = !empty($binding["enabled"]) ? $this->rows($binding, 1) : [];
-        return ["oldest_pending" => $rows ? (int) $rows[0]["option_value"] : 0, "error" => (string) get_option(self::OPTION_ERROR, "")];
+        $withdrawn = Webhook_Manager::is_valid_listing_source_id($binding["source"] ?? "") ? (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name LIKE %s AND option_value LIKE %s",
+            $wpdb->esc_like(self::MEMBER_PREFIX . $binding["source"] . "_") . "%", "%" . $wpdb->esc_like(self::MEMBER_WITHDRAWN)
+        )) : 0;
+        return ["oldest_pending" => $rows ? (int) $rows[0]["option_value"] : 0, "error" => (string) get_option(self::OPTION_ERROR, ""), "withdrawn" => $withdrawn];
     }
 
     public static function stop()
