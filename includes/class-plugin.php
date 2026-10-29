@@ -241,7 +241,7 @@ class Plugin
 
         add_action(
             "woocommerce_webhook_updated",
-            [$this, "maybe_mark_managed_webhook_out_of_sync"],
+            [$this, "maybe_mark_edited_managed_webhook_out_of_sync"],
             10,
             1,
         );
@@ -1119,7 +1119,30 @@ class Plugin
     }
 
     /**
-     * Marks the plugin webhooks as out of sync after a manual edit or deletion.
+     * Marks the plugin webhooks as out of sync after a managed field changed.
+     * WooCommerce also saves a webhook after every delivery, so a save alone
+     * is no reason to stage the webhooks paused and repeat the backend PUT.
+     *
+     * @param int $webhook_id Webhook ID.
+     * @return void
+     */
+    public function maybe_mark_edited_managed_webhook_out_of_sync($webhook_id)
+    {
+        if (!$this->manager instanceof Webhook_Manager) {
+            return;
+        }
+
+        if ($this->manager->is_syncing()) {
+            return;
+        }
+
+        if ($this->manager->has_managed_webhook_drift($webhook_id)) {
+            $this->manager->mark_sync_required();
+        }
+    }
+
+    /**
+     * Marks the plugin webhooks as out of sync after a deletion.
      *
      * @param int             $webhook_id Webhook ID.
      * @param \WC_Webhook|null $webhook   Optional webhook instance.

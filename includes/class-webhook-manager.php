@@ -1022,6 +1022,13 @@ class Webhook_Manager
         if (method_exists($webhook, "set_pending_delivery")) {
             $webhook->set_pending_delivery(false);
         }
+
+        // Activation restores WooCommerce's full failure allowance. A webhook
+        // it disabled after repeated failures would otherwise keep its count,
+        // and a single further failure would disable it and force another sync.
+        if ("active" === $status) {
+            $webhook->set_failure_count(0);
+        }
     }
 
     /**
@@ -1189,6 +1196,62 @@ class Webhook_Manager
         return $loaded_webhook
             ? $this->is_managed_webhook($loaded_webhook)
             : false;
+    }
+
+    /**
+     * Returns whether a saved webhook needs the sync to repair it. WooCommerce
+     * also saves a webhook after every delivery to track its failure count,
+     * so only the fields the sync applies count, never failure counts,
+     * pending deliveries or dates.
+     *
+     * @param int $webhook_id Webhook ID.
+     * @return bool
+     */
+    public function has_managed_webhook_drift($webhook_id)
+    {
+        $webhook_id = absint($webhook_id);
+        $webhook_ids = $this->get_webhook_ids();
+        $topic = $webhook_id ? array_search($webhook_id, $webhook_ids, true) : false;
+
+        if (false === $topic) {
+            // The sync adopts an untracked managed webhook only in place of a
+            // missing tracked one, and never changes a same-named copy.
+            $webhook = $this->load_webhook($webhook_id);
+            if (!$webhook || !$this->is_managed_webhook($webhook)) {
+                return false;
+            }
+
+            $managed_webhook = $this->load_managed_webhook($webhook->get_topic("edit"), $webhook_ids);
+
+            return $managed_webhook && $webhook_id === absint($managed_webhook->get_id());
+        }
+
+        // Only a successful last sync leaves the configuration below in place.
+        if ("no" !== get_option(self::OPTION_NEEDS_SYNC, "yes")) {
+            return true;
+        }
+
+        $webhook = $this->load_webhook($webhook_id);
+        if (!$webhook) {
+            return true;
+        }
+
+        // Apply the sync's configuration without saving it. WooCommerce only
+        // records a change for a raw value that differs from the stored one.
+        $settings = $this->get_settings();
+        $this->apply_managed_webhook_configuration(
+            $webhook,
+            $topic,
+            "" !== $settings["listing_source_id"] && "" !== $settings["access_token"]
+                ? "active"
+                : "paused",
+            self::get_webhook_endpoint_url($settings["listing_source_id"]),
+            $settings["secret"],
+            $this->resolve_webhook_user_id(),
+        );
+        $managed_fields = ["name", "topic", "status", "delivery_url", "secret", "user_id", "api_version"];
+
+        return [] !== array_intersect_key($webhook->get_changes(), array_flip($managed_fields));
     }
 
     /**
