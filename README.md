@@ -86,7 +86,7 @@ Managed webhook topics:
 
 | Item | Value |
 | --- | --- |
-| Plugin version | `0.3.0` |
+| Plugin version | `0.3.1` |
 | WordPress | `6.5+` |
 | WooCommerce | Required |
 | PHP | `8.2+` |
@@ -452,7 +452,7 @@ For WordPress.org submission, use the clean release tree or equivalent release c
 
 The production OAuth registration and broker credentials are provisioned. The current webapp already selects ListingSources and uses `/v1/oauth/token`; the plugin requests `requires_listing_source_id=true` and consumes `listing_source_id`. Preserve the matching production client ID and server-side secret when redeploying the webapp. The broker uses the production client secret through its server-side Worker binding; never include that secret in the plugin.
 
-Before publishing `0.3.0`, complete the deferred real-store connection check: consent and callback, provider configuration, three active signed product webhooks, initial catalog admission, shipping publication and disconnect/deactivation cleanup. The release-preparation checks deliberately do not install WordPress or execute that flow. A matching Git version tag triggers the WordPress.org deployment workflow; `WP_ORG_USERNAME` and `WP_ORG_PASSWORD` must be configured in repository secrets.
+Before publishing `0.3.1`, complete the deferred real-store connection check: consent and callback, provider configuration, three active signed product webhooks, initial catalog admission, shipping publication and disconnect/deactivation cleanup. The release-preparation checks deliberately do not install WordPress or execute that flow. A matching Git version tag triggers the WordPress.org deployment workflow; `WP_ORG_USERNAME` and `WP_ORG_PASSWORD` must be configured in repository secrets.
 
 ## License
 
