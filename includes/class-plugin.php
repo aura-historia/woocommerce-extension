@@ -2100,6 +2100,13 @@ class Plugin
                 esc_html__('Processed products: %1$d. Deferred components: %2$d. Protected manual edits: %3$d.', "aura-historia-partner-connect"),
                 (int) ($state["processed"] ?? 0), count($state["deferred"] ?? []), (int) ($state["protected"] ?? 0)
             ) . '</p>';
+            if ($queue["withdrawn"]) {
+                echo '<p>' . sprintf(
+                    /* translators: %d: removed products whose last shipping remains on their withdrawn listing. */
+                    esc_html__('Removed products whose last shipping stays with their withdrawn listing: %d. Aura Historia does not change withdrawn listings, and shipping imports never restore one. Restoring a product from the Trash imports its current shipping.', "aura-historia-partner-connect"),
+                    (int) $queue["withdrawn"]
+                ) . '</p>';
+            }
             if (!empty($state["limitations"])) {
                 echo '<p>' . esc_html__("Some rates need checkout context and remain uncertain. See the documented shipping support matrix.", "aura-historia-partner-connect") . '</p>';
             }

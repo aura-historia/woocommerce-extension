@@ -90,6 +90,7 @@ That means:
 - Keep catalog backfill separate from live webhooks and shipping publication. Shipping must never restart catalog CREATE work.
 - Shipping uses the pinned API contract, stable profile identity, immutable retry requests, actual acquisition times and `observation: {}`; do not add expiry fields or a backend-to-plugin callback.
 - Failed or incomplete shipping reads preserve existing assertions. Respect component ownership and reacquire after conflicts; use the shared publisher source lock and ordering for all shipping work.
+- `PRODUCT_LISTING_WITHDRAWN` is a catalog lifecycle state, not a revision conflict. Never restore or recreate a listing to clear its shipping, and never report a refused removal as committed.
 
 ## Local development and tests
 
