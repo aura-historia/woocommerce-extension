@@ -5,6 +5,7 @@
  * @package AuraHistoria\PartnerConnect
  */
 
+use AuraHistoria\PartnerConnect\Plugin;
 use AuraHistoria\PartnerConnect\Webhook_Manager;
 use GuzzleHttp\Client;
 use GuzzleHttp\HandlerStack;
@@ -199,7 +200,7 @@ class Test_AHPC_Product_Deletion extends WP_UnitTestCase
         $parent->set_status("publish");
         $parent->save();
         $variation_ids = [];
-        foreach (["20", "30"] as $price) {
+        foreach (["20", "30", "40"] as $price) {
             $variation = new WC_Product_Variation();
             $variation->set_parent_id($parent->get_id());
             $variation->set_status("publish");
@@ -223,6 +224,14 @@ class Test_AHPC_Product_Deletion extends WP_UnitTestCase
     {
         clean_post_cache($post_id);
         $this->assertNull(get_post($post_id));
+    }
+
+    public function test_boot_registers_deletion_hooks_before_woocommerce_loads_webhooks()
+    {
+        // WooCommerce resolves topic hooks on init; boot() runs on plugins_loaded.
+        Plugin::instance()->boot();
+        $this->assertSame(10, has_filter("woocommerce_webhook_topic_hooks", [Webhook_Manager::class, "add_permanent_deletion_hook"]));
+        $this->assertSame(10, has_action("deleted_post", [Webhook_Manager::class, "announce_permanent_deletion"]));
     }
 
     public function test_rest_force_delete_withdraws_published_product_without_trash()
@@ -329,6 +338,11 @@ class Test_AHPC_Product_Deletion extends WP_UnitTestCase
         $this->assertSame([], $this->summarize($this->finish_request(), "product.deleted"));
         $this->assert_absent($variation_ids[1]);
 
+        // Trash keeps WooCommerce's deletion for the variation's own ID.
+        $this->start_request();
+        $this->rest_delete("/wc/v3/products/" . $parent_id . "/variations/" . $variation_ids[2], false);
+        $this->assertNotContains($this->deletion($parent_id), $this->summarize($this->finish_request(), "product.deleted"));
+
         clean_post_cache($parent_id);
         $this->assertSame("publish", get_post_status($parent_id));
     }
@@ -376,7 +390,8 @@ class Test_AHPC_Product_Deletion extends WP_UnitTestCase
         $this->assertContains(Webhook_Manager::PRODUCT_DELETED_HOOK, (new WC_Webhook($managed_ids["product.deleted"]))->get_hooks());
         $this->assertContains("wp_trash_post", (new WC_Webhook($managed_ids["product.deleted"]))->get_hooks());
         $this->assertNotContains(Webhook_Manager::PRODUCT_DELETED_HOOK, (new WC_Webhook($managed_ids["product.updated"]))->get_hooks());
-        $this->assertSame(["wp_trash_post"], (new WC_Webhook($merchant->get_id()))->get_hooks());
+        $this->assertContains("wp_trash_post", (new WC_Webhook($merchant->get_id()))->get_hooks());
+        $this->assertNotContains(Webhook_Manager::PRODUCT_DELETED_HOOK, (new WC_Webhook($merchant->get_id()))->get_hooks());
 
         $kept_id = $this->published_product("Kept fixture");
         $deleted_id = $this->published_product();
@@ -401,16 +416,48 @@ class Test_AHPC_Product_Deletion extends WP_UnitTestCase
         );
     }
 
-    public function test_paused_managed_webhook_does_not_deliver_permanent_deletion()
+    public function test_action_scheduler_delivers_queued_permanent_deletion()
     {
+        // WooCommerce's default: queue at shutdown, deliver from Action Scheduler.
+        add_filter("woocommerce_webhook_deliver_async", "__return_true", 99);
+        $managed_id = (new Webhook_Manager())->get_webhook_ids()["product.deleted"];
         $product_id = $this->published_product();
-        (new Webhook_Manager())->pause_webhooks();
 
         $this->start_request();
-        wc_get_product($product_id)->delete(true);
-
-        $this->assert_absent($product_id);
+        $this->rest_delete("/wc/v3/products/" . $product_id, true);
         $this->assertSame([], $this->finish_request());
+        $action_ids = $this->pending_deliveries($managed_id, $product_id);
+        $this->assertCount(1, $action_ids);
+
+        $this->deliveries = [];
+        ActionScheduler::store()->fetch_action(reset($action_ids))->execute();
+        $this->assertSame([$this->deletion($product_id)], $this->summarize($this->deliveries));
+        $this->assert_signed_deletion($this->deliveries[0], $product_id);
+
+        // A still pending Trash delivery absorbs the permanent deletion.
+        $trashed_id = $this->published_product("Pending trash fixture");
+        $this->start_request();
+        wc_get_product($trashed_id)->delete(false);
+        $this->finish_request();
+        $this->start_request();
+        $this->rest_delete("/wc/v3/products/" . $trashed_id, true);
+        $this->finish_request();
+        $this->assertCount(1, $this->pending_deliveries($managed_id, $trashed_id));
+    }
+
+    /**
+     * @param int $webhook_id Webhook ID.
+     * @param int $product_id Product ID.
+     * @return int[] Pending WooCommerce delivery action IDs.
+     */
+    private function pending_deliveries($webhook_id, $product_id)
+    {
+        return as_get_scheduled_actions([
+            "hook" => "woocommerce_deliver_webhook_async",
+            "args" => ["webhook_id" => $webhook_id, "arg" => $product_id],
+            "group" => "woocommerce-webhooks",
+            "status" => ActionScheduler_Store::STATUS_PENDING,
+        ], "ids");
     }
 
     /**

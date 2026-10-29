@@ -270,7 +270,9 @@ class Webhook_Manager
      * Announces a parent product whose row WordPress has actually deleted;
      * deleted_post never fires for a failed delete, so an unreadable or still
      * present product is never reported. Variations have no listing of their
-     * own, and deleting one must not withdraw its published parent.
+     * own, and deleting one must not withdraw its published parent. After
+     * switch_to_blog() the deleted ID belongs to another site's catalog, while
+     * the loaded webhooks still deliver to the current site's source.
      *
      * @param int          $post_id Deleted post ID.
      * @param \WP_Post|null $post   Deleted post as read before deletion.
@@ -279,6 +281,7 @@ class Webhook_Manager
     public static function announce_permanent_deletion($post_id, $post = null)
     {
         if (
+            (is_multisite() && ms_is_switched()) ||
             !$post instanceof \WP_Post ||
             absint($post_id) !== (int) $post->ID ||
             "product" !== $post->post_type ||
