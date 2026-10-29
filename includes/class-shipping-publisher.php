@@ -178,7 +178,9 @@ class Shipping_Publisher
                     "item_id" => 0, "component" => "selection", "pending" => null, "deferred" => [], "traversed" => false,
                     "processed" => 0, "protected" => 0, "failed" => 0, "attempt" => 0, "conflicts" => 0, "limitations" => [], "last_error" => "", "retry_remaining" => 0];
             } elseif ($refresh && !empty($state["deferred"])) {
-                if (!empty($state["pending"]) && count($state["deferred"]) >= self::MAX_DEFERRED) {
+                $state["deferred"] = self::compact_deferred($state["deferred"]);
+                // An interrupted replay already owns the head entry; resend it first.
+                if (!empty($state["pending"]) && empty($state["replaying"]) && count($state["deferred"]) >= self::MAX_DEFERRED) {
                     $state["held_pending"] = $state["pending"];
                     $state["pending"] = null;
                 }
@@ -474,7 +476,7 @@ class Shipping_Publisher
         }
         if (!empty($state["targets"])) {
             $state["targeting"] = true;
-            return $this->prepare_item($state, $state["targets"][0]["id"], $state["targets"][0]["component"]);
+            return $this->prepare_unretained($state, $state["targets"][0]["id"], $state["targets"][0]["component"]);
         }
         if ($state["traversed"]) {
             $state["status"] = $state["deferred"] ? "partial" : "complete";
@@ -497,7 +499,24 @@ class Shipping_Publisher
             $state["item_id"] = $ids[0];
             $state["component"] = "selection";
         }
-        return $this->prepare_item($state, $state["item_id"], $state["component"]);
+        return $this->prepare_unretained($state, $state["item_id"], $state["component"]);
+    }
+
+    /**
+     * While an exact request for this component remains unconfirmed, it is the
+     * component's only retained work: replay resolves it before a refresh
+     * reaches this point again and reacquires current facts.
+     */
+    private function prepare_unretained(array &$state, $item_id, $component)
+    {
+        foreach ($state["deferred"] as $entry) {
+            if (!empty($entry["pending"]) && (int) $entry["item_id"] === (int) $item_id && $entry["component"] === $component) {
+                $this->advance($state, $component);
+                $this->schedule($state);
+                return null;
+            }
+        }
+        return $this->prepare_item($state, $item_id, $component);
     }
 
     private function prepare_default(array &$state)
@@ -833,14 +852,19 @@ class Shipping_Publisher
             return;
         }
         if (in_array($kind, ["selection", "inputs"], true)) {
-            $entry = ["item_id" => $pending["item_id"] ?? ($active_item["item_id"] ?? ($active_item["id"] ?? $state["item_id"])), "component" => $kind, "pending" => $pending];
+            // A request that was never sent or was definitely rejected cannot
+            // have committed. Keep the component, not the payload, so replay
+            // reacquires current facts instead of resending a refused body.
+            $rejected = "ahpc_backend_invalid_request" === $error->get_error_code()
+                || (($data["response_code"] ?? 0) >= 400 && ($data["response_code"] ?? 0) < 500 && empty($data["retryable"]));
+            $entry = ["item_id" => (int) ($pending["item_id"] ?? ($active_item["item_id"] ?? ($active_item["id"] ?? $state["item_id"]))), "component" => $kind, "pending" => $rejected ? null : $pending];
             if (!empty($state["replaying"])) {
+                // The replayed entry already owned a slot; never drop its request.
                 array_shift($state["deferred"]);
-                $state["deferred"][] = $entry;
+                self::defer($state["deferred"], $entry, false);
                 $state["retry_remaining"]--;
                 $state["replaying"] = false;
-            } elseif (count($state["deferred"]) < self::MAX_DEFERRED) {
-                $state["deferred"][] = $entry;
+            } elseif (self::defer($state["deferred"], $entry)) {
                 $this->advance($state, $kind);
             } else {
                 // Stop at the exact checkpoint instead of dropping failed work.
@@ -856,6 +880,56 @@ class Shipping_Publisher
         }
         $state["status"] = "failed";
         $this->save($state);
+    }
+
+    /**
+     * Retains unresolved work per logical component. Every distinct exact
+     * request keeps its own unchanged entry. A failed acquisition sent nothing,
+     * so it needs no slot beside an existing entry for the same component. A new
+     * request fills a request-less entry instead of taking another slot.
+     *
+     * @return bool False only when a distinct entry would exceed the bound.
+     */
+    private static function defer(array &$deferred, array $entry, $bounded = true)
+    {
+        foreach ($deferred as $index => $existing) {
+            if ((int) $existing["item_id"] !== $entry["item_id"] || $existing["component"] !== $entry["component"]) {
+                continue;
+            }
+            if (empty($entry["pending"]) || (!empty($existing["pending"])
+                && $existing["pending"]["arguments"][1]["import"]["requestKey"] === $entry["pending"]["arguments"][1]["import"]["requestKey"])) {
+                return true;
+            }
+            if (empty($existing["pending"])) {
+                $deferred[$index] = $entry;
+                return true;
+            }
+        }
+        if ($bounded && count($deferred) >= self::MAX_DEFERRED) {
+            return false;
+        }
+        $deferred[] = $entry;
+        return true;
+    }
+
+    /**
+     * Drops request-less copies that earlier releases appended for an already
+     * retained component. The head entry and every exact request stay in order,
+     * so a persisted in-flight replay still resolves its own entry.
+     */
+    private static function compact_deferred(array $deferred)
+    {
+        $seen = [];
+        $kept = [];
+        foreach ($deferred as $entry) {
+            $component = (int) $entry["item_id"] . ":" . $entry["component"];
+            if (empty($entry["pending"]) && isset($seen[$component])) {
+                continue;
+            }
+            $seen[$component] = true;
+            $kept[] = $entry;
+        }
+        return $kept;
     }
 
     private function save(array $state)
