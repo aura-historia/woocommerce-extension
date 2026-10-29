@@ -103,7 +103,7 @@ Yes. This plugin is intended for merchants who already use Aura Historia and adm
 
 = Which WooCommerce events are sent? =
 
-Only `product.created`, `product.updated`, and `product.deleted`.
+Only `product.created`, `product.updated`, and `product.deleted`. The plugin's own `product.deleted` webhook fires when a product is trashed and also when a product is deleted permanently, with or without Trash first. Deleting a single variation does not remove its parent product from Aura Historia. Your own WooCommerce webhooks keep their default behavior.
 
 = What data is sent to Aura Historia? =
 

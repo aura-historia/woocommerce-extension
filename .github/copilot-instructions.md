@@ -83,7 +83,7 @@ That means:
 
 ## Webhook-specific notes
 
-- `product.deleted` follows WooCommerce's built-in semantics and is triggered when a product is trashed.
+- `product.deleted` follows WooCommerce's built-in semantics and is triggered when a product is trashed. The managed `product.deleted` webhook, and no merchant webhook, is also subscribed to `Webhook_Manager::PRODUCT_DELETED_HOOK`, which fires only from `deleted_post` for a parent `product` row. Variations, auto-drafts, failed deletes and deletions after `switch_to_blog()` never fire it. Deliveries keep WooCommerce's single attempt.
 - Deleted payloads only contain an `id`.
 - WooCommerce signs deliveries with `X-WC-Webhook-Signature`.
 - The generated secret is a signing secret, not a standalone Authorization header.

@@ -33,6 +33,7 @@ class Webhook_Manager
     const SETTINGS_GROUP = "ahpc_settings_group";
     const TEXT_DOMAIN = "aura-historia-partner-connect";
     const API_VERSION = 3;
+    const PRODUCT_DELETED_HOOK = "ahpc_product_permanently_deleted";
 
     /**
      * Whether a sync operation is currently in progress.
@@ -233,6 +234,69 @@ class Webhook_Manager
 
         $args["headers"]["Authorization"] = "Bearer " . $settings["access_token"];
         return $args;
+    }
+
+    /**
+     * WooCommerce's product.deleted topic only listens to wp_trash_post, so a
+     * permanent deletion without Trash never reaches the backend. Subscribe the
+     * managed product.deleted webhook, and no merchant webhook, to permanent
+     * deletions as well. Delivery stays WooCommerce's signed {"id"} payload.
+     *
+     * @param array<string,array<int,string>> $topic_hooks Topic hook map.
+     * @param WC_Webhook|null                 $webhook     Webhook being enqueued.
+     * @return array<string,array<int,string>>
+     */
+    public static function add_permanent_deletion_hook($topic_hooks, $webhook = null)
+    {
+        if (!is_array($topic_hooks) || !$webhook instanceof WC_Webhook || !$webhook->get_id()) {
+            return $topic_hooks;
+        }
+
+        $ids = (new self())->get_webhook_ids();
+        if (!isset($ids["product.deleted"]) || $ids["product.deleted"] !== absint($webhook->get_id())) {
+            return $topic_hooks;
+        }
+
+        $hooks = isset($topic_hooks["product.deleted"]) ? (array) $topic_hooks["product.deleted"] : [];
+        if (!in_array(self::PRODUCT_DELETED_HOOK, $hooks, true)) {
+            $hooks[] = self::PRODUCT_DELETED_HOOK;
+        }
+        $topic_hooks["product.deleted"] = $hooks;
+
+        return $topic_hooks;
+    }
+
+    /**
+     * Announces a parent product whose row WordPress has actually deleted;
+     * deleted_post never fires for a failed delete, so an unreadable or still
+     * present product is never reported. Variations have no listing of their
+     * own, and deleting one must not withdraw its published parent. After
+     * switch_to_blog() the deleted ID belongs to another site's catalog, while
+     * the loaded webhooks still deliver to the current site's source.
+     *
+     * @param int          $post_id Deleted post ID.
+     * @param \WP_Post|null $post   Deleted post as read before deletion.
+     * @return void
+     */
+    public static function announce_permanent_deletion($post_id, $post = null)
+    {
+        if (
+            (is_multisite() && ms_is_switched()) ||
+            !$post instanceof \WP_Post ||
+            absint($post_id) !== (int) $post->ID ||
+            "product" !== $post->post_type ||
+            "auto-draft" === $post->post_status
+        ) {
+            return;
+        }
+
+        /**
+         * Fires after a parent product row was permanently deleted. The name
+         * equals PRODUCT_DELETED_HOOK; a literal lets Plugin Check verify it.
+         *
+         * @param int $product_id Deleted product ID, the catalog source listing ID.
+         */
+        do_action("ahpc_product_permanently_deleted", (int) $post->ID);
     }
 
     /**
