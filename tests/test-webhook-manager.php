@@ -2701,12 +2701,18 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
     {
         $ids = $this->sync_and_watch_managed_webhooks();
 
+        // A failed ping keeps the pending-delivery flag WooCommerce stored.
+        $this->http_response_code = 500;
         foreach ($ids as $webhook_id) {
             $webhook = new WC_Webhook($webhook_id);
             $webhook->set_failure_count(3);
             $webhook->set_pending_delivery(true);
             $webhook->set_date_modified(time() - HOUR_IN_SECONDS);
             $webhook->save();
+
+            $stored = new WC_Webhook($webhook_id);
+            $this->assertSame(3, $stored->get_failure_count());
+            $this->assertTrue($stored->get_pending_delivery());
         }
 
         $this->assert_next_request_does_not_sync($ids);
@@ -2735,7 +2741,39 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
         $this->assertTrue((new Webhook_Manager())->maybe_sync_webhooks());
         $this->assertCount(1, $this->backend_http_requests);
-        $this->assertSame("active", (new WC_Webhook($ids["product.updated"]))->get_status());
+        $repaired = new WC_Webhook($ids["product.updated"]);
+        $this->assertSame("active", $repaired->get_status());
+        $this->assertSame(0, $repaired->get_failure_count());
+
+        // The repaired webhook has its full failure allowance again.
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+        $repaired->deliver($product_id);
+        $this->assertSame(1, (new WC_Webhook($ids["product.updated"]))->get_failure_count());
+        $this->assert_next_request_does_not_sync($ids);
+    }
+
+    public function test_stale_delivery_save_after_secret_rotation_requires_sync()
+    {
+        $product_id = $this->create_delivery_product();
+        $ids = $this->sync_and_watch_managed_webhooks();
+        // An async delivery loaded the webhook before another request rotated the secret.
+        $stale = new WC_Webhook($ids["product.updated"]);
+        $settings = get_option(Webhook_Manager::OPTION_SETTINGS);
+        $settings["secret"] = "rotated-secret";
+        update_option(Webhook_Manager::OPTION_SETTINGS, $settings, false);
+        $manager = new Webhook_Manager();
+        $this->assertTrue($manager->sync_webhooks());
+        $this->assertSame("rotated-secret", (new WC_Webhook($ids["product.updated"]))->get_secret());
+        $this->assertSame("no", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+
+        // WooCommerce's delivery save writes the whole stale row back.
+        $stale->deliver($product_id);
+
+        $this->assertSame("test-secret", (new WC_Webhook($ids["product.updated"]))->get_secret());
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+        $this->assertTrue($manager->maybe_sync_webhooks());
+        $this->assertSame("rotated-secret", (new WC_Webhook($ids["product.updated"]))->get_secret());
     }
 
     public function test_changed_managed_field_requires_sync_and_is_repaired()

@@ -1022,6 +1022,13 @@ class Webhook_Manager
         if (method_exists($webhook, "set_pending_delivery")) {
             $webhook->set_pending_delivery(false);
         }
+
+        // Activation restores WooCommerce's full failure allowance. A webhook
+        // it disabled after repeated failures would otherwise keep its count,
+        // and a single further failure would disable it and force another sync.
+        if ("active" === $status) {
+            $webhook->set_failure_count(0);
+        }
     }
 
     /**
@@ -1229,10 +1236,11 @@ class Webhook_Manager
             return true;
         }
 
+        // Apply the sync's configuration without saving it. WooCommerce only
+        // records a change for a raw value that differs from the stored one.
         $settings = $this->get_settings();
-        $expected = new WC_Webhook();
         $this->apply_managed_webhook_configuration(
-            $expected,
+            $webhook,
             $topic,
             "" !== $settings["listing_source_id"] && "" !== $settings["access_token"]
                 ? "active"
@@ -1241,15 +1249,9 @@ class Webhook_Manager
             $settings["secret"],
             $this->resolve_webhook_user_id(),
         );
+        $managed_fields = ["name", "topic", "status", "delivery_url", "secret", "user_id", "api_version"];
 
-        foreach (["name", "topic", "status", "delivery_url", "secret", "user_id", "api_version"] as $field) {
-            $getter = "get_" . $field;
-            if ($expected->$getter("edit") !== $webhook->$getter("edit")) {
-                return true;
-            }
-        }
-
-        return false;
+        return [] !== array_intersect_key($webhook->get_changes(), array_flip($managed_fields));
     }
 
     /**
