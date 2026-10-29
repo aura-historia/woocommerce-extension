@@ -106,7 +106,7 @@ It is **not** a general-purpose WooCommerce webhook manager.
 ## How it works
 
 1. A merchant installs the plugin and opens `WooCommerce > Aura Historia`.
-2. If the store is not connected yet, the settings page starts the Aura Historia OAuth flow automatically; the Connect button is available as a fallback.
+2. If the store is not connected yet, the settings page starts the Aura Historia OAuth flow automatically, once per browser tab. After a failed or denied attempt, or when the tab cannot record the attempt in session storage, the merchant uses the Connect button instead.
 3. Aura Historia redirects back to the plugin settings page with a selected `ls_` ListingSource ID and a short-lived third-party exchange code. The webapp requests source selection with `requires_listing_source_id=true` and returns the selected `ls_` ID in `listing_source_id`.
 4. The plugin exchanges that code for an Aura Historia access token and stores the ListingSource ID and token locally.
 5. The plugin generates a WooCommerce webhook signing secret and applies that exact secret, store currency, and language via `PUT /v1/listing-sources/{listingSourceId}/ingestion-configurations/woocommerce` before enabling delivery.
@@ -351,6 +351,7 @@ If you need a different port, create a local `.wp-env.override.json` file.
 - `npm run env:destroy` — remove the environment entirely
 - `npm run wp -- plugin list` — run WP-CLI commands inside the environment
 - `npm test` — run the WordPress integration test suite
+- `npm run test:e2e` — run the Playwright browser tests against the development site
 - `npm run plugin:check` — build the release artifact and run WordPress Plugin Check (PCP) against the shipped plugin contents
 - `npm run release:zip` — build the distributable plugin ZIP
 - `npm run openapi:generate` — regenerate the typed internal API client
@@ -384,6 +385,23 @@ Run the suite with:
 
 ```sh
 npm test
+```
+
+### Browser tests
+
+Playwright tests in `tests/e2e/` drive the rendered settings page in Chromium against the running development site. They cover the automatic OAuth start, its loop protection and the manual Connect fallback. The tests capture the OAuth authorization redirect and block other origins, so no request leaves the local site.
+
+The development site must be disconnected and have a valid `oc_` `AHPC_OAUTH_CLIENT_ID`. Any format-valid ID works because the authorization request is never sent. Set it in `.wp-env.override.json` as shown above and run `npm run env:update`. A failed OAuth attempt stores an error that disables the automatic start until a connection succeeds. Clear it before running the tests:
+
+```sh
+npm run wp -- option delete ahpc_last_oauth_error
+```
+
+Then install Chromium (add `--with-deps` on Linux hosts without its system libraries) and run the tests:
+
+```sh
+npx playwright install chromium
+npm run test:e2e
 ```
 
 ### Plugin Check (PCP)

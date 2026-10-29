@@ -492,9 +492,60 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $this->assertStringContainsString("Connect with Aura Historia", $output);
         $this->assertStringContainsString("ahpc-oauth-start-form", $output);
         $this->assertStringContainsString("ahpc_start_oauth", $output);
-        $this->assertStringContainsString("form.submit", $output);
+        $this->assertStringContainsString("ahpcOauthAutoStart", $output);
         $this->assertStringNotContainsString("id=\"ahpc-listing-source-id\"", $output);
         $this->assertStringNotContainsString("id=\"ahpc-access-token\"", $output);
+    }
+
+    /**
+     * It skips OAuth auto-start after a failed attempt and for connected stores.
+     *
+     * The browser behavior of the auto-start script is covered by
+     * tests/e2e/oauth-auto-start.spec.js.
+     *
+     * @return void
+     */
+    public function test_render_settings_page_skips_oauth_auto_start_after_failure_or_when_connected()
+    {
+        update_option(
+            Webhook_Manager::OPTION_SETTINGS,
+            [
+                "listing_source_id" => "",
+                "access_token" => "",
+                "secret" => "test-secret",
+            ],
+            false,
+        );
+
+        $output = $this->render_plugin_settings_page([
+            "ahpc_oauth" => "failed",
+        ]);
+        $this->assertStringNotContainsString("ahpcOauthAutoStart", $output);
+        $this->assertStringContainsString("Connect with Aura Historia", $output);
+
+        update_option(
+            Webhook_Manager::OPTION_LAST_OAUTH_ERROR,
+            "Aura Historia authorization was denied.",
+            false,
+        );
+        $output = $this->render_plugin_settings_page();
+        $this->assertStringNotContainsString("ahpcOauthAutoStart", $output);
+        $this->assertStringContainsString("Connect with Aura Historia", $output);
+        delete_option(Webhook_Manager::OPTION_LAST_OAUTH_ERROR);
+
+        update_option(
+            Webhook_Manager::OPTION_SETTINGS,
+            [
+                "listing_source_id" => "ls_01jw7j4azge00800000000000g",
+                "access_token" =>
+                    "aurahistoria_abcdefghijk_verylongtokenvalue",
+                "secret" => "test-secret",
+            ],
+            false,
+        );
+        $output = $this->render_plugin_settings_page();
+        $this->assertStringNotContainsString("ahpcOauthAutoStart", $output);
+        $this->assertStringContainsString("Reconnect with Aura Historia", $output);
     }
 
     /**

@@ -1416,18 +1416,34 @@ class Plugin
 				<script>
 					(function () {
 						var storageKey = "ahpcOauthAutoStart";
+						var form = document.getElementById("ahpc-oauth-start-form");
+						var storage;
+
+						if (!form) {
+							return;
+						}
+
+						// The attempt is recorded per tab to prevent redirect loops. If it
+						// cannot be recorded, leave the start to the manual button.
 						try {
-							if (window.sessionStorage && window.sessionStorage.getItem(storageKey)) {
+							storage = window.sessionStorage;
+							if (!storage || storage.getItem(storageKey)) {
 								return;
 							}
-							if (window.sessionStorage) {
-								window.sessionStorage.setItem(storageKey, "1");
-							}
-						} catch (error) {}
+							storage.setItem(storageKey, "1");
+						} catch (error) {
+							return;
+						}
 
-						var form = document.getElementById("ahpc-oauth-start-form");
-						if (form) {
-							form.submit();
+						try {
+							// The button named "submit" shadows form.submit, so call the
+							// native method directly.
+							HTMLFormElement.prototype.submit.call(form);
+						} catch (error) {
+							// Only a submission the browser rejects is retried on the next
+							// visit. A sent request counts as the tab's attempt.
+							storage.removeItem(storageKey);
+							throw error;
 						}
 					})();
 				</script>

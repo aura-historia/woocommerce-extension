@@ -8,3 +8,4 @@ npm-debug.log
 .DS_Store
 build-release/**
 aura-historia-partner-connect.zip
+/test-results/
