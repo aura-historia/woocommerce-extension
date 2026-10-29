@@ -2103,7 +2103,7 @@ class Plugin
             if ($queue["withdrawn"]) {
                 echo '<p>' . sprintf(
                     /* translators: %d: removed products whose last shipping remains on their withdrawn listing. */
-                    esc_html__('Removed products whose last shipping stays with their withdrawn listing: %d. Aura Historia does not change withdrawn listings, and shipping imports never restore one. Publishing a product again imports its current shipping.', "aura-historia-partner-connect"),
+                    esc_html__('Removed products whose last shipping stays with their withdrawn listing: %d. Aura Historia does not change withdrawn listings, and shipping imports never restore one. Restoring a product from the Trash imports its current shipping.', "aura-historia-partner-connect"),
                     (int) $queue["withdrawn"]
                 ) . '</p>';
             }

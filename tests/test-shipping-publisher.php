@@ -43,6 +43,7 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
     private $classes = [];
     private $receipts = [];
     private $withdrawn = [];
+    private $withdrawn_reads = false;
 
     public static function wpSetUpBeforeClass($factory)
     {
@@ -190,6 +191,9 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
             }
             $version = $this->versions[$id] ?? 1;
             if ("GET" === $method) {
+                if ($this->withdrawn_reads && !empty($this->withdrawn[$id])) {
+                    return $this->reply(["error" => "PRODUCT_LISTING_WITHDRAWN"], 409);
+                }
                 return $this->reply(["productListingId" => self::LISTING, "expectedVersion" => $version, "delivery" => null]);
             }
             // A withdrawn listing stays readable, but commands never change or restore it.
@@ -1089,7 +1093,7 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
         $this->assertSame(0, (new Shipping_Sync())->status()["withdrawn"]);
     }
 
-    public function test_publication_to_a_withdrawn_listing_waits_like_catalog_lag_without_stalling_the_source()
+    public function test_publication_to_a_withdrawn_listing_retries_like_catalog_lag_instead_of_stopping_for_review()
     {
         $this->zone();
         $lagging = $this->product();
@@ -1104,13 +1108,95 @@ class Test_AHPC_Shipping_Publisher extends WP_UnitTestCase
         $this->assertSame([$lagging->get_id() . ":selection", $lagging->get_id() . ":inputs"], self::deferred_components($state));
         $this->assertSame([null, null], array_column($state["deferred"], "pending"));
         $this->assertArrayHasKey("inputs", $this->listing_bodies[$other->get_id()]);
-        // A lifecycle rejection retries boundedly and never restarts the shared profile.
+        // The lifecycle rejection itself retries boundedly; it is not a revision
+        // conflict, so it does not reacquire the shared profile.
         $this->assertCount(2 * Shipping_Publisher::MAX_ATTEMPTS, $this->item_writes($lagging->get_id()));
         $this->assertSame(1, $this->profile["managementRevision"]);
         $this->withdrawn = [];
         $this->assertTrue($publisher->queue(self::SOURCE));
         $this->assertSame("complete", $this->finish()["status"]);
         $this->assertArrayHasKey("inputs", $this->listing_bodies[$lagging->get_id()]);
+    }
+
+    public static function withdrawn_refusals()
+    {
+        return [["read"], ["inputs"]];
+    }
+
+    /** @dataProvider withdrawn_refusals */
+    public function test_withdrawn_refusal_of_the_read_or_the_later_inputs_clear_is_retained_the_same_way($refused)
+    {
+        $this->zone();
+        $product = $this->product();
+        $id = $product->get_id();
+        $publisher = new Shipping_Publisher();
+        $this->assertTrue($publisher->queue(self::SOURCE));
+        $this->assertSame("complete", $this->finish()["status"]);
+        $sent = count($this->item_writes($id));
+        $product->set_status("trash");
+        $product->save();
+        $this->assertTrue($publisher->queue_item_removal(self::SOURCE, $id));
+        if ("inputs" === $refused) {
+            // The selection clear commits before the listing is withdrawn.
+            $this->assertSame("inputs", $this->tick()["removals"][0]["component"]);
+        } else {
+            $this->withdrawn_reads = true;
+        }
+        $this->withdrawn[$id] = true;
+        $state = $this->finish();
+        $this->assertSame("complete", $state["status"]);
+        $this->assertSame([[], [], 0, ""], [$state["removals"], $state["deferred"], $state["conflicts"], $state["last_error"]]);
+        $this->assertSame($id . Shipping_Sync::MEMBER_WITHDRAWN, get_option(Shipping_Sync::MEMBER_PREFIX . self::SOURCE . "_" . $id));
+        $clears = array_slice($this->item_writes($id), $sent);
+        $this->assertCount("read" === $refused ? 0 : 2, $clears);
+    }
+
+    public function test_full_capacity_refresh_resends_an_unconfirmed_removal_before_the_next_removal()
+    {
+        $this->zone();
+        $first = $this->product();
+        $second = $this->product();
+        $publisher = new Shipping_Publisher();
+        $this->assertTrue($publisher->queue(self::SOURCE));
+        $this->assertSame("complete", $this->finish()["status"]);
+        foreach ([$first, $second] as $product) {
+            $product->set_status("trash");
+            $product->save();
+        }
+        $this->unreachable[$first->get_id()] = true;
+        $this->assertTrue($publisher->queue_item_removal(self::SOURCE, $first->get_id()));
+        // Every send of the clear ends uncertain; the source stops on its exact request.
+        $state = $this->finish();
+        $this->assertSame("failed", $state["status"]);
+        $request = $state["pending"];
+        $this->assertSame([$first->get_id(), "remove_selection"], [$request["item_id"], $request["kind"]]);
+        // Another removal is queued, and retained work fills the bound when a refresh arrives.
+        $state["removals"][] = ["id" => $second->get_id(), "component" => "selection"];
+        for ($index = 1; count($state["deferred"]) < Shipping_Publisher::MAX_DEFERRED; $index++) {
+            $state["deferred"][] = ["item_id" => PHP_INT_MAX - $index, "component" => "selection", "pending" => null];
+        }
+        update_option(Shipping_Publisher::state_option(self::SOURCE), $state, false);
+        $this->assertTrue($publisher->queue(self::SOURCE));
+        $queued = $publisher->get_status(self::SOURCE);
+        $this->assertEmpty($queued["held_pending"] ?? null);
+        $this->assertSame(wp_json_encode($request), wp_json_encode($queued["pending"]));
+        // The listing was withdrawn meanwhile: the exact resend is refused and
+        // marks its own product, not the next queued removal.
+        $this->unreachable = [];
+        $this->withdrawn[$first->get_id()] = true;
+        $state = $this->tick();
+        $sent = $this->bodies_for($first->get_id(), $request);
+        $this->assertCount(1 + Shipping_Publisher::MAX_ATTEMPTS, $sent);
+        $this->assertSame(array_fill(0, count($sent), $sent[0]), $sent);
+        $refused = count($this->item_writes($first->get_id()));
+        $this->assertSame([["id" => $second->get_id(), "component" => "selection"]], $state["removals"]);
+        $this->assertSame("", $state["last_error"]);
+        $this->assertSame($first->get_id() . Shipping_Sync::MEMBER_WITHDRAWN, get_option(Shipping_Sync::MEMBER_PREFIX . self::SOURCE . "_" . $first->get_id()));
+        $this->tick();
+        $this->assertSame([], $this->tick()["removals"]);
+        $this->assertSame("CLEAR", $this->listing_bodies[$second->get_id()]["inputs"]["delivery"]["value"]["rateInputs"]["state"]);
+        $this->assertFalse(get_option(Shipping_Sync::MEMBER_PREFIX . self::SOURCE . "_" . $second->get_id()));
+        $this->assertCount($refused, $this->item_writes($first->get_id()));
     }
 
     public function test_failed_read_before_a_removal_request_fails_closed_without_touching_traversal()

@@ -180,7 +180,9 @@ class Shipping_Publisher
             } elseif ($refresh && !empty($state["deferred"])) {
                 $state["deferred"] = self::compact_deferred($state["deferred"]);
                 // An interrupted replay already owns the head entry; resend it first.
-                if (!empty($state["pending"]) && empty($state["replaying"]) && count($state["deferred"]) >= self::MAX_DEFERRED) {
+                // Removals precede replay, so a removal request is resent first too.
+                if (!empty($state["pending"]) && empty($state["replaying"]) && !str_starts_with($state["pending"]["kind"], "remove_")
+                    && count($state["deferred"]) >= self::MAX_DEFERRED) {
                     $state["held_pending"] = $state["pending"];
                     $state["pending"] = null;
                 }
@@ -908,23 +910,28 @@ class Shipping_Publisher
     private function retain_withdrawn(array &$state)
     {
         global $wpdb;
-        $removal = $state["removals"][0];
-        $name = Shipping_Sync::MEMBER_PREFIX . $state["source"] . "_" . $removal["id"];
+        // The refused request names its product; never assume the queue head.
+        $id = (int) ($state["pending"]["item_id"] ?? $state["removals"][0]["id"]);
+        $name = Shipping_Sync::MEMBER_PREFIX . $state["source"] . "_" . $id;
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.NoCaching -- The dynamic option and negative option caches are cleared by clear_option_cache() immediately below.
         $marked = $wpdb->query($wpdb->prepare(
             "UPDATE {$wpdb->options} AS member INNER JOIN {$wpdb->options} AS lease ON lease.option_name = %s SET member.option_value = %s WHERE member.option_name = %s AND lease.option_value = %s",
-            $this->lock["name"], $removal["id"] . Shipping_Sync::MEMBER_WITHDRAWN, $name, $this->lock["value"]
+            $this->lock["name"], $id . Shipping_Sync::MEMBER_WITHDRAWN, $name, $this->lock["value"]
         ));
         self::clear_option_cache($name);
         $this->assert_lock($state["source"]);
         if (false === $marked) {
             throw new \RuntimeException("shipping_membership_checkpoint_failed");
         }
-        array_shift($state["removals"]);
+        if (($state["removals"][0]["id"] ?? 0) === $id) {
+            array_shift($state["removals"]);
+        }
         $state["pending"] = null;
         $state["removing"] = false;
         $state["attempt"] = 0;
         $state["conflicts"] = 0;
+        // The settings page reports this outcome through the withdrawn count.
+        $state["last_error"] = "";
         $this->schedule($state);
     }
 
