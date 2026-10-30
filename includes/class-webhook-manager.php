@@ -46,16 +46,18 @@ class Webhook_Manager
     const SYNC_ACTION_GROUP = "ahpc-partner-connect";
     /** Seconds before the first automatic retry; each further retry waits twice as long. */
     const SYNC_RETRY_DELAY = 60;
-    /** Longest wait between automatic attempts. */
+    /** Longest wait between the backed-off attempts. */
     const SYNC_MAX_RETRY_DELAY = 3600;
-    /** Failed attempts in a row after which automatic reconciliation stops. */
-    const SYNC_MAX_ATTEMPTS = 10;
+    /** Failed attempts in a row that back off; later ones wait SYNC_SLOW_RETRY_DELAY. */
+    const SYNC_BACKOFF_ATTEMPTS = 10;
+    /** Seconds between attempts after the backoff, and after a non-retryable failure. */
+    const SYNC_SLOW_RETRY_DELAY = 21600;
     /** Reconciliation status: queued for the first attempt. */
     const SYNC_PENDING = "pending";
     /** Reconciliation status: a retryable failure, another attempt is queued. */
     const SYNC_RETRYING = "retrying";
-    /** Reconciliation status: no automatic attempt follows until resumed. */
-    const SYNC_STOPPED = "stopped";
+    /** Reconciliation status: a failure that retrying alone rarely fixes; still retried slowly. */
+    const SYNC_NEEDS_ATTENTION = "needs_attention";
     /** Reconciliation status: the current configuration is confirmed. */
     const SYNC_CONFIRMED = "confirmed";
     const SETTINGS_GROUP = "ahpc_settings_group";
@@ -491,8 +493,7 @@ class Webhook_Manager
 
     /**
      * Synchronizes the managed webhooks now, on behalf of a merchant action.
-     * This also resumes stopped background reconciliation: a retryable
-     * failure starts a new series of automatic attempts.
+     * A failure restarts the automatic attempts with a fresh backoff.
      *
      * @param int $wait Seconds to wait for a sync running in another request.
      * @return true|WP_Error
@@ -535,9 +536,9 @@ class Webhook_Manager
 
     /**
      * Queues the background reconciliation while a sync is required, unless
-     * an action for the current attempt is already queued or automatic
-     * attempts have stopped. Runs on ordinary requests, so it never contacts
-     * the backend and normally costs one Action Scheduler lookup.
+     * an action for the current attempt is already queued. Runs on ordinary
+     * requests, so it never contacts the backend and normally costs one
+     * Action Scheduler lookup.
      *
      * @return bool Whether this call queued an action.
      */
@@ -553,7 +554,7 @@ class Webhook_Manager
         }
 
         $state = $this->get_sync_retry();
-        if (self::SYNC_STOPPED === $state["status"] || $this->sync_action_queued($state["wake"])) {
+        if ($this->sync_action_queued($state["wake"])) {
             return false;
         }
 
@@ -568,7 +569,6 @@ class Webhook_Manager
             $state = $this->get_sync_retry(true);
             if (
                 "yes" !== Option_Lease::read(self::OPTION_NEEDS_SYNC, "yes") ||
-                self::SYNC_STOPPED === $state["status"] ||
                 $this->sync_action_queued($state["wake"])
             ) {
                 return false;
@@ -616,7 +616,7 @@ class Webhook_Manager
     /**
      * Returns the reconciliation status for the settings page.
      *
-     * @return array{status:string,attempts:int,max_attempts:int,next_at:int}
+     * @return array{status:string,attempts:int,backoff_attempts:int,next_at:int}
      */
     public function get_sync_status()
     {
@@ -631,19 +631,25 @@ class Webhook_Manager
         return [
             "status" => $status,
             "attempts" => $state["attempts"],
-            "max_attempts" => self::SYNC_MAX_ATTEMPTS,
+            "backoff_attempts" => self::SYNC_BACKOFF_ATTEMPTS,
             "next_at" => self::SYNC_CONFIRMED === $status ? 0 : $state["next_at"],
         ];
     }
 
     /**
-     * Returns the seconds to wait after a number of failed attempts in a row.
+     * Returns the seconds to wait after a number of failed attempts in a row:
+     * exponential backoff capped at an hour, then a slow period that keeps
+     * retrying until the backend is back.
      *
      * @param int $attempts Failed attempts so far, at least one.
      * @return int
      */
     public static function sync_retry_delay($attempts)
     {
+        if ((int) $attempts >= self::SYNC_BACKOFF_ATTEMPTS) {
+            return self::SYNC_SLOW_RETRY_DELAY;
+        }
+
         $exponent = min(max(0, (int) $attempts - 1), 16);
 
         return (int) min(self::SYNC_RETRY_DELAY * (2 ** $exponent), self::SYNC_MAX_RETRY_DELAY);
@@ -652,7 +658,7 @@ class Webhook_Manager
     /**
      * Returns the automatic attempts of the current context. Attempts left by
      * another connection, currency or language count as a fresh start, so a
-     * context change resumes stopped reconciliation.
+     * context change is attempted at once, without a slowed-down backoff.
      *
      * @param bool $fresh Read from the database instead of the option cache.
      * @return array{context:string,status:string,attempts:int,next_at:int,wake:string}
@@ -677,7 +683,7 @@ class Webhook_Manager
 
         return [
             "context" => $context,
-            "status" => in_array($status, [self::SYNC_PENDING, self::SYNC_RETRYING, self::SYNC_STOPPED], true) ? $status : "",
+            "status" => in_array($status, [self::SYNC_PENDING, self::SYNC_RETRYING, self::SYNC_NEEDS_ATTENTION], true) ? $status : "",
             "attempts" => max(0, (int) ($state["attempts"] ?? 0)),
             "next_at" => max(0, (int) ($state["next_at"] ?? 0)),
             "wake" => isset($state["wake"]) && is_string($state["wake"]) ? $state["wake"] : "",
@@ -762,11 +768,13 @@ class Webhook_Manager
     }
 
     /**
-     * Decides whether and when reconciliation tries again after a failure
-     * recorded under the lease. Only retryable failures (no response, timeout,
-     * HTTP 408, 429 or 5xx, or a local save error) are retried, with
-     * exponential backoff, and automatic attempts stop after
-     * SYNC_MAX_ATTEMPTS failures in a row. A failure of an interactive sync
+     * Decides when reconciliation tries again after a failure recorded under
+     * the lease; it never gives up on its own. Retryable failures (no
+     * response, timeout, HTTP 408, 429 or 5xx, or a local save error) back off
+     * exponentially for SYNC_BACKOFF_ATTEMPTS attempts, then retry every
+     * SYNC_SLOW_RETRY_DELAY. Other failures, such as a rejected token or an
+     * unsupported currency, need attention but are still retried at that slow
+     * pace, in case the backend caused them. A failure of an interactive sync
      * starts a new series; a changed context is attempted again right away.
      *
      * @param Option_Lease $lease Held sync lease.
@@ -790,9 +798,9 @@ class Webhook_Manager
         $state["attempts"] = $this->attempt["automatic"] ? max(1, $state["attempts"]) : 1;
         $data = $error->get_error_data();
 
-        if (!is_array($data) || empty($data["retryable"]) || $state["attempts"] >= self::SYNC_MAX_ATTEMPTS) {
-            $state["status"] = self::SYNC_STOPPED;
-            $this->retire_sync_wake($lease, $state);
+        if (!is_array($data) || empty($data["retryable"])) {
+            $state["status"] = self::SYNC_NEEDS_ATTENTION;
+            $this->queue_sync_action($lease, $state, self::SYNC_SLOW_RETRY_DELAY);
             return;
         }
 
@@ -857,22 +865,9 @@ class Webhook_Manager
                     return true;
                 }
 
-                if ($state["attempts"] >= self::SYNC_MAX_ATTEMPTS) {
-                    // Earlier attempts ended without an outcome, for example
-                    // after a fatal error; stop like after recorded failures.
-                    $state["status"] = self::SYNC_STOPPED;
-                    $this->retire_sync_wake($lease, $state);
-                    return new WP_Error(
-                        "ahpc_sync_stopped",
-                        __(
-                            "Automatic webhook synchronization stopped after repeated failures. Use Sync webhooks now to try again.",
-                            "aura-historia-partner-connect",
-                        ),
-                    );
-                }
-
                 // Count the attempt before any outbound request, so one that
-                // ends without recording an outcome still backs off.
+                // ends without recording an outcome, for example after a fatal
+                // error, still backs off.
                 ++$state["attempts"];
                 $state["next_at"] = time() + self::sync_retry_delay($state["attempts"]);
                 if (!$lease->write(self::OPTION_SYNC_RETRY, $state)) {

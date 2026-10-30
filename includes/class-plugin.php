@@ -1786,26 +1786,29 @@ class Plugin
 
         $sync = $this->manager instanceof Webhook_Manager
             ? $this->manager->get_sync_status()
-            : ["status" => "", "attempts" => 0, "max_attempts" => 0, "next_at" => 0];
+            : ["status" => "", "attempts" => 0, "backoff_attempts" => 0, "next_at" => 0];
+        $next_at = $this->format_admin_timestamp($sync["next_at"]);
+        $next_at = "" !== $next_at ? $next_at : __("the next opportunity", "aura-historia-partner-connect");
+        $slow_hours = (int) round(Webhook_Manager::SYNC_SLOW_RETRY_DELAY / HOUR_IN_SECONDS);
 
-        if (Webhook_Manager::SYNC_STOPPED === $sync["status"]) {
+        if (Webhook_Manager::SYNC_NEEDS_ATTENTION === $sync["status"]) {
             $message = "" !== $sync_error
                 ? sprintf(
                     /* translators: %s: connection check error detail. */
-                    __("Aura Historia did not confirm the webhook configuration: %s", "aura-historia-partner-connect"),
+                    __("Aura Historia did not accept the webhook configuration: %s", "aura-historia-partner-connect"),
                     $sync_error,
                 )
-                : __("Aura Historia did not confirm the webhook configuration.", "aura-historia-partner-connect");
-            $message .= " " . ($sync["attempts"] >= $sync["max_attempts"]
-                ? sprintf(
-                    /* translators: %d: number of failed attempts. */
-                    __("Automatic retries stopped after %d failed attempts.", "aura-historia-partner-connect"),
-                    $sync["attempts"],
-                )
-                : __("This problem is not retried automatically.", "aura-historia-partner-connect"));
-            $message .= " " . __(
-                "Delivery stays paused. Resolve the problem, then use Sync webhooks now.",
-                "aura-historia-partner-connect",
+                : __("Aura Historia did not accept the webhook configuration.", "aura-historia-partner-connect");
+            $message .= " " . sprintf(
+                /* translators: 1: retry interval in hours, 2: formatted time. */
+                _n(
+                    'Delivery stays paused. This usually needs a fix, such as reconnecting the store or selecting a supported currency, but the plugin keeps trying on its own every %1$d hour; the next attempt runs at %2$s.',
+                    'Delivery stays paused. This usually needs a fix, such as reconnecting the store or selecting a supported currency, but the plugin keeps trying on its own every %1$d hours; the next attempt runs at %2$s.',
+                    $slow_hours,
+                    "aura-historia-partner-connect",
+                ),
+                $slow_hours,
+                $next_at,
             );
 
             return [
@@ -1816,22 +1819,34 @@ class Plugin
         }
 
         if (Webhook_Manager::SYNC_RETRYING === $sync["status"]) {
-            $next_at = $this->format_admin_timestamp($sync["next_at"]);
+            $message = sprintf(
+                /* translators: 1: error detail, 2: failed attempts in a row, 3: formatted time. */
+                __(
+                    'Aura Historia did not confirm the webhook configuration: %1$s Delivery stays paused. Failed attempts so far: %2$d. The plugin retries on its own; the next attempt runs in the background at %3$s.',
+                    "aura-historia-partner-connect",
+                ),
+                "" !== $sync_error ? $sync_error : __("The request could not be confirmed.", "aura-historia-partner-connect"),
+                $sync["attempts"],
+                $next_at,
+            );
+
+            if ($sync["backoff_attempts"] && $sync["attempts"] >= $sync["backoff_attempts"]) {
+                $message .= " " . sprintf(
+                    /* translators: %d: retry interval in hours. */
+                    _n(
+                        "Aura Historia has been unavailable for a while, so it is now tried every %d hour.",
+                        "Aura Historia has been unavailable for a while, so it is now tried every %d hours.",
+                        $slow_hours,
+                        "aura-historia-partner-connect",
+                    ),
+                    $slow_hours,
+                );
+            }
 
             return [
                 "type" => "warning",
                 "label" => __("Retry scheduled", "aura-historia-partner-connect"),
-                "message" => sprintf(
-                    /* translators: 1: error detail, 2: failed attempts, 3: attempt limit, 4: formatted time. */
-                    __(
-                        'Aura Historia did not confirm the webhook configuration: %1$s Delivery stays paused. Attempt %2$d of %3$d failed; the next automatic attempt runs in the background at %4$s.',
-                        "aura-historia-partner-connect",
-                    ),
-                    "" !== $sync_error ? $sync_error : __("The request could not be confirmed.", "aura-historia-partner-connect"),
-                    $sync["attempts"],
-                    $sync["max_attempts"],
-                    "" !== $next_at ? $next_at : __("the next opportunity", "aura-historia-partner-connect"),
-                ),
+                "message" => $message,
             ];
         }
 
@@ -1949,22 +1964,37 @@ class Plugin
             ? (string) $details["last_error"]
             : "";
         $attempts = isset($details["attempts"]) ? absint($details["attempts"]) : 0;
-        $max_attempts = isset($details["max_attempts"]) ? absint($details["max_attempts"]) : 0;
+        $backoff_attempts = isset($details["backoff_attempts"]) ? absint($details["backoff_attempts"]) : 0;
 
         if (Product_Backfill::STATUS_RETRY_SCHEDULED === $status) {
-            return [
-                "label" => __("Retry scheduled", "aura-historia-partner-connect"),
-                "message" => sprintf(
-                    /* translators: 1: error detail, 2: failed attempts, 3: attempt limit, 4: formatted time. */
-                    __(
-                        '%1$s Attempt %2$d of %3$d failed. The unchanged batch is sent again with the same retry key at %4$s.',
+            $message = sprintf(
+                /* translators: 1: error detail, 2: failed attempts in a row, 3: formatted time. */
+                __(
+                    '%1$s Failed attempts so far: %2$d. The unchanged batch is sent again automatically with the same retry key at %3$s.',
+                    "aura-historia-partner-connect",
+                ),
+                "" !== $last_error ? $last_error : __("The most recent product backfill batch could not be confirmed.", "aura-historia-partner-connect"),
+                $attempts,
+                "" !== $scheduled_at ? $scheduled_at : __("the next opportunity", "aura-historia-partner-connect"),
+            );
+
+            if ($backoff_attempts && $attempts >= $backoff_attempts) {
+                $slow_hours = (int) round(Product_Backfill::SLOW_RETRY_DELAY / HOUR_IN_SECONDS);
+                $message .= " " . sprintf(
+                    /* translators: %d: retry interval in hours. */
+                    _n(
+                        "Aura Historia has been unavailable for a while, so it is now tried every %d hour.",
+                        "Aura Historia has been unavailable for a while, so it is now tried every %d hours.",
+                        $slow_hours,
                         "aura-historia-partner-connect",
                     ),
-                    "" !== $last_error ? $last_error : __("The most recent product backfill batch could not be confirmed.", "aura-historia-partner-connect"),
-                    $attempts,
-                    $max_attempts,
-                    "" !== $scheduled_at ? $scheduled_at : __("the next opportunity", "aura-historia-partner-connect"),
-                ),
+                    $slow_hours,
+                );
+            }
+
+            return [
+                "label" => __("Retry scheduled", "aura-historia-partner-connect"),
+                "message" => $message,
             ];
         }
 
@@ -1972,14 +2002,6 @@ class Plugin
             $message = "" !== $last_error
                 ? $last_error
                 : __("The product backfill stopped.", "aura-historia-partner-connect");
-
-            if ($max_attempts && $attempts >= $max_attempts) {
-                $message .= " " . sprintf(
-                    /* translators: %d: number of failed attempts. */
-                    __("Automatic retries stopped after %d failed attempts.", "aura-historia-partner-connect"),
-                    $attempts,
-                );
-            }
 
             $message .= " " . __(
                 "Use Re-send all existing products to resume it: a pending batch is sent again unchanged with its retry key, otherwise the run continues with its next page.",

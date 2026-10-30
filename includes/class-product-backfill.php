@@ -28,8 +28,9 @@ if (!defined("ABSPATH")) {
  * Credentials are read at execution time, never stored in action arguments.
  *
  * A retryable failure replays the unchanged batch with exponential backoff.
- * After {@see MAX_ATTEMPTS} failed attempts in a row automatic replays stop;
- * the snapshot and its key stay saved until a manual start resumes them.
+ * After {@see BACKOFF_ATTEMPTS} failed attempts in a row it keeps replaying
+ * every {@see SLOW_RETRY_DELAY} seconds until the backend admits it; the
+ * snapshot and its key never change meanwhile.
  *
  * Action Scheduler (bundled with WooCommerce) is used so that large catalogs
  * do not block the HTTP response and can be retried automatically on failure.
@@ -85,7 +86,7 @@ class Product_Backfill
     /** Backfill status: a retryable failure, the unchanged batch is queued again. */
     const STATUS_RETRY_SCHEDULED = "retry_scheduled";
 
-    /** Backfill status: automatic work stopped; the retained batch awaits a manual resume. */
+    /** Backfill status: stopped, for example by deactivation; the retained work awaits a manual resume. */
     const STATUS_STOPPED = "stopped";
 
     /** Start outcome: an idle source queued a fresh full catalog run. */
@@ -108,11 +109,14 @@ class Product_Backfill
      */
     const RETRY_DELAY = 60;
 
-    /** Longest wait between automatic replays. */
+    /** Longest wait between the backed-off replays. */
     const MAX_RETRY_DELAY = 3600;
 
-    /** Failed attempts of one batch in a row after which automatic replays stop. */
-    const MAX_ATTEMPTS = 10;
+    /** Failed attempts of one batch in a row that back off; later replays wait SLOW_RETRY_DELAY. */
+    const BACKOFF_ATTEMPTS = 10;
+
+    /** Seconds between replays after the backoff. */
+    const SLOW_RETRY_DELAY = 21600;
 
     /** Lease lifetime; far longer than building and admitting one batch. */
     const LOCK_SECONDS = 120;
@@ -456,7 +460,7 @@ class Product_Backfill
 
         $state["hook"] = self::ACTION_HOOK;
         $state["next_scheduled_at"] = $next_scheduled_at;
-        $state["max_attempts"] = self::MAX_ATTEMPTS;
+        $state["backoff_attempts"] = self::BACKOFF_ATTEMPTS;
 
         return $state;
     }
@@ -752,14 +756,18 @@ class Product_Backfill
      */
     public static function retry_delay($attempts)
     {
+        if ((int) $attempts >= self::BACKOFF_ATTEMPTS) {
+            return self::SLOW_RETRY_DELAY;
+        }
+
         $exponent = min(max(0, (int) $attempts - 1), 16);
 
         return (int) min(self::RETRY_DELAY * (2 ** $exponent), self::MAX_RETRY_DELAY);
     }
 
     /**
-     * Queues a delayed replay under a new wake-up, or stops automatic replays
-     * once the batch has failed MAX_ATTEMPTS times in a row. Either way the
+     * Queues a delayed replay under a new wake-up; replays slow down after
+     * BACKOFF_ATTEMPTS failures in a row but never stop on their own. The
      * persisted request, its payload and idempotency key stay unchanged.
      *
      * @param string $listing_source_id Listing source TypeID.
@@ -770,23 +778,6 @@ class Product_Backfill
     private function schedule_retry($listing_source_id, $page, $message)
     {
         $attempts = (int) $this->get_state()["attempts"] + 1;
-
-        if ($attempts >= self::MAX_ATTEMPTS) {
-            // Retire the wake-up: only a manual start resumes the batch.
-            if (!$this->update_state(array_merge($this->failed_changes($message), [
-                "status" => self::STATUS_STOPPED,
-                "attempts" => $attempts,
-                "wake" => self::new_wake(),
-            ]))) {
-                $this->assert_owner();
-                throw new \RuntimeException(esc_html(sprintf(
-                    "Aura Historia backfill batch (page %d) could not save its stopped retries.",
-                    $page,
-                )));
-            }
-            return;
-        }
-
         $changes = array_merge($this->failed_changes($message), [
             "status" => self::STATUS_RETRY_SCHEDULED,
             "attempts" => $attempts,

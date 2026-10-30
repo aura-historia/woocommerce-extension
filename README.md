@@ -124,16 +124,16 @@ Reconciliation actions and backfill batch actions carry only a random wake-up to
 
 | | Webhook reconciliation | Catalog backfill batch |
 | --- | --- | --- |
-| Retried automatically | No response or timeout, HTTP 408, 429 and 5xx, an unexpected success status, a local webhook save failure | No response or timeout, HTTP 408, 429 and 5xx, an invalid response, retryable listing failures, a failed page handoff |
-| Not retried | Other HTTP 4xx such as a revoked token, local configuration problems such as an unsupported currency | Non-retryable rejections end the batch as failed, as before |
-| Backoff | 1, 2, 4, 8, 16 and 32 minutes, then hourly | Same |
-| Stops | After 10 failed attempts in a row, about four hours | After 10 failed attempts of one batch in a row |
-| While stopped | Delivery stays paused, no backend call is made | The batch snapshot and its idempotency key are kept unchanged |
-| Resumes | **Sync webhooks now** or another interactive admin action, reconnecting, a changed ListingSource, secret, currency or site language, activation and plugin updates | **Re-send all existing products** replays the retained batch with its key, or continues with the next page |
+| Backed off | No response or timeout, HTTP 408, 429 and 5xx, an unexpected success status, a local webhook save failure | No response or timeout, HTTP 408, 429 and 5xx, an invalid response, retryable listing failures, a failed page handoff |
+| Backoff | 1, 2, 4, 8, 16 and 32 minutes, then hourly, for 10 failed attempts in a row (about four hours) | Same, per batch |
+| After the backoff | Every 6 hours until Aura Historia confirms the configuration | Every 6 hours until the batch is admitted |
+| Other failures | Other HTTP 4xx such as a revoked token, and local problems such as an unsupported currency, show **Needs attention** and are retried every 6 hours | Non-retryable rejections end the batch as failed, as before |
+| Meanwhile | Delivery stays paused | The batch snapshot and its idempotency key are kept unchanged |
+| Retry at once | **Sync webhooks now** or another interactive admin action, reconnecting, a changed ListingSource, secret, currency or site language, activation and plugin updates | **Re-send all existing products** leaves the queued retry in place |
 
-An attempt that only found the sync or batch busy queues itself again a minute later and does not count as a failure. Each automatic reconciliation is counted before its request is sent, so an attempt that ends without recording an outcome, for example after a PHP fatal error, still backs off and counts toward the limit. A failed configuration never activates delivery, and a successful reconciliation activates only the connection and store context it registered; a context change during activation pauses delivery again and queues an immediate attempt for the new context. Deactivation removes queued reconciliation and backfill actions, retires their wake-ups and takes the leases from running work, so a sync or batch already in progress can neither activate delivery nor checkpoint afterwards. Activation queues a fresh reconciliation, while a stopped backfill waits for the manual action. Shipping keeps its own retry limits and ownership rules.
+Automatic work never gives up on its own, so recovery after an outage on the Aura Historia side needs no merchant action; it only slows down to one request per 6 hours per site. An attempt that only found the sync or batch busy queues itself again a minute later and does not count as a failure. Each automatic reconciliation is counted before its request is sent, so an attempt that ends without recording an outcome, for example after a PHP fatal error, still backs off. A failed configuration never activates delivery, and a successful reconciliation activates only the connection and store context it registered; a context change during activation pauses delivery again and queues an immediate attempt for the new context. Deactivation removes queued reconciliation and backfill actions, retires their wake-ups and takes the leases from running work, so a sync or batch already in progress can neither activate delivery nor checkpoint afterwards. Activation queues a fresh reconciliation. A backfill stopped by deactivation waits for **Re-send all existing products**, which replays its retained batch with the same key or continues with its next page. Shipping keeps its own retry limits and ownership rules.
 
-The settings page distinguishes **Sync pending** (queued), **Retry scheduled** (with the failed attempt count and the time of the next attempt), **Needs attention** (stopped) and **Connected** (confirmed) for the webhook configuration, and **Queued**, **Running**, **Retry scheduled**, **Stopped**, **Failed** and **Completed** for the backfill. If nothing advances, check WooCommerce Scheduled Actions and the WordPress cron or server runner, for example `wp action-scheduler run --group=ahpc-partner-connect`.
+The settings page distinguishes **Sync pending** (queued), **Retry scheduled** (with the failed attempt count and the time of the next attempt), **Needs attention** (a failure that usually needs a fix, still retried) and **Connected** (confirmed) for the webhook configuration, and **Queued**, **Running**, **Retry scheduled**, **Stopped**, **Failed** and **Completed** for the backfill. If nothing advances, check WooCommerce Scheduled Actions and the WordPress cron or server runner, for example `wp action-scheduler run --group=ahpc-partner-connect`.
 
 ## Shipping support
 
@@ -401,7 +401,7 @@ Coverage focuses on the plugin's main contract, including:
 - drift recovery
 - async ProductListings admission, exact-batch idempotent retries, stable product-ID cursor pagination, and backfill failure reporting
 - interleaved backfill callbacks and webhook syncs, lease contention and expiry, and workers suspended across cancellation, source replacement or same-source reconnect
-- storefront requests that queue one background reconciliation without a backend call, mocked timeout/5xx/429 outages that back off and stop at the attempt limit, manual resumption with the retained batch and key, and obsolete actions after reconnects or deactivation
+- storefront requests that queue one background reconciliation without a backend call, mocked timeout/5xx/429 outages that back off, slow down and recover on their own with the retained batch and key, and obsolete actions after reconnects or deactivation
 - actual PHP shipping mapper fixtures, generated union/empty-object/microsecond serialization, local zone/variation acquisition, stable profile identity, immutable retries, manual ownership, catalog lag, explicit removal and source coordination
 
 Run the suite with:

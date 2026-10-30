@@ -1439,11 +1439,12 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         ];
     }
 
-    public function test_retryable_failures_back_off_then_stop_and_manual_resume_replays_the_batch()
+    public function test_retryable_failures_back_off_then_replay_the_same_batch_slowly_until_admitted()
     {
         $product = $this->add_product("Outage");
         $failures = $this->retryable_failures();
-        $this->assertCount(Product_Backfill::MAX_ATTEMPTS, $failures);
+        $failures[] = new Response(503, ["Content-Type" => "application/problem+json"], "{}");
+        $this->assertGreaterThan(Product_Backfill::BACKOFF_ATTEMPTS, count($failures));
         $this->mock_responses(array_merge($failures, [$this->admission(1)]));
         $backfill = new Product_Backfill();
         try {
@@ -1466,36 +1467,33 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
                 $this->assertSame((string) $this->request()->getBody(), (string) $this->request($index)->getBody());
                 $status = $backfill->get_status_details();
                 $this->assertSame((string) $attempt, $status["attempts"]);
-                if (Product_Backfill::MAX_ATTEMPTS === $attempt) {
-                    break;
-                }
-
                 $this->assertSame(Product_Backfill::STATUS_RETRY_SCHEDULED, $status["status"]);
                 $this->assertNotSame($args[2], $this->queued_args(1)[2]);
                 $this->assertEqualsWithDelta(time() + Product_Backfill::retry_delay($attempt), $status["next_scheduled_at"], 5);
                 $delays[] = Product_Backfill::retry_delay($attempt);
+
+                if (1 === $attempt) {
+                    // Edits after the first attempt never change the replayed request.
+                    $product->set_name("Edited during the outage");
+                    $product->save();
+                }
             }
 
-            $this->assertSame([60, 120, 240, 480, 960, 1920, 3600, 3600, 3600], $delays);
-            $status = $backfill->get_status_details();
-            $this->assertSame(Product_Backfill::STATUS_STOPPED, $status["status"]);
-            $this->assertSame([], $this->queued_actions(1));
-            $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
-            // The action of the last attempt cannot continue a stopped batch.
-            do_action_ref_array(Product_Backfill::ACTION_HOOK, $args);
-            $this->assertCount(Product_Backfill::MAX_ATTEMPTS, $this->requests);
+            // Exponential backoff, then a slow pace that never gives up.
+            $this->assertSame([60, 120, 240, 480, 960, 1920, 3600, 3600, 3600, 21600, 21600], $delays);
 
-            // A manual resume after recovery replays the retained request.
-            $product->set_name("Edited while stopped");
-            $product->save();
-            $this->assertSame(Product_Backfill::START_RESUMED, $backfill->start_or_resume_backfill(self::SOURCE_ID));
-            $this->assertSame("0", $backfill->get_status_details()["attempts"]);
+            // The superseded action of an earlier attempt cannot resend the batch.
+            do_action_ref_array(Product_Backfill::ACTION_HOOK, $args);
+            $this->assertCount(count($failures), $this->requests);
+
+            // Once the backend is back, the queued replay is admitted without anyone acting.
             $this->run_queued(1);
-            $this->assertCount(Product_Backfill::MAX_ATTEMPTS + 1, $this->requests);
-            $this->assertSame((string) $this->request()->getBody(), (string) $this->request(Product_Backfill::MAX_ATTEMPTS)->getBody());
-            $this->assertSame($snapshot["idempotency_key"], $this->request(Product_Backfill::MAX_ATTEMPTS)->getHeaderLine("Idempotency-Key"));
+            $this->assertCount(count($failures) + 1, $this->requests);
+            $this->assertSame((string) $this->request()->getBody(), (string) $this->request(count($failures))->getBody());
+            $this->assertSame($snapshot["idempotency_key"], $this->request(count($failures))->getHeaderLine("Idempotency-Key"));
             $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH));
             $this->assertSame(Product_Backfill::STATUS_COMPLETE, $backfill->get_status_details()["status"]);
+            $this->assertSame("0", $backfill->get_status_details()["attempts"]);
         } finally {
             $product->delete(true);
         }
