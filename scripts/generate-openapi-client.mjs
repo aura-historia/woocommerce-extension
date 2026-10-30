@@ -532,16 +532,6 @@ function applyWordPressGeneratedClientPatches(config) {
     );
     writeFileSync(productListingsPath, productListings, 'utf8');
 
-    const formDataProcessorPath = path.join(outputPath, 'FormDataProcessor.php');
-    let formDataProcessor = readFileSync(formDataProcessorPath, 'utf8');
-    formDataProcessor = replaceOrThrow(
-        formDataProcessor,
-        'array_is_list($source)',
-        '(!$source || array_keys($source) === range(0, count($source) - 1))',
-        'PHP 7.4 list compatibility',
-    );
-    writeFileSync(formDataProcessorPath, formDataProcessor, 'utf8');
-
     const configurationPath = path.join(outputPath, 'Configuration.php');
     let configuration = readFileSync(configurationPath, 'utf8');
 

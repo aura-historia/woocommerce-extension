@@ -99,7 +99,7 @@ class FormDataProcessor
             $currentPrefix    = '';
             $currentSuffix    = '';
             $currentSuffixEnd = false;
-        } elseif ((!$source || array_keys($source) === range(0, count($source) - 1))) {
+        } elseif (array_is_list($source)) {
             $currentPrefix    = $opt['prefix-list'];
             $currentSuffix    = $opt['suffix-list'];
             $currentSuffixEnd = $opt['suffix-list-end'];

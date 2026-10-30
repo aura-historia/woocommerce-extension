@@ -19,16 +19,8 @@ const result = spawnSync(
 		'composer',
 		...composerArgs,
 	],
-	{ encoding: 'utf8' }
+	{ stdio: 'inherit' }
 );
-
-if ( result.stdout ) {
-	process.stdout.write(result.stdout);
-}
-
-if ( result.stderr ) {
-	process.stderr.write(result.stderr);
-}
 
 if ( result.error ) {
 	console.error(result.error.message);

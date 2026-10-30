@@ -230,6 +230,27 @@ class Test_AHPC_Internal_Api_Configuration extends WP_UnitTestCase
         $this->assertCount(1, $history);
     }
 
+    public function test_malformed_success_report_remains_retryable()
+    {
+        $history = [];
+        $reports = [
+            ["submissionId" => "submission-malformed", "acceptedCount" => 0, "failures" => [null]],
+            ["submissionId" => "submission-null", "acceptedCount" => 1, "failures" => null],
+            ["submissionId" => "submission-missing", "acceptedCount" => 1],
+        ];
+        $this->mock_backend(array_map(static function ($report) {
+            return new Response(202, ["Content-Type" => "application/json"], wp_json_encode($report));
+        }, $reports), $history);
+        foreach ($reports as $report) {
+            $result = (new Backend_Api_Client("https://example.com"))->post_async_partner_product_listings(
+                "ls_01jw7j4azge008000000000003", "token", [["sourceListingId" => "one"]], "retained-key",
+            );
+            $this->assertWPError($result);
+            $this->assertTrue($result->get_error_data()["retryable"]);
+        }
+        $this->assertCount(3, $history);
+    }
+
     public function test_non_2xx_report_is_not_a_success_and_retains_retryability()
     {
         $history = [];

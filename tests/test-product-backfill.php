@@ -229,6 +229,75 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         }
     }
 
+    public function test_stale_action_and_missing_credentials_preserve_pending_snapshot()
+    {
+        $snapshot = ["listing_source_id" => self::SOURCE_ID, "page" => 1,
+            "payloads" => [["sourceListingId" => "123"]], "idempotency_key" => "unchanged-key", "product_count" => 1];
+        update_option(Product_Backfill::OPTION_BATCH, $snapshot, false);
+        $backfill = new Product_Backfill();
+
+        $backfill->process_batch(self::OTHER_SOURCE_ID, 1);
+        $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
+        $this->configure_connection(self::SOURCE_ID, "");
+        $backfill->process_batch(self::SOURCE_ID, 1);
+        $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
+        update_option(Webhook_Manager::OPTION_SETTINGS, "invalid", false);
+        $backfill->process_batch(self::SOURCE_ID, 1);
+        $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
+        $this->assertSame([], $this->requests);
+    }
+
+    public function test_database_read_failure_does_not_report_completion()
+    {
+        global $wpdb;
+        $break_query = static function ($sql, $query) {
+            return $query->get("ahpc_backfill_page") ? "SELECT ID FROM ahpc_missing_test_table" : $sql;
+        };
+        add_filter("posts_request", $break_query, 10, 2);
+        $suppressed = $wpdb->suppress_errors(true);
+        try {
+            try {
+                (new Product_Backfill())->process_batch(self::SOURCE_ID, 1);
+                $this->fail("A failed product read must stop the batch.");
+            } catch (RuntimeException $exception) {
+                $this->assertStringContainsString("Products could not be read", $exception->getMessage());
+            }
+        } finally {
+            remove_filter("posts_request", $break_query, 10);
+            $wpdb->suppress_errors($suppressed);
+        }
+        $state = (new Product_Backfill())->get_status_details();
+        $this->assertSame(Product_Backfill::STATUS_FAILED, $state["status"]);
+        $this->assertSame("", $state["completed_at"]);
+        $this->assertSame("0", $state["last_product_id"]);
+        $this->assertSame([], $this->requests);
+    }
+
+    public function test_backfill_cursor_does_not_filter_nested_queries()
+    {
+        $earlier = $this->add_product("Earlier product");
+        $later = $this->add_product("Later product");
+        $nested_ids = null;
+        $nested_query = static function ($where, $query) use ($earlier, &$nested_ids) {
+            if ($query->get("ahpc_backfill_page")) {
+                $nested = new WP_Query(["post_type" => "product", "post__in" => [$earlier->get_id()], "fields" => "ids"]);
+                $nested_ids = $nested->posts;
+            }
+            return $where;
+        };
+        add_filter("posts_where", $nested_query, 20, 2);
+        try {
+            $method = new ReflectionMethod(Product_Backfill::class, "get_product_ids");
+            $ids = $method->invoke(new Product_Backfill(), $earlier->get_id());
+            $this->assertSame([$later->get_id()], $ids);
+            $this->assertSame([$earlier->get_id()], array_map("intval", $nested_ids));
+        } finally {
+            remove_filter("posts_where", $nested_query, 20);
+            $earlier->delete(true);
+            $later->delete(true);
+        }
+    }
+
     public function test_submits_only_published_products_with_listing_contract()
     {
         $published = $this->add_product("Alpha &amp; Beta");

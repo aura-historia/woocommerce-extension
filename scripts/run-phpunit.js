@@ -16,17 +16,10 @@ const result = spawnSync(
 		'tests-cli',
 		`--env-cwd=wp-content/plugins/${pluginDir}`,
 		'vendor/bin/phpunit',
+		...process.argv.slice(2),
 	],
-	{ encoding: 'utf8' }
+	{ stdio: 'inherit' }
 );
-
-if ( result.stdout ) {
-	process.stdout.write(result.stdout);
-}
-
-if ( result.stderr ) {
-	process.stderr.write(result.stderr);
-}
 
 if ( result.error ) {
 	console.error(result.error.message);

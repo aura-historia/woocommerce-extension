@@ -13,6 +13,7 @@ use AuraHistoria\PartnerConnect\InternalApi\Api\ProductListingsApi;
 use AuraHistoria\PartnerConnect\InternalApi\ApiException;
 use AuraHistoria\PartnerConnect\InternalApi\Configuration;
 use AuraHistoria\PartnerConnect\InternalApi\Model\AsyncProductListingBatchReport;
+use AuraHistoria\PartnerConnect\InternalApi\Model\AsyncProductListingBatchFailure;
 use AuraHistoria\PartnerConnect\InternalApi\Model\OAuthTokenResponseData;
 use AuraHistoria\PartnerConnect\InternalApi\Model\PutWoocommerceListingSourceIngestionConfigurationData;
 use GuzzleHttp\Client as GuzzleClient;
@@ -105,7 +106,7 @@ class Backend_Api_Client
         if ("" === $this->base_url || !Webhook_Manager::is_valid_listing_source_id($listing_source_id)) {
             return $this->invalid_listing_source_error();
         }
-        if (!is_string($idempotency_key) || !preg_match('/^[\x21-\x2B\x2D-\x7E]{1,128}$/D', $idempotency_key) || count($payloads) > 100 || (!empty($payloads) && array_keys($payloads) !== range(0, count($payloads) - 1))) {
+        if (!is_string($idempotency_key) || !preg_match('/^[\x21-\x2B\x2D-\x7E]{1,128}$/D', $idempotency_key) || count($payloads) > 100 || !array_is_list($payloads)) {
             return $this->invalid_request_error();
         }
         if (!$this->is_runtime_available()) {
@@ -138,17 +139,21 @@ class Backend_Api_Client
         if (202 !== $status || !$response instanceof AsyncProductListingBatchReport) {
             return new WP_Error("ahpc_backend_invalid_response", __("The backend returned an unexpected batch response.", "aura-historia-partner-connect"), ["retryable" => true]);
         }
+        $failures = $response->getFailures();
         $report = $this->parse_batch_report([
             "submissionId" => $response->getSubmissionId(),
             "acceptedCount" => $response->getAcceptedCount(),
-            "failures" => array_map(static function ($failure) {
+            "failures" => is_array($failures) ? array_map(static function ($failure) {
+                if (!$failure instanceof AsyncProductListingBatchFailure) {
+                    return null; // The report validator rejects malformed entries.
+                }
                 return [
                     "index" => $failure->getIndex(),
                     "sourceListingId" => $failure->getSourceListingId(),
                     "error" => $failure->getError(),
                     "retryable" => $failure->getRetryable(),
                 ];
-            }, (array) $response->getFailures()),
+            }, $failures) : null,
         ], $payloads);
         return null !== $report ? $report : new WP_Error("ahpc_backend_invalid_response", __("The backend returned an unexpected batch response.", "aura-historia-partner-connect"), ["retryable" => true]);
     }
@@ -190,7 +195,7 @@ class Backend_Api_Client
     private function parse_batch_report($body, array $payloads)
     {
         $count = count($payloads);
-        if (!is_array($body) || !isset($body["submissionId"], $body["acceptedCount"], $body["failures"]) || !is_string($body["submissionId"]) || "" === $body["submissionId"] || strlen($body["submissionId"]) > 512 || preg_match('/[\x00-\x1F\x7F]/', $body["submissionId"]) || !is_int($body["acceptedCount"]) || !is_array($body["failures"]) || (!empty($body["failures"]) && array_keys($body["failures"]) !== range(0, count($body["failures"]) - 1)) || $body["acceptedCount"] < 0 || $body["acceptedCount"] + count($body["failures"]) !== $count) {
+        if (!is_array($body) || !isset($body["submissionId"], $body["acceptedCount"], $body["failures"]) || !is_string($body["submissionId"]) || "" === $body["submissionId"] || strlen($body["submissionId"]) > 512 || preg_match('/[\x00-\x1F\x7F]/', $body["submissionId"]) || !is_int($body["acceptedCount"]) || !is_array($body["failures"]) || !array_is_list($body["failures"]) || $body["acceptedCount"] < 0 || $body["acceptedCount"] + count($body["failures"]) !== $count) {
             return null;
         }
         $failures = [];

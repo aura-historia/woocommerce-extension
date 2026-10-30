@@ -33,6 +33,14 @@ tests_add_filter("pre_http_request", static function ($preempt) {
         : $preempt;
 }, 1);
 
+// The typed API uses Guzzle, which does not pass through WordPress HTTP hooks.
+// Tests that need responses replace this default at the normal filter priority.
+tests_add_filter("ahpc_backend_guzzle_client", static function () {
+    return new \GuzzleHttp\Client([
+        "handler" => \GuzzleHttp\HandlerStack::create(new \GuzzleHttp\Handler\MockHandler()),
+    ]);
+}, 1);
+
 tests_add_filter("muplugins_loaded", static function () {
     $woocommerce_files = glob(WP_PLUGIN_DIR . "/*/woocommerce.php");
 

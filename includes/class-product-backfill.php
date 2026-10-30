@@ -120,11 +120,6 @@ class Product_Backfill
     ];
 
     /**
-     * Plugin text domain.
-     */
-    const TEXT_DOMAIN = "aura-historia-partner-connect";
-
-    /**
      * Deferred backfill operation to run once Action Scheduler is initialized.
      *
      * @var array<string,string>|null
@@ -374,7 +369,6 @@ class Product_Backfill
         $settings = get_option(Webhook_Manager::OPTION_SETTINGS, []);
 
         if (!is_array($settings)) {
-            delete_option(self::OPTION_BATCH);
             return;
         }
 
@@ -390,7 +384,8 @@ class Product_Backfill
             !Webhook_Manager::is_valid_listing_source_id($listing_source_id) ||
             !Webhook_Manager::is_valid_access_token($access_token)
         ) {
-            delete_option(self::OPTION_BATCH);
+            // A stale action must not delete another connection's pending
+            // request. Missing credentials may also be repaired before replay.
             return;
         }
 
@@ -429,6 +424,11 @@ class Product_Backfill
             !is_string($snapshot["idempotency_key"])
         ) {
             $product_ids = $this->get_product_ids((int) $this->get_state()["last_product_id"]);
+
+            if (is_wp_error($product_ids)) {
+                $this->record_failed($product_ids->get_error_message());
+                throw new \RuntimeException(esc_html($product_ids->get_error_message()));
+            }
 
             if (empty($product_ids)) {
                 delete_option(self::OPTION_BATCH);
@@ -773,23 +773,26 @@ class Product_Backfill
      * including products that disappear before their payload is built.
      *
      * @param int $after_id Last selected product ID from the previous batch.
-     * @return int[]
+     * @return int[]|\WP_Error
      */
     private function get_product_ids($after_id)
     {
         if (!function_exists("wc_get_product")) {
-            return [];
+            return new \WP_Error("ahpc_backfill_products_unavailable", "WooCommerce products could not be read. Retry the product backfill.");
         }
 
         global $wpdb;
         $after_id = max(0, (int) $after_id);
-        $where_after_id = static function ($where) use ($wpdb, $after_id) {
+        $where_after_id = static function ($where, $query) use ($wpdb, $after_id) {
+            if (!$query->get("ahpc_backfill_page")) {
+                return $where;
+            }
             return $where . $wpdb->prepare(" AND {$wpdb->posts}.ID > %d", $after_id);
         };
 
         // Scope the keyset constraint to this query; get_posts() suppresses
         // filters by default, so use WP_Query directly for the ID selection.
-        add_filter("posts_where", $where_after_id);
+        add_filter("posts_where", $where_after_id, 10, 2);
         try {
             $query = new \WP_Query([
                 "post_type" => "product",
@@ -799,7 +802,11 @@ class Product_Backfill
                 "order" => "ASC",
                 "fields" => "ids",
                 "no_found_rows" => true,
+                "ahpc_backfill_page" => true,
             ]);
+            if ($wpdb->last_error) {
+                return new \WP_Error("ahpc_backfill_product_read_failed", "Products could not be read. Retry the product backfill.");
+            }
         } finally {
             remove_filter("posts_where", $where_after_id);
         }
