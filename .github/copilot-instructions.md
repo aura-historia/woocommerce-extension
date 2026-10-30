@@ -20,6 +20,7 @@ Keep the plugin small and follow the current structure:
 - `includes/class-plugin.php` — WordPress/WooCommerce bootstrapping, admin UI, settings page, lightweight validation, and manual sync action
 - `includes/class-webhook-manager.php` — webhook ownership, idempotent sync, backend secret registration, pause/delete behavior, drift recovery, and endpoint resolution
 - `includes/class-product-backfill.php` — separate asynchronous catalog CREATE admission
+- `includes/class-option-lease.php` — expiring option-row leases and lease-fenced checkpoints; backfill and webhook sync each use their own lease
 - `includes/class-shipping-{acquisition,mapper,publisher}.php` — local shipping reads, conservative mapping and resumable typed publication shared with ongoing reconciliation
 - `includes/class-backend-api-client.php` — typed backend requests using the generated client
 - `uninstall.php` — uninstall cleanup
@@ -88,6 +89,7 @@ That means:
 - WooCommerce signs deliveries with `X-WC-Webhook-Signature`.
 - The generated secret is a signing secret, not a standalone Authorization header.
 - Keep catalog backfill separate from live webhooks and shipping publication. Shipping must never restart catalog CREATE work.
+- Backfill batches and webhook syncs are serialized by their own `Option_Lease`. Write their checkpoints through the lease, recheck it and the connection before outbound calls, and keep backfill action arguments to the source, page and wake-up token.
 - Shipping uses the pinned API contract, stable profile identity, immutable retry requests, actual acquisition times and `observation: {}`; do not add expiry fields or a backend-to-plugin callback.
 - Failed or incomplete shipping reads preserve existing assertions. Respect component ownership and reacquire after conflicts; use the shared publisher source lock and ordering for all shipping work.
 - `PRODUCT_LISTING_WITHDRAWN` is a catalog lifecycle state, not a revision conflict. Never restore or recreate a listing to clear its shipping, and never report a refused removal as committed.

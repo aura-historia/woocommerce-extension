@@ -9,6 +9,7 @@ if (!defined("WP_UNINSTALL_PLUGIN")) {
     exit();
 }
 
+require_once __DIR__ . "/includes/class-option-lease.php";
 require_once __DIR__ . "/includes/class-webhook-manager.php";
 require_once __DIR__ . "/includes/class-product-backfill.php";
 require_once __DIR__ . "/includes/class-shipping-publisher.php";

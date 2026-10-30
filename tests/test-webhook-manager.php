@@ -2382,6 +2382,32 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         }
     }
 
+    /** Returns the queued backfill actions' arguments for a source and page. */
+    private function backfill_actions($listing_source_id, $page)
+    {
+        $matches = [];
+        foreach (as_get_scheduled_actions([
+            "hook" => Product_Backfill::ACTION_HOOK,
+            "group" => Product_Backfill::ACTION_GROUP,
+            "status" => ActionScheduler_Store::STATUS_PENDING,
+            "per_page" => 100,
+        ]) as $action) {
+            $args = $action->get_args();
+            if ($listing_source_id === $args[0] && $page === $args[1]) {
+                $matches[] = $args;
+            }
+        }
+
+        return $matches;
+    }
+
+    /** Runs a queued backfill action the way Action Scheduler would. */
+    private function run_backfill_action(array $args)
+    {
+        as_unschedule_all_actions(Product_Backfill::ACTION_HOOK, $args, Product_Backfill::ACTION_GROUP);
+        do_action_ref_array(Product_Backfill::ACTION_HOOK, $args);
+    }
+
     private function connect_listing_source(Plugin $plugin, $listing_source_id, array $responses = [])
     {
         $url = $plugin->create_oauth_authorization_url();
@@ -2405,15 +2431,15 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $b = "ls_01jw7j4azge00800000000000g";
         $plugin = new Plugin();
         $this->assertTrue($this->connect_listing_source($plugin, $a));
-        $this->assertTrue((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, [$a, 1], Product_Backfill::ACTION_GROUP));
+        $this->assertCount(1, $this->backfill_actions($a, 1));
         $this->assertSame([$a => true], get_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []));
         $this->assertTrue($this->connect_listing_source($plugin, $b));
-        $this->assertFalse((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, [$a, 1], Product_Backfill::ACTION_GROUP));
-        $this->assertTrue((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, [$b, 1], Product_Backfill::ACTION_GROUP));
+        $this->assertCount(0, $this->backfill_actions($a, 1));
+        $this->assertCount(1, $this->backfill_actions($b, 1));
         $this->assertSame([$a => true, $b => true], get_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []));
         $this->assertTrue($this->connect_listing_source($plugin, $a));
-        $this->assertFalse((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, [$a, 1], Product_Backfill::ACTION_GROUP));
-        $this->assertFalse((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, [$b, 1], Product_Backfill::ACTION_GROUP));
+        $this->assertCount(0, $this->backfill_actions($a, 1));
+        $this->assertCount(0, $this->backfill_actions($b, 1));
         $this->assertFalse(get_option(Plugin::OPTION_INITIAL_BACKFILL_PENDING_SOURCE, false));
         $this->assertSame([$a => true, $b => true], get_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []));
     }
@@ -2431,8 +2457,10 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $product->save();
         try {
             $this->set_backend_mock_responses([new Response(503, ["Content-Type" => "application/problem+json"], "{}")]);
+            $queued = $this->backfill_actions($a, 1);
+            $this->assertCount(1, $queued);
             try {
-                (new Product_Backfill())->process_batch($a, 1);
+                $this->run_backfill_action($queued[0]);
                 $this->fail("Expected the first backfill to queue a retry");
             } catch (RuntimeException $exception) {
                 $this->assertNotFalse(get_option(Product_Backfill::OPTION_BATCH, false));
@@ -2440,7 +2468,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             $this->assertArrayHasKey($a, get_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []));
             $this->assertTrue($this->connect_listing_source($plugin, $b));
             $this->assertTrue($this->connect_listing_source($plugin, $a));
-            $this->assertFalse((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, [$a, 1], Product_Backfill::ACTION_GROUP));
+            $this->assertCount(0, $this->backfill_actions($a, 1));
         } finally {
             $product->delete(true);
         }
@@ -2456,12 +2484,12 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $this->assertInstanceOf(WP_Error::class, $result);
         $this->assertSame($id, get_option(Plugin::OPTION_INITIAL_BACKFILL_PENDING_SOURCE));
         $this->assertSame([], get_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []));
-        $this->assertFalse((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, [$id, 1], Product_Backfill::ACTION_GROUP));
+        $this->assertCount(0, $this->backfill_actions($id, 1));
 
         $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
         (new Plugin())->bootstrap_woocommerce();
         $this->assertSame("no", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
-        $this->assertTrue((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, [$id, 1], Product_Backfill::ACTION_GROUP));
+        $this->assertCount(1, $this->backfill_actions($id, 1));
         $this->assertSame([$id => true], get_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []));
         $this->assertFalse(get_option(Plugin::OPTION_INITIAL_BACKFILL_PENDING_SOURCE, false));
         $state = get_option(Product_Backfill::OPTION_STATE);
@@ -2493,7 +2521,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
 
         delete_option(Product_Backfill::OPTION_BATCH);
         (new Plugin())->bootstrap_woocommerce();
-        $this->assertTrue((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, [$id, 1], Product_Backfill::ACTION_GROUP));
+        $this->assertCount(1, $this->backfill_actions($id, 1));
         $this->assertSame([$id => true], get_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []));
         $this->assertFalse(get_option(Plugin::OPTION_INITIAL_BACKFILL_PENDING_SOURCE, false));
         $this->assertFalse(get_option(Plugin::OPTION_INITIAL_BACKFILL_ERROR, false));
@@ -2522,18 +2550,15 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
         $this->assertSame(Product_Backfill::START_RESUMED, $plugin->queue_manual_backfill());
         $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
-        $this->assertTrue((bool) as_has_scheduled_action(
-            Product_Backfill::ACTION_HOOK,
-            [$id, 1, "retry-" . hash("sha256", "manual-retry-key:1")],
-            Product_Backfill::ACTION_GROUP,
-        ));
+        $queued = $this->backfill_actions($id, 1);
+        $this->assertCount(1, $queued);
 
         $this->set_backend_mock_responses([new Response(202, ["Content-Type" => "application/json"], wp_json_encode([
             "submissionId" => "manual-resume",
             "acceptedCount" => 1,
             "failures" => [],
         ]))]);
-        (new Product_Backfill())->process_batch($id, 1);
+        $this->run_backfill_action($queued[0]);
         $requests = $this->get_backend_requests_for_url(
             "https://example.com/v1/listing-sources/" . $id . "/product-listings/async",
         );
@@ -2967,6 +2992,10 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         update_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, [$id => true], false);
         update_option(Plugin::OPTION_INITIAL_BACKFILL_PENDING_SOURCE, $id, false);
         update_option(Plugin::OPTION_INITIAL_BACKFILL_ERROR, "Retry later", false);
+        // Leases left behind by requests that never released them.
+        $abandoned = wp_json_encode(["token" => "abandoned", "until" => time() + 60]);
+        update_option(Product_Backfill::OPTION_LOCK, $abandoned, false);
+        update_option(Webhook_Manager::OPTION_SYNC_LOCK, $abandoned, false);
         if (!defined("WP_UNINSTALL_PLUGIN")) {
             define("WP_UNINSTALL_PLUGIN", "aura-historia-partner-connect.php");
         }
@@ -2977,6 +3006,8 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             Webhook_Manager::OPTION_NEEDS_SYNC,
             Product_Backfill::OPTION_BATCH,
             Product_Backfill::OPTION_STATE,
+            Product_Backfill::OPTION_LOCK,
+            Webhook_Manager::OPTION_SYNC_LOCK,
             Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES,
             Plugin::OPTION_INITIAL_BACKFILL_PENDING_SOURCE,
             Plugin::OPTION_INITIAL_BACKFILL_ERROR,
@@ -2986,6 +3017,269 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $this->assertFalse((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, null, Product_Backfill::ACTION_GROUP));
         foreach ($ids as $webhook_id) {
             $this->assertSame(0, (new WC_Webhook($webhook_id))->get_id());
+        }
+    }
+
+    /** Lets the webhook sync lease run out, as if its holder had stalled. */
+    private function expire_sync_lease()
+    {
+        global $wpdb;
+        $lease = json_decode((string) $wpdb->get_var($wpdb->prepare(
+            "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s",
+            Webhook_Manager::OPTION_SYNC_LOCK,
+        )), true);
+        $this->assertIsArray($lease);
+        $lease["until"] = time() - 1;
+        $wpdb->update($wpdb->options, ["option_value" => wp_json_encode($lease)], ["option_name" => Webhook_Manager::OPTION_SYNC_LOCK]);
+        wp_cache_delete(Webhook_Manager::OPTION_SYNC_LOCK, "options");
+    }
+
+    /** Counts every webhook row that carries a managed webhook name. */
+    private function count_managed_webhook_rows()
+    {
+        global $wpdb;
+        return (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$wpdb->prefix}wc_webhooks WHERE name LIKE %s",
+            $wpdb->esc_like("Aura Historia Partner Connect - ") . "%",
+        ));
+    }
+
+    public function test_concurrent_syncs_keep_three_webhooks_and_one_registration()
+    {
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => "ls_01jw7j4azge00800000000000g",
+            "access_token" => "test-token",
+            "secret" => "test-secret",
+        ]);
+        $concurrent = [];
+        $registrations = 0;
+        $this->backend_guzzle_client = new Client([
+            "handler" => function ($request) use (&$concurrent, &$registrations) {
+                if (1 === ++$registrations) {
+                    // Another request syncs while the registration is in flight.
+                    $concurrent[] = (new Webhook_Manager())->sync_webhooks();
+                }
+                return new \GuzzleHttp\Promise\FulfilledPromise(new Response(204));
+            },
+        ]);
+        // Another request syncs as soon as the first managed webhook exists.
+        $creating = false;
+        $while_creating = function () use (&$concurrent, &$creating) {
+            if (!$creating) {
+                $creating = true;
+                $concurrent[] = (new Webhook_Manager())->sync_webhooks();
+            }
+        };
+        add_action("woocommerce_new_webhook", $while_creating);
+        try {
+            $this->assertTrue((new Webhook_Manager())->sync_webhooks());
+        } finally {
+            remove_action("woocommerce_new_webhook", $while_creating);
+        }
+
+        $this->assertCount(2, $concurrent);
+        foreach ($concurrent as $result) {
+            $this->assertInstanceOf(WP_Error::class, $result);
+            $this->assertSame("ahpc_sync_in_progress", $result->get_error_code());
+        }
+        $this->assertSame(1, $registrations);
+        $ids = (new Webhook_Manager())->get_webhook_ids();
+        $this->assertCount(3, $ids);
+        $this->assertSame(3, $this->count_managed_webhook_rows());
+        foreach ($ids as $webhook_id) {
+            $this->assertSame("active", (new WC_Webhook($webhook_id))->get_status());
+        }
+        $this->assertSame("no", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        $this->assertSame("", (new Webhook_Manager())->get_last_sync_error());
+        $this->assertTrue((new Webhook_Manager())->sync_webhooks());
+        $this->assertSame(3, $this->count_managed_webhook_rows());
+    }
+
+    public function test_sync_does_not_activate_a_connection_replaced_during_registration()
+    {
+        $id = "ls_01jw7j4azge00800000000000g";
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "registered-secret",
+        ]);
+        $secrets = [];
+        $this->backend_guzzle_client = new Client([
+            "handler" => function ($request) use ($id, &$secrets) {
+                $secrets[] = json_decode((string) $request->getBody(), true)["webhookSecret"];
+                if (1 === count($secrets)) {
+                    // Another request reconnects while this registration is in flight.
+                    update_option(Webhook_Manager::OPTION_SETTINGS, [
+                        "listing_source_id" => $id,
+                        "access_token" => "test-token",
+                        "secret" => "reconnected-secret",
+                    ]);
+                }
+                return new \GuzzleHttp\Promise\FulfilledPromise(new Response(204));
+            },
+        ]);
+        $manager = new Webhook_Manager();
+
+        $result = $manager->sync_webhooks();
+        $this->assertInstanceOf(WP_Error::class, $result);
+        $this->assertSame("ahpc_connection_changed", $result->get_error_code());
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        $ids = $manager->get_webhook_ids();
+        $this->assertCount(3, $ids);
+        foreach ($ids as $webhook_id) {
+            $this->assertSame("paused", (new WC_Webhook($webhook_id))->get_status());
+        }
+
+        $this->assertTrue($manager->sync_webhooks());
+        $this->assertSame(["registered-secret", "reconnected-secret"], $secrets);
+        $this->assertSame($ids, $manager->get_webhook_ids());
+        foreach ($ids as $webhook_id) {
+            $webhook = new WC_Webhook($webhook_id);
+            $this->assertSame("active", $webhook->get_status());
+            $this->assertSame("reconnected-secret", $webhook->get_secret());
+        }
+    }
+
+    public function test_expired_sync_cannot_activate_over_its_successor()
+    {
+        $id = "ls_01jw7j4azge00800000000000g";
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "stalled-secret",
+        ]);
+        $secrets = [];
+        $successor = null;
+        $this->backend_guzzle_client = new Client([
+            "handler" => function ($request) use ($id, &$secrets, &$successor) {
+                $secrets[] = json_decode((string) $request->getBody(), true)["webhookSecret"];
+                if (1 === count($secrets)) {
+                    // The first sync stalls past its lease while a successor
+                    // registers and activates a newer secret.
+                    $this->expire_sync_lease();
+                    update_option(Webhook_Manager::OPTION_SETTINGS, [
+                        "listing_source_id" => $id,
+                        "access_token" => "test-token",
+                        "secret" => "successor-secret",
+                    ]);
+                    $successor = (new Webhook_Manager())->sync_webhooks();
+                }
+                return new \GuzzleHttp\Promise\FulfilledPromise(new Response(204));
+            },
+        ]);
+        $manager = new Webhook_Manager();
+
+        $result = $manager->sync_webhooks();
+
+        $this->assertTrue($successor);
+        $this->assertInstanceOf(WP_Error::class, $result);
+        $this->assertSame("ahpc_sync_superseded", $result->get_error_code());
+        $this->assertSame(["stalled-secret", "successor-secret"], $secrets);
+        $ids = $manager->get_webhook_ids();
+        $this->assertCount(3, $ids);
+        $this->assertSame(3, $this->count_managed_webhook_rows());
+        foreach ($ids as $webhook_id) {
+            $webhook = new WC_Webhook($webhook_id);
+            $this->assertSame("active", $webhook->get_status());
+            $this->assertSame("successor-secret", $webhook->get_secret());
+        }
+        // The stalled sync cannot vouch for the result and asks for another pass.
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+    }
+
+    public function test_sync_does_not_activate_a_currency_changed_during_registration()
+    {
+        update_option("woocommerce_currency", "EUR", false);
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => "ls_01jw7j4azge00800000000000g",
+            "access_token" => "test-token",
+            "secret" => "test-secret",
+        ]);
+        $currencies = [];
+        $this->backend_guzzle_client = new Client([
+            "handler" => function ($request) use (&$currencies) {
+                $currencies[] = json_decode((string) $request->getBody(), true)["currency"];
+                if (1 === count($currencies)) {
+                    // A merchant changes the store currency in another request.
+                    update_option("woocommerce_currency", "GBP", false);
+                }
+                return new \GuzzleHttp\Promise\FulfilledPromise(new Response(204));
+            },
+        ]);
+        $manager = new Webhook_Manager();
+
+        $result = $manager->sync_webhooks();
+        $this->assertInstanceOf(WP_Error::class, $result);
+        $this->assertSame("ahpc_connection_changed", $result->get_error_code());
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        $ids = $manager->get_webhook_ids();
+        foreach ($ids as $webhook_id) {
+            $this->assertSame("paused", (new WC_Webhook($webhook_id))->get_status());
+        }
+
+        $this->assertTrue($manager->maybe_sync_webhooks());
+        $this->assertSame(["EUR", "GBP"], $currencies);
+        $this->assertSame("no", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        foreach ($ids as $webhook_id) {
+            $this->assertSame("active", (new WC_Webhook($webhook_id))->get_status());
+        }
+    }
+
+    public function test_interactive_sync_waits_for_another_request_to_finish()
+    {
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => "ls_01jw7j4azge00800000000000g",
+            "access_token" => "test-token",
+            "secret" => "test-secret",
+        ]);
+        // Another request holds the sync lease for about one more second.
+        $holder = new \AuraHistoria\PartnerConnect\Option_Lease(Webhook_Manager::OPTION_SYNC_LOCK);
+        $this->assertTrue($holder->acquire(1));
+        $manager = new Webhook_Manager();
+
+        $busy = $manager->sync_webhooks();
+        $this->assertSame("ahpc_sync_in_progress", $busy->get_error_code());
+        $this->assertSame([], $manager->get_webhook_ids());
+        $this->assertSame("", $manager->get_last_sync_error());
+        $this->assertSame([], $this->backend_http_requests);
+
+        $this->assertTrue($manager->sync_webhooks(Webhook_Manager::SYNC_WAIT_SECONDS));
+        $this->assertCount(3, $manager->get_webhook_ids());
+        $this->assertCount(1, $this->backend_http_requests);
+    }
+
+    public function test_stalled_sync_failure_leaves_its_successors_webhooks_active()
+    {
+        $id = "ls_01jw7j4azge00800000000000g";
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "test-secret",
+        ]);
+        $successor = null;
+        $registrations = 0;
+        $this->backend_guzzle_client = new Client([
+            "handler" => function ($request) use (&$successor, &$registrations) {
+                if (1 === ++$registrations) {
+                    // The first registration stalls past its lease and then
+                    // fails, after a successor has activated delivery.
+                    $this->expire_sync_lease();
+                    $successor = (new Webhook_Manager())->sync_webhooks();
+                    return new \GuzzleHttp\Promise\FulfilledPromise(new Response(503));
+                }
+                return new \GuzzleHttp\Promise\FulfilledPromise(new Response(204));
+            },
+        ]);
+        $manager = new Webhook_Manager();
+
+        $result = $manager->sync_webhooks();
+
+        $this->assertTrue($successor);
+        $this->assertSame("ahpc_sync_superseded", $result->get_error_code());
+        $this->assertSame("", $manager->get_last_sync_error());
+        $this->assertSame(3, $this->count_managed_webhook_rows());
+        foreach ($manager->get_webhook_ids() as $webhook_id) {
+            $this->assertSame("active", (new WC_Webhook($webhook_id))->get_status());
         }
     }
 }
