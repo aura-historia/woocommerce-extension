@@ -215,8 +215,9 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      # The format-valid test client ID enables automatic OAuth start. The tests
-      # capture its authorization redirect, so it never reaches Aura Historia.
+      # The format-valid test client ID enables automatic OAuth start. The e2e
+      # fake broker mu-plugin answers the broker and API requests on the site
+      # itself, so nothing reaches Aura Historia.
       - name: Configure environment versions and OAuth client
         env:
           WP_CORE: "WordPress/WordPress#7.0"
@@ -227,7 +228,12 @@ jobs:
           config = {
               'core': os.environ['WP_CORE'],
               'plugins': [os.environ['WC_ZIP'], '.'],
-              'config': {'AHPC_OAUTH_CLIENT_ID': 'oc_01jw7j4azge00800000000000g'},
+              'mappings': {'wp-content/mu-plugins': './tests/e2e/mu-plugins'},
+              'config': {
+                  'AHPC_OAUTH_CLIENT_ID': 'oc_01jw7j4azge00800000000000g',
+                  'AHPC_OAUTH_BROKER_BASE_URL': 'http://localhost:8888',
+                  'AHPC_E2E_FAKE_BROKER': True,
+              },
           }
           with open('.wp-env.override.json', 'w') as f:
               json.dump(config, f, indent=2)

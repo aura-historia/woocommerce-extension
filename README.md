@@ -74,7 +74,7 @@ Managed webhook topics:
 - keeps webhook sync idempotent and repairs manual drift
 - generates the WooCommerce signing secret automatically and keeps it hidden from merchants
 - starts an OAuth connection flow from the settings page instead of asking merchants to paste credentials
-- exchanges the OAuth broker code for an Aura Historia access token and stores it locally
+- completes OAuth through the Aura Historia broker's transaction protocol: the browser carries only opaque references, and the access token and ListingSource come together from one proof-protected server-to-server response
 - sends the generated secret to Aura Historia before activating delivery
 - injects bearer `Authorization` into signed, managed webhook deliveries late in the WordPress HTTP stack without rewriting WooCommerce's signed body
 - submits published catalog listings to the async ProductListings API in background batches after connection; admission does not mean ingestion is complete
@@ -107,14 +107,51 @@ It is **not** a general-purpose WooCommerce webhook manager.
 
 1. A merchant installs the plugin and opens `WooCommerce > Aura Historia`.
 2. If the store is not connected yet, the settings page starts the Aura Historia OAuth flow automatically, once per browser tab. After a failed or denied attempt, or when the tab cannot record the attempt in session storage, the merchant uses the Connect button instead.
-3. Aura Historia redirects back to the plugin settings page with a selected `ls_` ListingSource ID and a short-lived third-party exchange code. The webapp requests source selection with `requires_listing_source_id=true` and returns the selected `ls_` ID in `listing_source_id`.
-4. The plugin exchanges that code for an Aura Historia access token and stores the ListingSource ID and token locally.
+3. The plugin registers a broker transaction server to server and sends the browser to Aura Historia, where the merchant signs in, selects a ListingSource and approves access. The broker then returns the browser to the settings page with a one-time completion code.
+4. The plugin redeems that code together with a secret that never left the server and stores the returned ListingSource ID and access token locally. See [Connecting through the OAuth broker](#connecting-through-the-oauth-broker).
 5. The plugin generates a WooCommerce webhook signing secret and applies that exact secret, store currency, and language via `PUT /v1/listing-sources/{listingSourceId}/ingestion-configurations/woocommerce` before enabling delivery.
 6. The plugin stages the three managed WooCommerce webhooks paused with the desired signing secret before updating Aura Historia, then activates them only after provider configuration succeeds. Changes to the ListingSource, signing secret or token validity, WooCommerce currency or WordPress site language pause delivery immediately and require another provider sync. Unsupported store currencies leave the webhooks paused until corrected. A background reconciliation repeats this staged sync when a managed webhook is deleted or one of its managed fields (name, topic, status, delivery URL, secret, user or API version) no longer matches what the sync applies, for example after a merchant edit or when WooCommerce disables the webhook after repeated failed deliveries. Reactivation resets the failure count. WooCommerce's own save after each delivery, which only records the failure count, does not trigger a sync. Only one request synchronizes at a time. A background reconciliation that finds another sync running changes nothing, leaves the sync required and tries again a minute later; connecting, **Sync webhooks now** and the manual backfill and shipping actions wait up to 20 seconds for it first. If the connection, store currency or site language changes while a configuration is being registered, delivery stays paused until the next sync registers the new one. A sync that overran its lease leaves its successor's webhooks untouched and marks another sync required.
 7. WooCommerce sends unchanged, signed live webhook bodies to `POST /v1/webhooks/woocommerce/{listingSourceId}` with bearer authorization injected late.
    WooCommerce's own `product.deleted` topic only fires when a product or variation is trashed. The managed `product.deleted` webhook, and no merchant webhook, also fires after WordPress has removed a parent product's row permanently, for example through `DELETE /wc/v3/products/{id}?force=true`, `WC_Product::delete(true)`, Empty Trash, the scheduled Trash purge or a site with Trash disabled. The body is WooCommerce's signed `{"id": <product ID>}`. A delete that fails or never runs sends nothing, and neither does a deletion made after `switch_to_blog()`. Permanently deleting a variation sends nothing. Trashing one keeps WooCommerce's standard deletion with the variation's own ID, which matches no listing, so a published parent keeps its listing. Permanently deleting a trashed product can send the identical deletion message again; it never recreates the listing. Like every WooCommerce webhook delivery, a deletion is attempted once and is not retried after a failed response.
 8. After provider/webhook configuration succeeds, the plugin schedules an initial full CREATE backfill once per ListingSource. If setup or queueing fails, the initial run remains pending and retries on a later healthy bootstrap. Returning to a previously started source does not replay it automatically. Batches of up to 100 go to `POST /v1/listing-sources/{listingSourceId}/product-listings/async`; HTTP `202` means admission, not completed creation. Routine webhook repairs never start a new CREATE run unless that source's first run is still pending. The manual action resumes a pending batch with its original payload and idempotency key, leaves queued work alone, and starts a fresh run only when idle; its confirmation notice names which of these happened. A lease serializes snapshot allocation, admission checkpoints and page handoff across requests, and every checkpoint commits only while that lease is still held. Batch actions carry the ListingSource ID, page and a random wake-up token, never credentials; only the action holding the run's current wake-up processes, so duplicates and work from a cancelled or replaced run do nothing. A callback that finds the batch busy queues itself again instead of dropping work. A callback that loses its lease, or sees the connection change while its request is in flight, checkpoints nothing; the same persisted request then replays with the current token, also after reconnecting to the same ListingSource.
 9. A separate shipping job acquires local settings, publishes the common profile and source default, then attaches existing catalog listings and scoped class/variation inputs. **Import shipping** resumes interrupted work or requests a fresh acquisition. It does not restart catalog creation. Neither job needs an open wp-admin page.
+
+### Connecting through the OAuth broker
+
+The connection uses version 2 of the webapp's WooCommerce OAuth broker transaction protocol ([webapp #1025](https://github.com/aura-historia/webapp/issues/1025)). The broker performs sign-in, consent, ListingSource selection and the OAuth code exchange with the backend. The plugin never generates a backend PKCE verifier, never sees an authorization code and no longer redeems `/v1/oauth/tokens/by-third-party-code/...`.
+
+1. **Start.** After the `manage_woocommerce` and nonce checks, the plugin generates independent `client_state` and `completion_secret` values (32 bytes each from `random_bytes()`, base64url without padding; there is no weaker fallback). It sends `POST {broker}/api/oauth/client/redirect-broker/woocommerce/transactions` server to server with `protocol_version: 2`, `client_id`, `merchant_redirect_uri` (this site's settings page URL), `client_state`, `scope`, `completion_challenge` = base64url(SHA-256(`completion_secret`)) and `completion_challenge_method: "S256"`. The secret itself stays in a non-autoloaded option.
+2. **Authorize.** The broker answers with `protocol_version`, `transaction_id`, `authorization_url` and an RFC 3339 `expires_at`. The browser is redirected only if the authorization URL is on the configured broker origin, uses the `/oauth/authorize` or `/{language}/oauth/authorize` route and carries exactly the configured client ID, `response_type=code` and the requested scope, with no unknown, duplicated or array parameters, fragment or credentials. Its `state` is the broker's opaque reference; readable JSON state is rejected.
+3. **Callback.** The broker returns the browser to the settings page with `transaction_id`, `state` (the original `client_state`) and a fresh one-time `completion_code`, for approvals and for returnable denials alike. A callback with any other parameter, including `listing_source_id`, `error` or the retired `third_party_exchange_code`, or with a duplicated parameter is rejected before anything is consumed.
+4. **Complete.** After checking the administrator, transaction, state, configuration, expiry and phase, the plugin claims the attempt and sends `POST {broker}/api/oauth/client/redirect-broker/woocommerce/transactions/complete` with `protocol_version`, `transaction_id`, `completion_code` and `completion_secret`. The response must echo the transaction and state and contain either `outcome: "approved"` with `listing_source_id`, `access_token`, `token_type: "Bearer"` and exactly the requested `scope`, or `outcome: "denied"` or `"failed"` (with an optional `error` identifier) and no credentials. Token expiry, refresh tokens, resource indicators and unknown fields are rejected. The token and the ListingSource are stored together, only from this response.
+
+| Contract item | Plugin side |
+| --- | --- |
+| Error responses | Non-2xx JSON with an `error` identifier, mapped to actionable messages: `unsupported_protocol_version`, `invalid_client`, `invalid_scope`, `invalid_destination`, `unauthorized_destination`, `transaction_expired`, `transaction_consumed`, `transaction_pending`, `invalid_completion_code`, `invalid_completion_proof`. `408`, `429`, `5xx` and `temporarily_unavailable` mean the broker is unavailable. |
+| Formats | `transaction_id`: 16 to 128 characters of `[A-Za-z0-9_-]`; `client_state`: 43 base64url characters; `completion_code`: 43 to 512 base64url characters. |
+| Lifetime | 15 minutes locally, shortened to the broker's `expires_at`. Callbacks and retries never extend it. |
+| Transport | Guzzle, outside the WordPress HTTP hooks, with TLS verification, no redirects, a 15-second timeout and JSON response bodies of at most 16 KiB. Errors keep only the HTTP status and the error identifier, never a body. |
+
+- **Single active attempt.** A start that gets the lease retires any earlier attempt on the site before contacting the broker, so it leaves no attempt behind if the broker then fails. A start that cannot get the lease, because another start or completion is running, changes nothing. Of several tabs or administrators only the newest attempt can complete; an older callback is rejected and the merchant starts again. Starts and completions are serialized by an `Option_Lease` (`ahpc_oauth_lock`).
+- **One redemption.** A claimed attempt is redeemed at most once. Whatever the broker answers, including a timeout, the attempt and its secret are then deleted, and a retry starts a new connection. A replayed callback is rejected without contacting the broker.
+- **Existing connection preserved.** A denial, expiry, bad callback, transport failure or invalid result leaves the stored token and ListingSource unchanged. The replacement is written only while the lease is still held, so a completion that outlived its lease cannot overwrite a newer connection.
+- **Saved, then set up.** After the pair is saved, the usual connection lifecycle runs: webhook sync, the initial backfill and shipping. Source-change cleanup, such as cancelling the previous source's backfill, runs only once the new pair is saved; only the withdrawal of the previous source's shipping, which needs its credentials, comes before. If the follow-up fails, the connection stays saved, the settings page says so and the background reconciliation retries it; the completion code is never redeemed again.
+- **Rejected callbacks.** A callback that is rejected before the attempt is claimed, such as a replay, a crafted link or a callback for a replaced attempt, changes nothing and is reported once to the administrator who opened it. Failures after the claim are stored like other connection errors and stop the automatic start until a connection succeeds.
+- **Privacy.** The completion secret and the token never appear in URLs, markup, scripts, browser storage, notices or logs. The one-time completion code appears only in the merchant callback URL, where it is useless without the secret; the plugin immediately redirects to the plain settings page URL. A pending attempt is deleted shortly after it expires, on deactivation and on uninstall. The existing per-tab auto-start marker in session storage holds no credentials.
+
+The webapp owns transaction storage, destination authorization, consent and source-grant checks and the backend OAuth exchange ([webapp #1025](https://github.com/aura-historia/webapp/issues/1025)). This protocol needs no backend change, and ordinary authenticated API calls are unchanged. The routes, fields and error identifiers above are this plugin's side of the shared contract, whose canonical description belongs in the webapp's `docs/oauth-protocol-guidelines.md`. The previous unversioned handshake is not supported in either direction.
+
+#### Connection troubleshooting
+
+| Message on the settings page | What to do |
+| --- | --- |
+| "...in a format this plugin version no longer accepts" | The browser returned with the retired handshake, for example from an old bookmark or a broker without protocol version 2. Update the plugin and start again. |
+| "...did not accept this store's address as a connection destination" | WordPress must use its public HTTPS admin address, which Aura Historia authorizes as a destination. |
+| "...was started by a different administrator" | Finish the connection with the account that started it, or start again. |
+| "...does not belong to the latest connection attempt" | Another tab or administrator started a newer attempt. Finish that one or start again. |
+| "...callback has expired" | More than 15 minutes passed, the broker's expiry was reached, or this result was already used, for example when the callback page is reloaded. Start again if the store is not connected. |
+| "Another Aura Historia connection step is still running" | Another start or completion holds the lease. Wait a minute and start again. |
+| "Aura Historia could not be reached" | The broker was unavailable or did not answer in time. Start again later; nothing was changed. |
 
 ### Background reconciliation and outage recovery
 
@@ -212,6 +249,7 @@ This plugin depends on the Aura Historia service.
 
 Depending on the action, the plugin may send:
 
+- when connecting, to the Aura Historia OAuth broker: the OAuth client ID, the requested scopes, this store's settings page URL, a random state, a completion challenge, and later the transaction ID, completion code and completion secret
 - ListingSource ID (`ls_` TypeID)
 - Aura Historia access token in bearer `Authorization` headers for API calls and managed live webhook deliveries
 - generated WooCommerce webhook signing secret for provider configuration (never as an Authorization header)
@@ -230,9 +268,9 @@ Depending on the action, the plugin may send:
 
 ### Service endpoints
 
-- `GET https://aura-historia.com/oauth/authorize`
-- `GET https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce`
-- `GET https://api.aura-historia.com/v1/oauth/tokens/by-third-party-code/{thirdPartyCode}`
+- `POST https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce/transactions` (server to server)
+- `GET https://aura-historia.com/{language}/oauth/authorize` (in the merchant's browser, as returned by the broker)
+- `POST https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce/transactions/complete` (server to server)
 - `PUT https://api.aura-historia.com/v1/listing-sources/{listingSourceId}/ingestion-configurations/woocommerce`
 - `POST https://api.aura-historia.com/v1/webhooks/woocommerce/{listingSourceId}`
 - `POST https://api.aura-historia.com/v1/listing-sources/{listingSourceId}/product-listings/async`
@@ -297,7 +335,11 @@ Tests can also override the URL via the `ahpc_backend_base_url` filter.
 
 ### Configure the OAuth client and broker
 
-The plugin bundles the production public OAuth client ID `oc_01m5vyvraxecksre2zepjcza88`; installation needs no merchant credentials. The matching secret belongs only to the production webapp broker. For stage or local development, register a separate WooCommerce OAuth client and override `AHPC_OAUTH_CLIENT_ID`. Configure the same client ID and its matching client secret in that environment's webapp OAuth redirect broker. Register the broker redirect URI and authorize `product-listings:read product-listings:write listing-sources:read listing-sources:write`. Shipping needs the read scopes for identity/revision recovery; older connections may need **Reconnect with Aura Historia** to grant them. Ensure the broker selects a ListingSource and sends an `ls_` ID in its `listing_source_id` callback field; an old Shop UUID is rejected. The broker redirect URI defaults to `https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce` for production; configure the stage URI separately.
+The plugin bundles the production public OAuth client ID `oc_01m5vyvraxecksre2zepjcza88`; installation needs no merchant credentials. The matching secret belongs only to the production webapp broker. For stage or local development, register a separate WooCommerce OAuth client and override `AHPC_OAUTH_CLIENT_ID`. Configure the same client ID and its matching client secret in that environment's webapp OAuth broker, and authorize `product-listings:read product-listings:write listing-sources:read listing-sources:write`. Shipping needs the read scopes for identity/revision recovery; older connections may need **Reconnect with Aura Historia** to grant them. The broker must return an `ls_` ListingSource ID in its completion response; an old Shop UUID is rejected.
+
+`AHPC_OAUTH_BROKER_BASE_URL` is the webapp origin that runs the broker, `https://aura-historia.com` in production. The plugin derives the initiation and completion endpoints and the only allowed authorization origin from it. It must be an HTTPS origin without a path, query or credentials; plain HTTP is accepted only for `localhost`, `127.0.0.1` and `::1`. The broker must have protocol version 2 deployed and must authorize this site's settings page URL as a destination. The retired `AHPC_OAUTH_BROKER_REDIRECT_URI` constant is ignored.
+
+The WordPress admin URL must use HTTPS too, again with only the loopback exception for local development.
 
 An explicitly empty or malformed client ID disables connection. Without an override, the plugin uses the bundled production client ID. Both `oc_` OAuth client IDs and `ls_` ListingSource IDs must be canonical lowercase UUIDv7 TypeIDs (including the RFC UUID variant); neither old UUID Shop IDs nor noncanonical uppercase IDs are accepted.
 
@@ -305,17 +347,17 @@ Using `wp-config.php`:
 
 ```php
 define( 'AHPC_OAUTH_CLIENT_ID', '<actual registered oc_ TypeID>' );
-define( 'AHPC_OAUTH_BROKER_REDIRECT_URI', 'https://your-broker.example/api/oauth/client/redirect-broker/woocommerce' );
+define( 'AHPC_OAUTH_BROKER_BASE_URL', 'https://your-broker.example' );
 ```
 
 Using server-level environment variables:
 
 ```sh
 AHPC_OAUTH_CLIENT_ID=<actual registered oc_ TypeID>
-AHPC_OAUTH_BROKER_REDIRECT_URI=https://your-broker.example/api/oauth/client/redirect-broker/woocommerce
+AHPC_OAUTH_BROKER_BASE_URL=https://your-broker.example
 ```
 
-Tests can also override these values via the `ahpc_oauth_client_id` and `ahpc_oauth_broker_redirect_uri` filters.
+Tests can also override these values via the `ahpc_oauth_client_id` and `ahpc_oauth_broker_base_url` filters, and inject a broker HTTP client via `ahpc_oauth_broker_guzzle_client`.
 
 ## Local development
 
@@ -348,6 +390,7 @@ The repository uses `@wordpress/env` and the checked-in `.wp-env.json`:
 - enables `AHPC_FORCE_SYNC_DELIVERY=true` for synchronous local webhook delivery
 - overrides `AHPC_BACKEND_BASE_URL` to `https://api.stage.aura-historia.com` for local development safety
 - explicitly leaves `AHPC_OAUTH_CLIENT_ID` empty so the stage environment cannot inherit the bundled production client
+- points `AHPC_OAUTH_BROKER_BASE_URL` at the stage webapp broker
 
 Before testing a stage connection, set its registered public client ID in `.wp-env.override.json`, then run `npm run env:update`:
 
@@ -385,7 +428,7 @@ composer install
 npm run test:contracts
 ```
 
-These checks cover `/v1` request paths, non-expiring OAuth responses, bearer authorization, batch retry keys, shipping publication requests and fixture serialization. They do not replace the WooCommerce integration suite below.
+These checks cover `/v1` request paths, bearer authorization, batch retry keys, shipping publication requests and fixture serialization. They do not replace the WooCommerce integration suite below.
 
 The test suite runs inside `wp-env` and uses mocked outbound HTTP.
 
@@ -393,7 +436,7 @@ Coverage focuses on the plugin's main contract, including:
 
 - managed webhook creation
 - provider configuration before webhook activation
-- OAuth connection and callback handling
+- OAuth broker initiation, callback validation, proof-protected completion, response validation, replay and concurrency, and preservation of an existing connection on every failure, against an in-memory broker (`tests/class-ahpc-fake-oauth-broker.php`)
 - bearer `Authorization` for API calls and signed managed webhook deliveries
 - idempotent updates without duplicates
 - pause/delete cleanup
@@ -412,13 +455,22 @@ npm test
 
 ### Browser tests
 
-Playwright tests in `tests/e2e/` drive the rendered settings page in Chromium against the running development site. They cover the automatic OAuth start, its loop protection and the manual Connect fallback. The tests capture the OAuth authorization redirect and block other origins, so no request leaves the local site.
+Playwright tests in `tests/e2e/` drive the rendered settings page in Chromium against the running development site. They cover the automatic OAuth start, its loop protection and the manual Connect fallback, and the whole connection through the broker: consent, the merchant callback, completion, the clean settings page URL, replay, a browser-supplied `listing_source_id` and denial. The test-only mu-plugin in `tests/e2e/mu-plugins/` stands in for the webapp broker and the Aura Historia API on the site itself, and the tests block other origins, so no request leaves the local site. It also provides the reset action the tests use to disconnect the store before each run.
 
-The development site must be disconnected and have a valid `oc_` `AHPC_OAUTH_CLIENT_ID`. Any format-valid ID works because the authorization request is never sent. Set it in `.wp-env.override.json` as shown above and run `npm run env:update`. A failed OAuth attempt stores an error that disables the automatic start until a connection succeeds. Clear it before running the tests:
+Enable it with a format-valid `oc_` client ID in `.wp-env.override.json`, then run `npm run env:update`:
 
-```sh
-npm run wp -- option delete ahpc_last_oauth_error
+```json
+{
+  "mappings": { "wp-content/mu-plugins": "./tests/e2e/mu-plugins" },
+  "config": {
+    "AHPC_OAUTH_CLIENT_ID": "oc_01jw7j4azge00800000000000g",
+    "AHPC_OAUTH_BROKER_BASE_URL": "http://localhost:8888",
+    "AHPC_E2E_FAKE_BROKER": true
+  }
+}
 ```
+
+The fake broker replaces every stage connection on that site, so remove these settings again before connecting to stage.
 
 Then install Chromium (add `--with-deps` on Linux hosts without its system libraries) and run the tests:
 
@@ -444,6 +496,7 @@ npm run plugin:check
 | `includes/class-webhook-manager.php` | Webhook ownership, idempotent sync, backend registration, background reconciliation with bounded retries, cleanup, drift recovery |
 | `includes/class-option-lease.php` | Expiring option-row leases and lease-fenced checkpoints for backfill and webhook sync |
 | `includes/class-type-id-validator.php` | Strict canonical UUIDv7 `ls_` and `oc_` TypeID validation |
+| `includes/class-oauth-broker-client.php` | Validated server-to-server client for the webapp OAuth broker transactions |
 | `includes/class-product-backfill.php` | Background catalog CREATE admission via Action Scheduler with bounded retries |
 | `includes/class-shipping-acquisition.php` | Allowlisted local shipping configuration and item reads |
 | `includes/class-shipping-mapper.php` | Pure conservative mapping to Aura shipping types |
@@ -472,7 +525,7 @@ The release build:
 
 For WordPress.org submission, use the clean release tree or equivalent release contents rather than the raw development repository checkout.
 
-The production OAuth registration and broker credentials are provisioned. The current webapp already selects ListingSources and uses `/v1/oauth/token`; the plugin requests `requires_listing_source_id=true` and consumes `listing_source_id`. Preserve the matching production client ID and server-side secret when redeploying the webapp. The broker uses the production client secret through its server-side Worker binding; never include that secret in the plugin.
+The production OAuth registration and broker credentials are provisioned. The broker uses the production client secret through its server-side Worker binding; never include that secret in the plugin, and preserve the matching production client ID and secret when redeploying the webapp. This plugin version connects only through broker protocol version 2, so release it only after [webapp #1025](https://github.com/aura-historia/webapp/issues/1025) has deployed the transaction and completion endpoints, and after the paired end-to-end check against that broker has passed.
 
 Before publishing `0.3.1`, complete the deferred real-store connection check: consent and callback, provider configuration, three active signed product webhooks, initial catalog admission, shipping publication and disconnect/deactivation cleanup. The release-preparation checks deliberately do not install WordPress or execute that flow. A matching Git version tag triggers the WordPress.org deployment workflow; `WP_ORG_USERNAME` and `WP_ORG_PASSWORD` must be configured in repository secrets.
 

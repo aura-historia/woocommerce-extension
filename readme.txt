@@ -56,6 +56,7 @@ The service is used to:
 
 Data sent to the service may include:
 
+* when connecting, to the Aura Historia OAuth broker: the OAuth client ID, requested permissions, this store's settings page URL, a random state value and a completion challenge, and later the transaction ID, the one-time completion code and the matching completion secret
 * ListingSource ID (`ls_` TypeID)
 * Aura Historia access token in the bearer `Authorization` header for backend API calls
 * Aura Historia access token in a bearer `Authorization` header on managed live webhook deliveries
@@ -67,9 +68,9 @@ Data sent to the service may include:
 
 Service endpoints:
 
-* `GET https://aura-historia.com/oauth/authorize`
-* `GET https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce`
-* `GET https://api.aura-historia.com/v1/oauth/tokens/by-third-party-code/{thirdPartyCode}`
+* `POST https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce/transactions` (from the store's server)
+* `GET https://aura-historia.com/{language}/oauth/authorize` (in the merchant's browser)
+* `POST https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce/transactions/complete` (from the store's server)
 * `PUT https://api.aura-historia.com/v1/listing-sources/{listingSourceId}/ingestion-configurations/woocommerce`
 * `POST https://api.aura-historia.com/v1/webhooks/woocommerce/{listingSourceId}`
 * `POST https://api.aura-historia.com/v1/listing-sources/{listingSourceId}/product-listings/async`
@@ -93,13 +94,17 @@ Service provider and policies:
 4. Go to `WooCommerce > Aura Historia`.
 5. Approve the Aura Historia OAuth connection when prompted. If the approval page does not open automatically, click Connect with Aura Historia.
 
-The production public OAuth client ID is bundled; merchants do not need to configure it. For stage or local development, supply a separate registered canonical UUIDv7 `oc_` client ID via `AHPC_OAUTH_CLIENT_ID` (constant or environment variable). Keep the API URL and broker redirect URI in that same environment. Configure the same client ID and its matching secret in the webapp redirect broker, register the broker redirect URI, and grant `product-listings:read product-listings:write listing-sources:read listing-sources:write`. Reconnect older connections to grant the read scopes shipping needs for identity/revision recovery. The broker must return an `ls_` ListingSource ID in its external `listing_source_id` callback field; UUID Shop IDs are rejected. The API uses `https://api.aura-historia.com` in production and `https://api.stage.aura-historia.com` for stage. After OAuth completes, the plugin configures WooCommerce ingestion and syncs the managed webhooks.
+The production public OAuth client ID is bundled; merchants do not need to configure it. For stage or local development, supply a separate registered canonical UUIDv7 `oc_` client ID via `AHPC_OAUTH_CLIENT_ID` and the matching webapp origin via `AHPC_OAUTH_BROKER_BASE_URL` (constants or environment variables). Keep the API URL in that same environment. Configure the same client ID and its matching secret in the webapp OAuth broker and grant `product-listings:read product-listings:write listing-sources:read listing-sources:write`. Reconnect older connections to grant the read scopes shipping needs for identity/revision recovery. The broker must return an `ls_` ListingSource ID in its completion response; UUID Shop IDs are rejected. The API uses `https://api.aura-historia.com` in production and `https://api.stage.aura-historia.com` for stage. The WordPress admin address must use HTTPS. After OAuth completes, the plugin configures WooCommerce ingestion and syncs the managed webhooks.
 
 == Frequently Asked Questions ==
 
 = Do I need an Aura Historia account? =
 
 Yes. This plugin is intended for merchants who already use Aura Historia and administer a ListingSource they can authorize during OAuth.
+
+= How does connecting keep credentials out of the browser? =
+
+The plugin registers each connection attempt with Aura Historia from your server and keeps a one-time secret on your server. Aura Historia returns your browser with an opaque completion code, and the plugin redeems that code together with the secret, server to server. The access token and ListingSource come only from that response; nothing the browser adds can change them. Each attempt can complete once, within 15 minutes, for the administrator who started it. Starting again replaces an unfinished attempt. A denied, expired or failed attempt leaves an existing connection unchanged; start again from the settings page.
 
 = Which WooCommerce events are sent? =
 
@@ -150,6 +155,7 @@ Rescheduling a published product for future publication clears its owned shippin
 == Changelog ==
 
 = 0.3.1 =
+* Connects through version 2 of the Aura Historia OAuth broker protocol. The browser no longer carries a PKCE verifier or readable broker state, the token and ListingSource come from one proof-protected server-to-server response, and replayed, tampered or stale callbacks are rejected. Requires `AHPC_OAUTH_BROKER_BASE_URL` instead of `AHPC_OAUTH_BROKER_REDIRECT_URI` for non-production environments; the previous handshake is no longer supported.
 * Withdraws the Aura Historia listing when a product is permanently deleted, including forced REST/CRUD deletes, Empty Trash, the scheduled Trash purge and sites with Trash disabled.
 * Repairs the managed webhooks only on real drift. Routine WooCommerce delivery bookkeeping no longer pauses and re-syncs all three webhooks, and reactivating an auto-disabled webhook resets its failure count.
 * A removal refused because Trash already withdrew the listing no longer stalls shipping. Other products continue, the listing is never restored, and the settings page counts the affected products.

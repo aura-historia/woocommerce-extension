@@ -20,8 +20,42 @@ class Plugin
 {
     const PAGE_SLUG = "aura-historia-partner-connect";
     const OAUTH_SCOPE = "product-listings:read product-listings:write listing-sources:read listing-sources:write";
-    const OAUTH_STATE_TRANSIENT_PREFIX = "ahpc_oauth_state_";
-    const OAUTH_STATE_TTL = 600;
+    /** The single active connection attempt, including its completion secret. Never autoloaded. */
+    const OPTION_OAUTH_ATTEMPT = "ahpc_oauth_attempt";
+    /** Lease serializing attempt starts and completions. */
+    const OPTION_OAUTH_LOCK = "ahpc_oauth_lock";
+    /** Local attempt lifetime; the broker's expiry can only shorten it. */
+    const OAUTH_ATTEMPT_TTL = 900;
+    /** Longer than initiation, or than redemption plus replacing the previous connection. */
+    const OAUTH_LOCK_SECONDS = 180;
+    const OAUTH_LOCK_WAIT = 20;
+    const OAUTH_PHASE_AWAITING_CALLBACK = "awaiting_callback";
+    const OAUTH_PHASE_REDEEMING = "redeeming";
+    /** The only callback fields besides the static page parameter. */
+    const OAUTH_CALLBACK_PARAMETERS = ["transaction_id", "state", "completion_code"];
+    /** Fields of the retired handshake. Their presence is rejected, never interpreted. */
+    const OAUTH_LEGACY_PARAMETERS = ["third_party_exchange_code", "listing_source_id", "code", "error", "error_description", "access_token"];
+    /** 32 random bytes as base64url without padding. */
+    const OAUTH_STATE_PATTERN = '/\A[A-Za-z0-9_-]{43}\z/';
+    /**
+     * Callback rejections that happen before the attempt is claimed. They
+     * change nothing, so they are shown once instead of being stored.
+     */
+    const OAUTH_REJECTION_CODES = [
+        "ahpc_oauth_legacy_callback",
+        "ahpc_oauth_invalid_callback",
+        "ahpc_oauth_invalid_state",
+        "ahpc_oauth_expired_state",
+        "ahpc_oauth_user_mismatch",
+        "ahpc_oauth_transaction_mismatch",
+        "ahpc_oauth_context_changed",
+        "ahpc_oauth_attempt_used",
+        "ahpc_oauth_busy",
+    ];
+    /** Per-user transient prefix for a one-time callback rejection notice. */
+    const OAUTH_NOTICE_TRANSIENT_PREFIX = "ahpc_oauth_notice_";
+    /** WP-Cron hook that removes an abandoned attempt once it expired. */
+    const OAUTH_CLEANUP_HOOK = "ahpc_discard_expired_oauth_attempt";
     const OPTION_INITIAL_BACKFILL_PENDING_SOURCE = "ahpc_initial_backfill_pending_source";
     const OPTION_INITIAL_BACKFILL_STARTED_SOURCES = "ahpc_initial_backfill_started_sources";
     const OPTION_INITIAL_BACKFILL_ERROR = "ahpc_initial_backfill_error";
@@ -125,6 +159,9 @@ class Plugin
         ));
         Shipping_Sync::stop();
         (new Shipping_Publisher())->withdraw();
+        // A pending connection attempt holds a completion secret.
+        delete_option(self::OPTION_OAUTH_ATTEMPT);
+        wp_clear_scheduled_hook(self::OAUTH_CLEANUP_HOOK);
     }
 
     /**
@@ -171,6 +208,7 @@ class Plugin
             2,
         );
         add_action("woocommerce_loaded", [$this, "bootstrap_woocommerce"]);
+        add_action(self::OAUTH_CLEANUP_HOOK, [$this, "discard_expired_oauth_attempt"]);
         add_action("update_option_woocommerce_currency", [$this, "on_store_locale_option_updated"], 10, 2);
         add_action("update_option_WPLANG", [$this, "on_store_locale_option_updated"], 10, 2);
         add_action("added_option", [$this, "on_store_locale_option_added"], 10, 2);
@@ -601,7 +639,7 @@ class Plugin
 
         check_admin_referer("ahpc_start_oauth");
 
-        $authorization_url = $this->create_oauth_authorization_url();
+        $authorization_url = $this->start_oauth_connection();
 
         if (is_wp_error($authorization_url)) {
             $this->store_oauth_error($authorization_url->get_error_message());
@@ -612,25 +650,26 @@ class Plugin
             exit();
         }
 
-        $authorization_host = wp_parse_url($authorization_url, PHP_URL_HOST);
+        // The authorization URL was checked against the configured broker
+        // origin. Only that configured host becomes a redirect target.
+        $broker_host = wp_parse_url($this->get_oauth_broker_base_url(), PHP_URL_HOST);
 
-        if (is_string($authorization_host) && "" !== $authorization_host) {
-            add_filter(
-                "allowed_redirect_hosts",
-                static function ($hosts) use ($authorization_host) {
-                    $hosts[] = strtolower($authorization_host);
+        add_filter(
+            "allowed_redirect_hosts",
+            static function ($hosts) use ($broker_host) {
+                $hosts[] = strtolower((string) $broker_host);
 
-                    return array_values(
-                        array_unique(
-                            array_filter(
-                                array_map("strtolower", (array) $hosts),
-                            ),
+                return array_values(
+                    array_unique(
+                        array_filter(
+                            array_map("strtolower", (array) $hosts),
                         ),
-                    );
-                },
-            );
-        }
+                    ),
+                );
+            },
+        );
 
+        nocache_headers();
         wp_safe_redirect(
             $authorization_url,
             302,
@@ -640,7 +679,10 @@ class Plugin
     }
 
     /**
-     * Handles the OAuth callback when Aura Historia redirects back to wp-admin.
+     * Handles the merchant callback when the Aura Historia broker returns the
+     * browser to wp-admin. The callback carries only the transaction ID, the
+     * original client state and a one-time completion code; anything else,
+     * including fields of the retired handshake, is rejected unread.
      *
      * @return void
      */
@@ -650,13 +692,10 @@ class Plugin
             return;
         }
 
-        $third_party_exchange_code = $this->get_query_param(
-            "third_party_exchange_code",
-        );
-        $listing_source_id = $this->get_query_param("listing_source_id");
-        $oauth_error = $this->get_query_param("error");
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Only parameter names are compared with fixed lists; the attempt's state is verified below.
+        $present = array_intersect(array_keys($_GET), array_merge(self::OAUTH_CALLBACK_PARAMETERS, self::OAUTH_LEGACY_PARAMETERS));
 
-        if ("" === $third_party_exchange_code && "" === $oauth_error) {
+        if (!$present) {
             return;
         }
 
@@ -670,158 +709,448 @@ class Plugin
             );
         }
 
-        if ("" !== $oauth_error) {
-            $result = $this->handle_oauth_error_callback(
-                $oauth_error,
-                $this->get_query_param("error_description"),
-                $this->get_query_param("state"),
+        $query = OAuth_Broker_Client::parse_unique_query($this->get_raw_query_string());
+        // The callback URL's own query, such as page, must come back
+        // unchanged next to exactly the three handoff fields.
+        $static = OAuth_Broker_Client::parse_unique_query(
+            (string) wp_parse_url($this->get_oauth_callback_url(), PHP_URL_QUERY),
+        );
+
+        if (array_intersect($present, self::OAUTH_LEGACY_PARAMETERS)) {
+            $result = new WP_Error(
+                "ahpc_oauth_legacy_callback",
+                __(
+                    "Aura Historia returned a connection result in a format this plugin version no longer accepts, so nothing was changed. Make sure the plugin is up to date, then start the connection again from this page.",
+                    "aura-historia-partner-connect",
+                ),
+            );
+        } elseif (
+            null === $query ||
+            null === $static ||
+            array_intersect(array_keys($static), self::OAUTH_CALLBACK_PARAMETERS) ||
+            count($query) !== count($static) + count(self::OAUTH_CALLBACK_PARAMETERS) ||
+            array_diff(self::OAUTH_CALLBACK_PARAMETERS, array_keys($query)) ||
+            array_diff_assoc($static, $query)
+        ) {
+            $result = new WP_Error(
+                "ahpc_oauth_invalid_callback",
+                __(
+                    "The Aura Historia connection callback was incomplete or contained unexpected fields, so nothing was changed. Start the connection again from this page.",
+                    "aura-historia-partner-connect",
+                ),
             );
         } else {
             $result = $this->complete_oauth_connection(
-                $listing_source_id,
-                $third_party_exchange_code,
-                $this->get_query_param("state"),
+                $query["transaction_id"],
+                $query["state"],
+                $query["completion_code"],
             );
         }
+
+        $status = "connected";
 
         if (is_wp_error($result)) {
-            $this->store_oauth_error($result->get_error_message());
-            $redirect_url = add_query_arg(
-                "ahpc_oauth",
-                "failed",
-                $this->get_settings_page_url(),
-            );
-        } else {
-            delete_option(Webhook_Manager::OPTION_LAST_OAUTH_ERROR);
-            $redirect_url = add_query_arg(
-                "ahpc_oauth",
-                "connected",
-                $this->get_settings_page_url(),
-            );
+            $data = $result->get_error_data();
+
+            if (is_array($data) && !empty($data["connection_saved"])) {
+                // The credentials were stored; only the follow-up setup failed.
+                // Its status is shown separately and retried in the background.
+                $status = "saved";
+            } elseif (in_array($result->get_error_code(), self::OAUTH_REJECTION_CODES, true)) {
+                // Nothing was consumed or changed, for example on a replay or
+                // a crafted link, so the message is shown only once.
+                set_transient(
+                    self::OAUTH_NOTICE_TRANSIENT_PREFIX . get_current_user_id(),
+                    sanitize_text_field($result->get_error_message()),
+                    5 * MINUTE_IN_SECONDS,
+                );
+                $status = "rejected";
+            } else {
+                $this->store_oauth_error($result->get_error_message());
+                $status = "failed";
+            }
         }
 
-        wp_safe_redirect($redirect_url);
+        if ("connected" === $status || "saved" === $status) {
+            delete_option(Webhook_Manager::OPTION_LAST_OAUTH_ERROR);
+        }
+
+        // Drop the transaction, state and completion code from the address bar.
+        nocache_headers();
+        wp_safe_redirect(
+            add_query_arg("ahpc_oauth", $status, $this->get_settings_page_url()),
+        );
         exit();
     }
 
     /**
-     * Builds an Aura Historia OAuth authorization URL and records CSRF state.
+     * Starts a connection: registers a broker transaction server-to-server and
+     * stores the single active attempt. Starting again replaces any earlier
+     * attempt, so only the newest one can complete.
+     *
+     * The completion secret never leaves this server except in the completion
+     * request body; the browser only receives the broker's authorization URL.
      *
      * @return string|WP_Error Authorization URL or error.
      */
-    public function create_oauth_authorization_url()
+    public function start_oauth_connection()
     {
-        $client_id = $this->get_oauth_client_id();
-        $broker_redirect_uri = $this->get_oauth_broker_redirect_uri();
-        $authorize_url = $this->get_oauth_authorize_url();
-        $callback_url = $this->get_oauth_callback_url();
+        if (!current_user_can("manage_woocommerce")) {
+            return $this->oauth_forbidden_error();
+        }
 
-        if (!$this->is_valid_oauth_client_id($client_id)) {
+        $context = $this->get_oauth_context();
+
+        if (is_wp_error($context)) {
+            return $context;
+        }
+
+        $client_state = $this->generate_oauth_random_value();
+        $completion_secret = $this->generate_oauth_random_value();
+
+        if (is_wp_error($client_state)) {
+            return $client_state;
+        }
+
+        if (is_wp_error($completion_secret)) {
+            return $completion_secret;
+        }
+
+        $lease = new Option_Lease(self::OPTION_OAUTH_LOCK);
+
+        if (!$lease->acquire(self::OAUTH_LOCK_SECONDS, self::OAUTH_LOCK_WAIT)) {
+            return $this->oauth_busy_error();
+        }
+
+        try {
+            // A restart retires the previous attempt, whether or not this one
+            // can be registered.
+            if (!$lease->delete(self::OPTION_OAUTH_ATTEMPT)) {
+                return $this->oauth_storage_error();
+            }
+
+            $broker = new OAuth_Broker_Client($context["broker_base_url"]);
+            $transaction = $broker->initiate([
+                "client_id" => $context["client_id"],
+                "merchant_redirect_uri" => $context["merchant_redirect_uri"],
+                "client_state" => $client_state,
+                "scope" => $context["scope"],
+                "completion_challenge" => $this->base64url_encode(
+                    hash("sha256", $completion_secret, true),
+                ),
+            ]);
+
+            if (is_wp_error($transaction)) {
+                return $transaction;
+            }
+
+            if (false !== strpos($transaction["authorization_url"], $completion_secret)) {
+                return new WP_Error(
+                    "ahpc_oauth_broker_invalid_response",
+                    __(
+                        "Aura Historia returned an unexpected connection response, so no settings were changed. Start the connection again from this page.",
+                        "aura-historia-partner-connect",
+                    ),
+                );
+            }
+
+            $now = time();
+            $attempt = $context + [
+                "protocol_version" => OAuth_Broker_Client::PROTOCOL_VERSION,
+                "user_id" => get_current_user_id(),
+                "transaction_id" => $transaction["transaction_id"],
+                "client_state_hash" => hash("sha256", $client_state),
+                "completion_secret" => $completion_secret,
+                "created_at" => $now,
+                "expires_at" => min($now + self::OAUTH_ATTEMPT_TTL, $transaction["expires_at"]),
+                "phase" => self::OAUTH_PHASE_AWAITING_CALLBACK,
+            ];
+
+            if (!$lease->write(self::OPTION_OAUTH_ATTEMPT, $attempt)) {
+                return $this->oauth_storage_error();
+            }
+
+            $this->schedule_oauth_attempt_cleanup($attempt["expires_at"]);
+
+            return $transaction["authorization_url"];
+        } finally {
+            $lease->release();
+        }
+    }
+
+    /**
+     * Completes the stored attempt with the callback's completion code and the
+     * locally held completion secret, then stores the broker's token and
+     * ListingSource as one pair.
+     *
+     * The attempt is checked against the current administrator, transaction,
+     * state, configuration, expiry and phase before anything is consumed. A
+     * claimed attempt is redeemed at most once: whatever the broker answers,
+     * the attempt and its secret are then discarded, and a retry needs a new
+     * start. Unsuccessful results leave the existing connection unchanged.
+     *
+     * @param string $transaction_id  Transaction ID from the callback.
+     * @param string $client_state    State from the callback.
+     * @param string $completion_code Completion code from the callback.
+     * @return true|WP_Error An error with connection_saved data when only the
+     *                       follow-up setup failed.
+     */
+    public function complete_oauth_connection(
+        $transaction_id,
+        #[\SensitiveParameter] $client_state,
+        #[\SensitiveParameter] $completion_code,
+    ) {
+        if (!current_user_can("manage_woocommerce")) {
+            return $this->oauth_forbidden_error();
+        }
+
+        if (
+            !is_string($transaction_id) ||
+            !is_string($client_state) ||
+            !is_string($completion_code) ||
+            1 !== preg_match(OAuth_Broker_Client::TRANSACTION_ID_PATTERN, $transaction_id) ||
+            1 !== preg_match(self::OAUTH_STATE_PATTERN, $client_state) ||
+            1 !== preg_match(OAuth_Broker_Client::COMPLETION_CODE_PATTERN, $completion_code)
+        ) {
             return new WP_Error(
-                "ahpc_oauth_invalid_client_id",
+                "ahpc_oauth_invalid_state",
                 __(
-                    "Aura Historia OAuth is not fully configured: the OAuth client ID is invalid.",
+                    "The Aura Historia connection callback did not include a valid security state. Start the connection again from this settings page.",
+                    "aura-historia-partner-connect",
+                ),
+            );
+        }
+
+        $checked = $this->check_oauth_attempt(
+            Option_Lease::read(self::OPTION_OAUTH_ATTEMPT, null),
+            $transaction_id,
+            $client_state,
+        );
+
+        if (is_wp_error($checked)) {
+            if ("ahpc_oauth_expired_state" === $checked->get_error_code()) {
+                $this->discard_expired_oauth_attempt();
+            }
+
+            return $checked;
+        }
+
+        $lease = new Option_Lease(self::OPTION_OAUTH_LOCK);
+
+        if (!$lease->acquire(self::OAUTH_LOCK_SECONDS, self::OAUTH_LOCK_WAIT)) {
+            return $this->oauth_busy_error();
+        }
+
+        try {
+            // Another callback may have claimed or replaced the attempt while
+            // this one waited for the lease.
+            $attempt = $this->check_oauth_attempt(
+                Option_Lease::read(self::OPTION_OAUTH_ATTEMPT, null),
+                $transaction_id,
+                $client_state,
+            );
+
+            if (is_wp_error($attempt)) {
+                return $attempt;
+            }
+
+            $claimed = $attempt;
+            $claimed["phase"] = self::OAUTH_PHASE_REDEEMING;
+
+            if (!$lease->write(self::OPTION_OAUTH_ATTEMPT, $claimed)) {
+                return $this->oauth_busy_error();
+            }
+
+            $result = (new OAuth_Broker_Client($attempt["broker_base_url"]))->complete(
+                $attempt["transaction_id"],
+                $completion_code,
+                $attempt["completion_secret"],
+            );
+
+            // One redemption per attempt, whatever the outcome. An ambiguous
+            // failure is never retried with the same code.
+            $lease->delete(self::OPTION_OAUTH_ATTEMPT);
+            unset($attempt["completion_secret"], $claimed);
+
+            if (is_wp_error($result)) {
+                return $result;
+            }
+
+            $connection = $this->validate_oauth_result($result, $attempt, $client_state);
+
+            if (is_wp_error($connection)) {
+                return $connection;
+            }
+
+            $saved = $this->save_oauth_connection(
+                $lease,
+                $connection["listing_source_id"],
+                $connection["access_token"],
+            );
+
+            if (is_wp_error($saved)) {
+                return $saved;
+            }
+        } finally {
+            $lease->release();
+        }
+
+        return $this->finish_oauth_connection($connection["listing_source_id"]);
+    }
+
+    /**
+     * Checks a stored attempt against the current request and configuration
+     * without changing it.
+     *
+     * @param mixed  $attempt        Stored attempt.
+     * @param string $transaction_id Transaction ID from the callback.
+     * @param string $client_state   State from the callback.
+     * @return array<string,mixed>|WP_Error
+     */
+    private function check_oauth_attempt($attempt, $transaction_id, $client_state)
+    {
+        $keys = ["protocol_version", "user_id", "transaction_id", "client_state_hash", "completion_secret", "client_id", "broker_base_url", "merchant_redirect_uri", "scope", "expires_at", "phase"];
+
+        if (!is_array($attempt) || array_diff($keys, array_keys($attempt))) {
+            return new WP_Error(
+                "ahpc_oauth_expired_state",
+                __(
+                    "The Aura Historia connection callback has expired. Start the connection again from this settings page.",
+                    "aura-historia-partner-connect",
+                ),
+            );
+        }
+
+        if (absint($attempt["user_id"]) !== get_current_user_id()) {
+            return new WP_Error(
+                "ahpc_oauth_user_mismatch",
+                __(
+                    "The Aura Historia connection was started by a different administrator. Start the connection again from this account.",
                     "aura-historia-partner-connect",
                 ),
             );
         }
 
         if (
-            "" === $broker_redirect_uri ||
-            "" === $authorize_url ||
-            !$this->is_valid_oauth_final_redirect_uri($broker_redirect_uri) ||
-            !$this->is_valid_oauth_final_redirect_uri($authorize_url)
+            !is_string($attempt["transaction_id"]) ||
+            !is_string($attempt["client_state_hash"]) ||
+            !hash_equals($attempt["transaction_id"], $transaction_id)
         ) {
             return new WP_Error(
-                "ahpc_oauth_invalid_endpoint",
+                "ahpc_oauth_transaction_mismatch",
                 __(
-                    "Aura Historia OAuth is not fully configured: the authorization endpoint is invalid.",
+                    "This Aura Historia connection result does not belong to the latest connection attempt started here. If you started the connection more than once, finish the newest attempt or start again from this page.",
                     "aura-historia-partner-connect",
                 ),
             );
         }
 
-        if (!$this->is_valid_oauth_final_redirect_uri($callback_url)) {
+        if (!hash_equals($attempt["client_state_hash"], hash("sha256", $client_state))) {
             return new WP_Error(
-                "ahpc_oauth_invalid_callback_url",
+                "ahpc_oauth_invalid_state",
                 __(
-                    "The WordPress admin URL must use HTTPS before this store can connect to Aura Historia. HTTP is only allowed for localhost development.",
+                    "The Aura Historia connection callback did not include a valid security state. Start the connection again from this settings page.",
                     "aura-historia-partner-connect",
                 ),
             );
         }
 
-        $code_verifier = $this->generate_oauth_code_verifier();
-        $client_state = $this->generate_oauth_state();
-        $broker_state = [
-            "redirect_uri" => $callback_url,
-            "code_verifier" => $code_verifier,
-            "client_state" => $client_state,
-        ];
-        $encoded_state = $this->base64url_encode(wp_json_encode($broker_state));
+        $context = $this->get_oauth_context();
 
-        set_transient(
-            $this->get_oauth_state_transient_name($client_state),
-            [
-                "user_id" => get_current_user_id(),
-                "redirect_uri" => $callback_url,
-                "created" => time(),
-            ],
-            self::OAUTH_STATE_TTL,
-        );
-
-        return add_query_arg(
-            [
-                "client_id" => $client_id,
-                "redirect_uri" => $broker_redirect_uri,
-                "code_challenge" => $this->create_oauth_code_challenge(
-                    $code_verifier,
+        if (
+            OAuth_Broker_Client::PROTOCOL_VERSION !== $attempt["protocol_version"] ||
+            is_wp_error($context) ||
+            $context["client_id"] !== $attempt["client_id"] ||
+            $context["broker_base_url"] !== $attempt["broker_base_url"] ||
+            $context["merchant_redirect_uri"] !== $attempt["merchant_redirect_uri"] ||
+            $context["scope"] !== $attempt["scope"]
+        ) {
+            return new WP_Error(
+                "ahpc_oauth_context_changed",
+                __(
+                    "The Aura Historia connection settings or this site's admin address changed after the connection started. Start the connection again from this page.",
+                    "aura-historia-partner-connect",
                 ),
-                "response_type" => "code",
-                "code_challenge_method" => "S256",
-                "scope" => self::OAUTH_SCOPE,
-                "requires_listing_source_id" => "true",
-                "state" => $encoded_state,
-            ],
-            $authorize_url,
-        );
+            );
+        }
+
+        if ((int) $attempt["expires_at"] <= time()) {
+            return new WP_Error(
+                "ahpc_oauth_expired_state",
+                __(
+                    "The Aura Historia connection callback has expired. Start the connection again from this settings page.",
+                    "aura-historia-partner-connect",
+                ),
+            );
+        }
+
+        if (self::OAUTH_PHASE_AWAITING_CALLBACK !== $attempt["phase"]) {
+            return new WP_Error(
+                "ahpc_oauth_attempt_used",
+                __(
+                    "This Aura Historia connection result is already being processed or was already used. Start the connection again from this page if the store is not connected.",
+                    "aura-historia-partner-connect",
+                ),
+            );
+        }
+
+        return $attempt;
     }
 
     /**
-     * Completes the OAuth callback by exchanging the broker code and storing
-     * connection settings locally.
+     * Checks a broker result against the redeemed attempt. The token and the
+     * ListingSource come only from this one authenticated response.
      *
-     * @param string $listing_source_id          Listing Source ID returned in the broker's listing_source_id parameter.
-     * @param string $third_party_exchange_code  Short-lived one-time exchange code.
-     * @param string $client_state               CSRF state forwarded by the broker.
-     * @return true|WP_Error
+     * @param array<string,string> $result       Broker completion result.
+     * @param array<string,mixed>  $attempt      Redeemed attempt.
+     * @param string               $client_state State from the callback.
+     * @return array{listing_source_id:string,access_token:string}|WP_Error
      */
-    public function complete_oauth_connection(
-        $listing_source_id,
-        $third_party_exchange_code,
-        $client_state,
-    ) {
-        if (!current_user_can("manage_woocommerce")) {
+    private function validate_oauth_result(array $result, array $attempt, $client_state)
+    {
+        if (
+            !hash_equals($attempt["transaction_id"], $result["transaction_id"]) ||
+            !hash_equals($client_state, $result["client_state"])
+        ) {
             return new WP_Error(
-                "ahpc_oauth_forbidden",
+                "ahpc_oauth_result_mismatch",
                 __(
-                    "You are not allowed to connect this store to Aura Historia.",
+                    "Aura Historia returned a connection result for a different attempt, so no settings were changed. Start the connection again from this page.",
                     "aura-historia-partner-connect",
                 ),
             );
         }
 
-        $state_result = $this->consume_oauth_state($client_state);
-
-        if (is_wp_error($state_result)) {
-            return $state_result;
+        if ("denied" === $result["outcome"]) {
+            return new WP_Error(
+                "ahpc_oauth_authorization_denied",
+                __(
+                    "The Aura Historia connection was not approved, so nothing was changed.",
+                    "aura-historia-partner-connect",
+                ),
+            );
         }
 
-        $listing_source_id = Webhook_Manager::normalize_listing_source_id(
-            $listing_source_id,
-        );
+        if ("approved" !== $result["outcome"]) {
+            return new WP_Error(
+                "ahpc_oauth_authorization_failed",
+                "" !== $result["error"]
+                    ? sprintf(
+                        /* translators: %s: broker error identifier. */
+                        __(
+                            "Aura Historia could not complete the connection (%s), so nothing was changed. Start the connection again from this page.",
+                            "aura-historia-partner-connect",
+                        ),
+                        $result["error"],
+                    )
+                    : __(
+                        "Aura Historia could not complete the connection, so nothing was changed. Start the connection again from this page.",
+                        "aura-historia-partner-connect",
+                    ),
+            );
+        }
 
-        if (!Webhook_Manager::is_valid_listing_source_id($listing_source_id)) {
+        if (!Webhook_Manager::is_valid_listing_source_id($result["listing_source_id"])) {
             return new WP_Error(
                 "ahpc_oauth_invalid_listing_source_id",
                 __(
@@ -831,47 +1160,7 @@ class Plugin
             );
         }
 
-        // The exchange code is a UUID, validated independently by Backend_Api_Client.
-        $exchange_code = sanitize_text_field((string) $third_party_exchange_code);
-
-        if ("" === Webhook_Manager::get_backend_base_url()) {
-            return new WP_Error(
-                "ahpc_oauth_missing_backend_base_url",
-                __(
-                    "Aura Historia is not fully configured inside the plugin. Define AHPC_BACKEND_BASE_URL before connecting a store.",
-                    "aura-historia-partner-connect",
-                ),
-            );
-        }
-
-        $client = new Backend_Api_Client(Webhook_Manager::get_backend_base_url());
-        $token_response = $client->oauth_token_by_third_party_code(
-            $exchange_code,
-        );
-
-        if (is_wp_error($token_response)) {
-            return new WP_Error(
-                "ahpc_oauth_exchange_failed",
-                sprintf(
-                    /* translators: %s: backend error detail. */
-                    __(
-                        "Aura Historia could not complete the OAuth token exchange: %s",
-                        "aura-historia-partner-connect",
-                    ),
-                    $token_response->get_error_message(),
-                ),
-            );
-        }
-
-        $access_token = Webhook_Manager::normalize_access_token(
-            $token_response->getAccessToken(),
-        );
-        $token_type = strtoupper(
-            sanitize_text_field((string) $token_response->getTokenType()),
-        );
-        $scope = sanitize_text_field((string) $token_response->getScope());
-
-        if ("BEARER" !== $token_type) {
+        if (0 !== strcasecmp("Bearer", $result["token_type"])) {
             return new WP_Error(
                 "ahpc_oauth_invalid_token_type",
                 __(
@@ -881,7 +1170,7 @@ class Plugin
             );
         }
 
-        if (!Webhook_Manager::is_valid_access_token($access_token)) {
+        if (!Webhook_Manager::is_valid_access_token($result["access_token"])) {
             return new WP_Error(
                 "ahpc_oauth_invalid_access_token",
                 __(
@@ -891,7 +1180,7 @@ class Plugin
             );
         }
 
-        if (!$this->has_required_oauth_scopes($scope)) {
+        if (!$this->is_requested_oauth_scope($result["scope"], $attempt["scope"])) {
             return new WP_Error(
                 "ahpc_oauth_missing_scope",
                 __(
@@ -901,20 +1190,43 @@ class Plugin
             );
         }
 
+        return [
+            "listing_source_id" => $result["listing_source_id"],
+            "access_token" => $result["access_token"],
+        ];
+    }
+
+    /**
+     * Replaces the stored connection while the attempt lease is held. The
+     * settings write is fenced by the lease, so a completion that outlived its
+     * lease cannot overwrite a newer connection. Only the shipping withdrawal,
+     * which needs the previous credentials, happens before that write; the
+     * remaining source-change cleanup follows only once the write succeeded.
+     *
+     * @param Option_Lease $lease             Held attempt lease.
+     * @param string       $listing_source_id Validated ListingSource ID.
+     * @param string       $access_token      Validated access token.
+     * @return true|WP_Error
+     */
+    private function save_oauth_connection(Option_Lease $lease, $listing_source_id, $access_token)
+    {
+        if (!$lease->held()) {
+            return new WP_Error(
+                "ahpc_oauth_not_saved",
+                __(
+                    "Aura Historia approved the connection, but this site could not save it, so the previous connection is unchanged. Start the connection again from this page.",
+                    "aura-historia-partner-connect",
+                ),
+            );
+        }
+
+        $previous = Option_Lease::read(Webhook_Manager::OPTION_SETTINGS, []);
         $settings = $this->get_current_settings();
+        $previous_source = $settings["listing_source_id"];
+        $withdrawn = Webhook_Manager::is_valid_listing_source_id($previous_source);
         Shipping_Sync::stop();
-        if (Webhook_Manager::is_valid_listing_source_id($settings["listing_source_id"])) {
+        if ($withdrawn) {
             (new Shipping_Publisher())->withdraw();
-        }
-        if ($settings["listing_source_id"] !== $listing_source_id) {
-            if (class_exists(Product_Backfill::class)) {
-                (new Product_Backfill())->cancel_backfill();
-            }
-            delete_option(self::OPTION_INITIAL_BACKFILL_PENDING_SOURCE);
-        }
-        $started = get_option(self::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []);
-        if (!is_array($started) || !isset($started[$listing_source_id])) {
-            update_option(self::OPTION_INITIAL_BACKFILL_PENDING_SOURCE, $listing_source_id, false);
         }
 
         $settings["listing_source_id"] = $listing_source_id;
@@ -924,13 +1236,56 @@ class Plugin
             $settings["secret"] = Webhook_Manager::generate_secret();
         }
 
-        update_option(Webhook_Manager::OPTION_SETTINGS, $settings, false);
+        if (!$lease->write(Webhook_Manager::OPTION_SETTINGS, $settings)) {
+            // The previous connection is still stored; resume its shipping.
+            (new Shipping_Sync())->initialize(true);
+
+            return new WP_Error(
+                "ahpc_oauth_not_saved",
+                $withdrawn
+                    ? __(
+                        "Aura Historia approved the connection, but this site could not save it. The previous connection is still stored, but its shipping was withdrawn while it was being replaced; use Import shipping to publish it again, or start the connection again from this page.",
+                        "aura-historia-partner-connect",
+                    )
+                    : __(
+                        "Aura Historia approved the connection, but this site could not save it, so the previous connection is unchanged. Start the connection again from this page.",
+                        "aura-historia-partner-connect",
+                    ),
+            );
+        }
+
+        // The fenced write bypasses update_option(), so apply its connection
+        // change handling explicitly.
+        Webhook_Manager::connection_settings_changed($previous, $settings);
+        if ($previous_source !== $listing_source_id) {
+            if (class_exists(Product_Backfill::class)) {
+                (new Product_Backfill())->cancel_backfill();
+            }
+            delete_option(self::OPTION_INITIAL_BACKFILL_PENDING_SOURCE);
+        }
+        $started = get_option(self::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []);
+        if (!is_array($started) || !isset($started[$listing_source_id])) {
+            update_option(self::OPTION_INITIAL_BACKFILL_PENDING_SOURCE, $listing_source_id, false);
+        }
         (new Shipping_Sync())->initialize(true);
         update_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes", false);
         delete_option(Webhook_Manager::OPTION_LAST_SYNC_ERROR);
         delete_option(Webhook_Manager::OPTION_LAST_OAUTH_ERROR);
         delete_option(self::OPTION_INITIAL_BACKFILL_ERROR);
 
+        return true;
+    }
+
+    /**
+     * Confirms the configuration for a newly saved connection while the
+     * merchant waits. Failures here never touch the saved credentials, and
+     * the background reconciliation retries them.
+     *
+     * @param string $listing_source_id Saved ListingSource ID.
+     * @return true|WP_Error
+     */
+    private function finish_oauth_connection($listing_source_id)
+    {
         if ($this->is_woocommerce_available()) {
             $this->bootstrap_woocommerce();
 
@@ -940,13 +1295,13 @@ class Plugin
                 $sync_result = $this->manager->sync_webhooks(Webhook_Manager::SYNC_WAIT_SECONDS);
 
                 if (is_wp_error($sync_result)) {
-                    return $sync_result;
+                    return $this->connection_saved_error($sync_result);
                 }
             }
 
             $backfill_result = $this->maybe_schedule_pending_initial_backfill();
             if (is_wp_error($backfill_result)) {
-                return $backfill_result;
+                return $this->connection_saved_error($backfill_result);
             }
         }
 
@@ -955,38 +1310,20 @@ class Plugin
     }
 
     /**
-     * Handles an OAuth authorization error callback.
+     * Marks a follow-up error as happening after the connection was saved.
      *
-     * @param string $error             OAuth error code.
-     * @param string $error_description Optional OAuth error description.
-     * @param string $client_state      CSRF state forwarded by the broker.
+     * @param WP_Error $error Follow-up error.
      * @return WP_Error
      */
-    private function handle_oauth_error_callback(
-        $error,
-        $error_description,
-        $client_state,
-    ) {
-        $state_result = $this->consume_oauth_state($client_state);
+    private function connection_saved_error(WP_Error $error)
+    {
+        $data = $error->get_error_data();
 
-        if (is_wp_error($state_result)) {
-            return $state_result;
-        }
-
-        $message = sanitize_text_field($error_description);
-
-        if ("" === $message) {
-            $message = sanitize_text_field($error);
-        }
-
-        if ("" === $message) {
-            $message = __(
-                "Aura Historia did not authorize the connection.",
-                "aura-historia-partner-connect",
-            );
-        }
-
-        return new WP_Error("ahpc_oauth_authorization_failed", $message);
+        return new WP_Error(
+            $error->get_error_code(),
+            $error->get_error_message(),
+            array_merge(is_array($data) ? $data : [], ["connection_saved" => true]),
+        );
     }
 
     /**
@@ -1261,8 +1598,11 @@ class Plugin
             $this->bootstrap_woocommerce();
         }
 
+        $this->discard_expired_oauth_attempt();
+
         $settings = $this->get_current_settings();
         $backend_base_url = Webhook_Manager::get_backend_base_url();
+        $oauth_broker_base_url = $this->get_oauth_broker_base_url();
         $webhook_endpoint_url = Webhook_Manager::get_webhook_endpoint_url(
             $settings["listing_source_id"],
         );
@@ -1286,6 +1626,11 @@ class Plugin
             $this->get_query_param("ahpc_backfill"),
         );
         $oauth_status = sanitize_key($this->get_query_param("ahpc_oauth"));
+        $oauth_notice = "";
+        if ("rejected" === $oauth_status) {
+            $oauth_notice = (string) get_transient(self::OAUTH_NOTICE_TRANSIENT_PREFIX . get_current_user_id());
+            delete_transient(self::OAUTH_NOTICE_TRANSIENT_PREFIX . get_current_user_id());
+        }
         $oauth_error = (string) get_option(
             Webhook_Manager::OPTION_LAST_OAUTH_ERROR,
             "",
@@ -1301,9 +1646,10 @@ class Plugin
         $should_auto_start_oauth =
             $this->is_woocommerce_available() &&
             !$is_connected &&
-            "failed" !== $oauth_status &&
+            !in_array($oauth_status, ["failed", "rejected"], true) &&
             "" === $oauth_error &&
             !empty($backend_base_url) &&
+            "" !== $oauth_broker_base_url &&
             $this->is_valid_oauth_client_id($this->get_oauth_client_id());
         $connection_status = $this->get_connection_status(
             $settings,
@@ -1399,6 +1745,16 @@ class Plugin
             "aura-historia-partner-connect",
         ),
     ); ?>
+			<?php elseif ("rejected" === $oauth_status && "" !== $oauth_notice): ?>
+				<?php $this->render_inline_notice("error", esc_html($oauth_notice)); ?>
+			<?php elseif ("saved" === $oauth_status): ?>
+				<?php $this->render_inline_notice(
+        "warning",
+        esc_html__(
+            "Aura Historia authorization completed and the connection was saved, but its setup has not finished yet. The plugin keeps retrying in the background, as shown below; you do not need to reconnect.",
+            "aura-historia-partner-connect",
+        ),
+    ); ?>
 			<?php endif; ?>
 
 			<?php if (!empty($oauth_error)): ?>
@@ -1418,6 +1774,14 @@ class Plugin
         "warning",
         esc_html__(
             "Define a valid oc_ OAuth client ID with AHPC_OAUTH_CLIENT_ID before connecting this store.",
+            "aura-historia-partner-connect",
+        ),
+    ); ?>
+			<?php elseif ("" === $oauth_broker_base_url && !$is_connected): ?>
+				<?php $this->render_inline_notice(
+        "warning",
+        esc_html__(
+            "Define a valid HTTPS Aura Historia origin with AHPC_OAUTH_BROKER_BASE_URL before connecting this store.",
             "aura-historia-partner-connect",
         ),
     ); ?>
@@ -2409,80 +2773,34 @@ class Plugin
     }
 
     /**
-     * Returns the configured OAuth broker redirect URI.
+     * Returns the configured OAuth broker origin, or an empty string when it
+     * is not a valid HTTPS (or loopback HTTP) origin.
      *
      * @return string
      */
-    public function get_oauth_broker_redirect_uri()
+    public function get_oauth_broker_base_url()
     {
-        $redirect_uri = defined("AHPC_OAUTH_BROKER_REDIRECT_URI")
-            ? AHPC_OAUTH_BROKER_REDIRECT_URI
+        $base_url = defined("AHPC_OAUTH_BROKER_BASE_URL")
+            ? AHPC_OAUTH_BROKER_BASE_URL
             : "";
 
         /**
-         * Filters the OAuth broker redirect URI used for Aura Historia connection.
+         * Filters the Aura Historia OAuth broker origin. The initiation and
+         * completion endpoints and the allowed authorization origin are
+         * derived from it.
          *
-         * @param string $redirect_uri Broker redirect URI.
+         * @param string $base_url Broker origin, such as https://aura-historia.com.
          */
-        $redirect_uri = apply_filters(
-            "ahpc_oauth_broker_redirect_uri",
-            $redirect_uri,
-        );
-        $redirect_uri = esc_url_raw(trim((string) $redirect_uri), [
-            "http",
-            "https",
-        ]);
+        $base_url = apply_filters("ahpc_oauth_broker_base_url", $base_url);
+        $base_url = is_string($base_url) ? trim($base_url) : "";
 
-        return $redirect_uri ? $redirect_uri : "";
+        return OAuth_Broker_Client::is_valid_base_url($base_url)
+            ? untrailingslashit($base_url)
+            : "";
     }
 
     /**
-     * Returns the Aura Historia authorization endpoint URL.
-     *
-     * @return string
-     */
-    public function get_oauth_authorize_url()
-    {
-        $broker_redirect_uri = $this->get_oauth_broker_redirect_uri();
-        $parts = $broker_redirect_uri ? wp_parse_url($broker_redirect_uri) : [];
-        $authorize_url = "https://aura-historia.com/oauth/authorize";
-
-        if (
-            is_array($parts) &&
-            !empty($parts["scheme"]) &&
-            !empty($parts["host"])
-        ) {
-            $authorize_url =
-                strtolower((string) $parts["scheme"]) .
-                "://" .
-                strtolower((string) $parts["host"]);
-
-            if (!empty($parts["port"])) {
-                $authorize_url .= ":" . absint($parts["port"]);
-            }
-
-            $authorize_url .= "/oauth/authorize";
-        }
-
-        /**
-         * Filters the OAuth authorization endpoint URL used for Aura Historia connection.
-         *
-         * @param string $authorize_url Authorization endpoint URL.
-         */
-        $authorize_url = apply_filters(
-            "ahpc_oauth_authorize_url",
-            $authorize_url,
-        );
-        $authorize_url = esc_url_raw(trim((string) $authorize_url), [
-            "http",
-            "https",
-        ]);
-
-        return $authorize_url ? $authorize_url : "";
-    }
-
-    /**
-     * Returns the wp-admin callback URL used as the final OAuth redirect URI.
+     * Returns the wp-admin callback URL the broker returns the browser to.
      *
      * @return string
      */
@@ -2492,13 +2810,81 @@ class Plugin
     }
 
     /**
+     * Returns the configuration a connection attempt is bound to.
+     *
+     * @return array{client_id:string,broker_base_url:string,merchant_redirect_uri:string,scope:string}|WP_Error
+     */
+    private function get_oauth_context()
+    {
+        $client_id = $this->get_oauth_client_id();
+
+        if (!$this->is_valid_oauth_client_id($client_id)) {
+            return new WP_Error(
+                "ahpc_oauth_invalid_client_id",
+                __(
+                    "Aura Historia OAuth is not fully configured: the OAuth client ID is invalid.",
+                    "aura-historia-partner-connect",
+                ),
+            );
+        }
+
+        $broker_base_url = $this->get_oauth_broker_base_url();
+
+        if ("" === $broker_base_url) {
+            return new WP_Error(
+                "ahpc_oauth_invalid_endpoint",
+                __(
+                    "Aura Historia OAuth is not fully configured: the connection service URL is invalid.",
+                    "aura-historia-partner-connect",
+                ),
+            );
+        }
+
+        $callback_url = $this->get_oauth_callback_url();
+
+        if (!$this->is_valid_oauth_callback_url($callback_url)) {
+            return new WP_Error(
+                "ahpc_oauth_invalid_callback_url",
+                __(
+                    "The WordPress admin URL must use HTTPS before this store can connect to Aura Historia. HTTP is only allowed for localhost development.",
+                    "aura-historia-partner-connect",
+                ),
+            );
+        }
+
+        return [
+            "client_id" => $client_id,
+            "broker_base_url" => $broker_base_url,
+            "merchant_redirect_uri" => $callback_url,
+            "scope" => self::OAUTH_SCOPE,
+        ];
+    }
+
+    /**
      * Returns whether the current request targets the plugin settings page.
      *
      * @return bool
      */
     private function is_settings_page_request()
     {
-        return self::PAGE_SLUG === $this->get_query_param("page");
+        global $pagenow;
+
+        return "admin.php" === $pagenow && self::PAGE_SLUG === $this->get_query_param("page");
+    }
+
+    /**
+     * Returns the raw query string, which still shows duplicated parameters.
+     *
+     * @return string
+     */
+    private function get_raw_query_string()
+    {
+        if (!isset($_SERVER["QUERY_STRING"]) || !is_string($_SERVER["QUERY_STRING"])) {
+            return "";
+        }
+
+        // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Parsed strictly by OAuth_Broker_Client::parse_unique_query() and validated field by field.
+        return wp_unslash($_SERVER["QUERY_STRING"]);
     }
 
     /**
@@ -2517,146 +2903,98 @@ class Plugin
     }
 
     /**
-     * Consumes and validates a one-time OAuth CSRF state value.
+     * Removes an expired attempt and its completion secret, so an abandoned
+     * attempt does not outlive its expiry. Runs from WP-Cron, the settings
+     * page and expired callbacks. While a start or completion holds the lease
+     * or a newer attempt is still valid, it checks again later.
      *
-     * @param string $client_state State value forwarded by the broker.
-     * @return true|WP_Error
+     * @return void
      */
-    private function consume_oauth_state($client_state)
+    public function discard_expired_oauth_attempt()
     {
-        $client_state = sanitize_text_field((string) $client_state);
+        $attempt = Option_Lease::read(self::OPTION_OAUTH_ATTEMPT, null);
 
-        if (
-            "" === $client_state ||
-            1 !== preg_match('/\A[A-Za-z0-9_-]{32,}\z/', $client_state)
-        ) {
-            return new WP_Error(
-                "ahpc_oauth_invalid_state",
-                __(
-                    "The Aura Historia connection callback did not include a valid security state. Start the connection again from this settings page.",
-                    "aura-historia-partner-connect",
-                ),
-            );
+        if (null === $attempt) {
+            return;
         }
 
-        $transient_name = $this->get_oauth_state_transient_name($client_state);
-        $state = get_transient($transient_name);
-        delete_transient($transient_name);
-
-        if (!is_array($state)) {
-            return new WP_Error(
-                "ahpc_oauth_expired_state",
-                __(
-                    "The Aura Historia connection callback has expired. Start the connection again from this settings page.",
-                    "aura-historia-partner-connect",
-                ),
-            );
+        if (is_array($attempt) && isset($attempt["expires_at"]) && (int) $attempt["expires_at"] > time()) {
+            $this->schedule_oauth_attempt_cleanup((int) $attempt["expires_at"]);
+            return;
         }
 
-        $expected_user_id = isset($state["user_id"])
-            ? absint($state["user_id"])
-            : 0;
+        $lease = new Option_Lease(self::OPTION_OAUTH_LOCK);
 
-        if ($expected_user_id && get_current_user_id() !== $expected_user_id) {
-            return new WP_Error(
-                "ahpc_oauth_user_mismatch",
-                __(
-                    "The Aura Historia connection was started by a different administrator. Start the connection again from this account.",
-                    "aura-historia-partner-connect",
-                ),
-            );
+        if (!$lease->acquire(self::OAUTH_LOCK_SECONDS)) {
+            $this->schedule_oauth_attempt_cleanup(time() + MINUTE_IN_SECONDS);
+            return;
         }
 
-        return true;
+        try {
+            $attempt = Option_Lease::read(self::OPTION_OAUTH_ATTEMPT, null);
+            if (null !== $attempt && (!is_array($attempt) || !isset($attempt["expires_at"]) || (int) $attempt["expires_at"] <= time())) {
+                $lease->delete(self::OPTION_OAUTH_ATTEMPT);
+            }
+        } finally {
+            $lease->release();
+        }
     }
 
     /**
-     * Returns the transient name used for one OAuth state value.
+     * Schedules the removal of the attempt shortly after it expires.
      *
-     * @param string $client_state OAuth client state.
-     * @return string
+     * @param int $expires_at Attempt expiry.
+     * @return void
      */
-    private function get_oauth_state_transient_name($client_state)
+    private function schedule_oauth_attempt_cleanup($expires_at)
     {
-        return self::OAUTH_STATE_TRANSIENT_PREFIX .
-            hash("sha256", (string) $client_state);
+        $next = wp_next_scheduled(self::OAUTH_CLEANUP_HOOK);
+
+        if (false !== $next && $next <= $expires_at + MINUTE_IN_SECONDS) {
+            return;
+        }
+
+        wp_clear_scheduled_hook(self::OAUTH_CLEANUP_HOOK);
+        wp_schedule_single_event($expires_at + MINUTE_IN_SECONDS, self::OAUTH_CLEANUP_HOOK);
     }
 
     /**
-     * Returns whether a final OAuth redirect URI is safe for the broker.
+     * Returns whether a URL may receive the broker's callback: HTTPS, or HTTP
+     * only on a loopback host for local development.
      *
-     * @param string $redirect_uri Final redirect URI.
+     * @param string $url Callback URL.
      * @return bool
      */
-    private function is_valid_oauth_final_redirect_uri($redirect_uri)
+    private function is_valid_oauth_callback_url($url)
     {
-        $parts = wp_parse_url($redirect_uri);
+        $parts = wp_parse_url($url);
 
-        if (
-            !is_array($parts) ||
-            empty($parts["scheme"]) ||
-            empty($parts["host"]) ||
-            !empty($parts["user"]) ||
-            !empty($parts["pass"])
-        ) {
-            return false;
-        }
-
-        $scheme = strtolower((string) $parts["scheme"]);
-        $host = strtolower(trim((string) $parts["host"], "[]"));
-
-        if ("https" === $scheme) {
-            return true;
-        }
-
-        if ("http" !== $scheme) {
-            return false;
-        }
-
-        return in_array($host, ["localhost", "127.0.0.1", "::1"], true);
+        return is_array($parts) &&
+            OAuth_Broker_Client::is_allowed_origin($parts) &&
+            !isset($parts["fragment"]);
     }
 
     /**
-     * Generates an OAuth PKCE verifier.
+     * Generates 32 bytes from the system CSPRNG as base64url without padding.
+     * There is deliberately no weaker fallback.
      *
-     * @return string
+     * @return string|WP_Error
      */
-    private function generate_oauth_code_verifier()
-    {
-        try {
-            return $this->base64url_encode(random_bytes(64));
-        } catch (\Exception $exception) {
-            unset($exception);
-            return wp_generate_password(64, false, false);
-        }
-    }
-
-    /**
-     * Generates an OAuth client-side CSRF state value.
-     *
-     * @return string
-     */
-    private function generate_oauth_state()
+    protected function generate_oauth_random_value()
     {
         try {
             return $this->base64url_encode(random_bytes(32));
-        } catch (\Exception $exception) {
+        } catch (\Throwable $exception) {
             unset($exception);
-            return wp_generate_password(48, false, false);
-        }
-    }
 
-    /**
-     * Creates an S256 PKCE challenge for a verifier.
-     *
-     * @param string $code_verifier PKCE code verifier.
-     * @return string
-     */
-    private function create_oauth_code_challenge($code_verifier)
-    {
-        return $this->base64url_encode(
-            hash("sha256", (string) $code_verifier, true),
-        );
+            return new WP_Error(
+                "ahpc_oauth_random_unavailable",
+                __(
+                    "This server could not generate secure random values, so the connection was not started. Ask your host to check PHP's random number source.",
+                    "aura-historia-partner-connect",
+                ),
+            );
+        }
     }
 
     /**
@@ -2671,20 +3009,63 @@ class Plugin
     }
 
     /**
-     * Returns whether an OAuth token scope string grants all plugin requirements.
+     * Returns whether a granted scope string is exactly the requested set:
+     * nothing required is missing and nothing unrequested was added.
      *
-     * @param string $scope OAuth scope string.
+     * @param string $granted   Granted scope string.
+     * @param string $requested Requested scope string.
      * @return bool
      */
-    private function has_required_oauth_scopes($scope)
+    private function is_requested_oauth_scope($granted, $requested)
     {
-        $granted_scopes = preg_split('/\s+/', trim((string) $scope));
+        $granted_scopes = explode(" ", (string) $granted);
+        $requested_scopes = explode(" ", (string) $requested);
+        sort($granted_scopes);
+        sort($requested_scopes);
 
-        if (!is_array($granted_scopes)) {
-            $granted_scopes = [];
-        }
+        return $granted_scopes === $requested_scopes;
+    }
 
-        return !array_diff(explode(" ", self::OAUTH_SCOPE), $granted_scopes);
+    /**
+     * @return WP_Error
+     */
+    private function oauth_forbidden_error()
+    {
+        return new WP_Error(
+            "ahpc_oauth_forbidden",
+            __(
+                "You are not allowed to connect this store to Aura Historia.",
+                "aura-historia-partner-connect",
+            ),
+        );
+    }
+
+    /**
+     * @return WP_Error
+     */
+    private function oauth_busy_error()
+    {
+        return new WP_Error(
+            "ahpc_oauth_busy",
+            __(
+                "Another Aura Historia connection step is still running on this site. Wait a minute, then start the connection again from this page.",
+                "aura-historia-partner-connect",
+            ),
+        );
+    }
+
+    /**
+     * @return WP_Error
+     */
+    private function oauth_storage_error()
+    {
+        return new WP_Error(
+            "ahpc_oauth_storage_failed",
+            __(
+                "This site could not save the connection attempt. Try again; if the problem persists, check the WordPress database.",
+                "aura-historia-partner-connect",
+            ),
+        );
     }
 
     /**

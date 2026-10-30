@@ -334,16 +334,4 @@ class Test_AHPC_Internal_Api_Configuration extends WP_UnitTestCase
         $this->assertTrue($transport->get_error_data()["retryable"]);
         $this->assertStringNotContainsString("test-token", $transport->get_error_message());
     }
-
-    public function test_oauth_exchange_requires_uuid_v7_independently_of_listing_source_id()
-    {
-        $history = [];
-        $this->mock_backend([new Response(200, ["Content-Type" => "application/json"], wp_json_encode(["access_token" => "test-token", "token_type" => "Bearer", "scope" => "product-listings:write"]))], $history);
-        $client = new Backend_Api_Client("https://example.com");
-        $this->assertWPError($client->oauth_token_by_third_party_code("550e8400-e29b-41d4-a716-446655440000"));
-        $this->assertWPError($client->oauth_token_by_third_party_code("ls_01jw7j4azge008000000000003"));
-        $response = $client->oauth_token_by_third_party_code("01970f22-2bf0-7000-8000-000000000099");
-        $this->assertSame("test-token", $response->getAccessToken());
-        $this->assertCount(1, $history);
-    }
 }

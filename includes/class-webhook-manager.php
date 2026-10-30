@@ -1416,6 +1416,9 @@ class Webhook_Manager
         delete_option("ahpc_initial_backfill_pending_source");
         delete_option("ahpc_initial_backfill_started_sources");
         delete_option("ahpc_initial_backfill_error");
+        delete_option("ahpc_oauth_attempt");
+        delete_option("ahpc_oauth_lock");
+        wp_clear_scheduled_hook("ahpc_discard_expired_oauth_attempt");
 
         if (class_exists(Product_Backfill::class)) {
             (new Product_Backfill())->cancel_backfill();
