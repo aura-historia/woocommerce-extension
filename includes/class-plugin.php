@@ -92,6 +92,8 @@ class Plugin
 
         update_option(Webhook_Manager::OPTION_SETTINGS, $settings, false);
         update_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes", false);
+        // Activation resumes background reconciliation with a fresh attempt.
+        (new Webhook_Manager())->reset_sync_retries();
 
         (new Shipping_Sync())->initialize(true);
 
@@ -112,7 +114,15 @@ class Plugin
     public static function deactivate()
     {
         $manager = new Webhook_Manager();
+        // Fence a running sync first, so it cannot activate delivery again
+        // after the pause. The retained backfill batch waits for a manual
+        // resume.
+        $manager->stop_sync();
         $manager->pause_webhooks();
+        (new Product_Backfill())->stop_backfill(__(
+            "The plugin was deactivated.",
+            "aura-historia-partner-connect",
+        ));
         Shipping_Sync::stop();
         (new Shipping_Publisher())->withdraw();
     }
@@ -204,9 +214,8 @@ class Plugin
      */
     public function bootstrap_woocommerce()
     {
-        // Wait for WordPress locale setup, then sync before WooCommerce's
-        // init callback loads active webhooks into this request. Loading them
-        // first could retain stale endpoints or secrets after a repair.
+        // Wait for WordPress locale setup. Ordinary requests only do local
+        // work here: the remote reconciliation runs in Action Scheduler.
         if (!did_action("init")) {
             add_action("init", [$this, "bootstrap_woocommerce"], -1);
             return;
@@ -245,6 +254,8 @@ class Plugin
             );
         }
 
+        add_action(Webhook_Manager::SYNC_ACTION_HOOK, [$this, "reconcile_webhooks"], 10, 1);
+
         add_action(
             "woocommerce_webhook_updated",
             [$this, "maybe_mark_edited_managed_webhook_out_of_sync"],
@@ -262,14 +273,41 @@ class Plugin
             AHPC_VERSION !==
             get_option(Webhook_Manager::OPTION_PLUGIN_VERSION, "")
         ) {
+            // An update resumes stopped reconciliation once; the required
+            // sync itself is recorded durably.
             $this->manager->mark_sync_required();
+            $this->manager->reset_sync_retries();
+            update_option(Webhook_Manager::OPTION_PLUGIN_VERSION, AHPC_VERSION, false);
         }
 
-        if ($this->manager->maybe_sync_webhooks()) {
+        if ("no" === get_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes")) {
             $this->maybe_schedule_pending_initial_backfill();
             if (did_action("action_scheduler_init")) {
                 $shipping->maybe_queue_initial();
             }
+        } elseif (did_action("action_scheduler_init")) {
+            $this->manager->maybe_queue_sync();
+        } else {
+            add_action("action_scheduler_init", [$this->manager, "maybe_queue_sync"], 20);
+        }
+    }
+
+    /**
+     * Runs the background webhook reconciliation. Once it confirms the
+     * configuration, a still pending initial backfill and shipping import
+     * are queued without waiting for another request.
+     *
+     * @param string $wake Wake-up token in the action args.
+     * @return void
+     */
+    public function reconcile_webhooks($wake = "")
+    {
+        if (
+            $this->manager instanceof Webhook_Manager &&
+            true === $this->manager->reconcile($wake)
+        ) {
+            $this->maybe_schedule_pending_initial_backfill();
+            (new Shipping_Publisher())->maybe_queue_initial();
         }
     }
 
@@ -894,33 +932,21 @@ class Plugin
         delete_option(self::OPTION_INITIAL_BACKFILL_ERROR);
 
         if ($this->is_woocommerce_available()) {
-            $was_bootstrapped = $this->woocommerce_bootstrapped;
             $this->bootstrap_woocommerce();
 
-            if ($was_bootstrapped && $this->manager instanceof Webhook_Manager) {
+            // The merchant waits for this confirmation; ordinary requests
+            // leave it to the background reconciliation.
+            if ($this->manager instanceof Webhook_Manager) {
                 $sync_result = $this->manager->sync_webhooks(Webhook_Manager::SYNC_WAIT_SECONDS);
 
                 if (is_wp_error($sync_result)) {
                     return $sync_result;
                 }
-            } elseif ($this->manager instanceof Webhook_Manager) {
-                $sync_error = $this->manager->get_last_sync_error();
-
-                if ("" !== $sync_error) {
-                    return new WP_Error("ahpc_oauth_sync_failed", $sync_error);
-                }
             }
 
-            if (!$was_bootstrapped) {
-                $backfill_error = (string) get_option(self::OPTION_INITIAL_BACKFILL_ERROR, "");
-                if ("" !== $backfill_error) {
-                    return new WP_Error("ahpc_backfill_failed", $backfill_error);
-                }
-            } else {
-                $backfill_result = $this->maybe_schedule_pending_initial_backfill();
-                if (is_wp_error($backfill_result)) {
-                    return $backfill_result;
-                }
+            $backfill_result = $this->maybe_schedule_pending_initial_backfill();
+            if (is_wp_error($backfill_result)) {
+                return $backfill_result;
             }
         }
 
@@ -1758,6 +1784,84 @@ class Plugin
             ];
         }
 
+        $sync = $this->manager instanceof Webhook_Manager
+            ? $this->manager->get_sync_status()
+            : ["status" => "", "attempts" => 0, "backoff_attempts" => 0, "next_at" => 0];
+        $next_at = $this->format_admin_timestamp($sync["next_at"]);
+        $next_at = "" !== $next_at ? $next_at : __("the next opportunity", "aura-historia-partner-connect");
+        $slow_hours = (int) round(Webhook_Manager::SYNC_SLOW_RETRY_DELAY / HOUR_IN_SECONDS);
+
+        if (Webhook_Manager::SYNC_NEEDS_ATTENTION === $sync["status"]) {
+            $message = "" !== $sync_error
+                ? sprintf(
+                    /* translators: %s: connection check error detail. */
+                    __("Aura Historia did not accept the webhook configuration: %s", "aura-historia-partner-connect"),
+                    $sync_error,
+                )
+                : __("Aura Historia did not accept the webhook configuration.", "aura-historia-partner-connect");
+            $message .= " " . sprintf(
+                /* translators: 1: retry interval in hours, 2: formatted time. */
+                _n(
+                    'Delivery stays paused. This usually needs a fix, such as reconnecting the store or selecting a supported currency, but the plugin keeps trying on its own every %1$d hour; the next attempt runs at %2$s.',
+                    'Delivery stays paused. This usually needs a fix, such as reconnecting the store or selecting a supported currency, but the plugin keeps trying on its own every %1$d hours; the next attempt runs at %2$s.',
+                    $slow_hours,
+                    "aura-historia-partner-connect",
+                ),
+                $slow_hours,
+                $next_at,
+            );
+
+            return [
+                "type" => "error",
+                "label" => __("Needs attention", "aura-historia-partner-connect"),
+                "message" => $message,
+            ];
+        }
+
+        if (Webhook_Manager::SYNC_RETRYING === $sync["status"]) {
+            $message = sprintf(
+                /* translators: 1: error detail, 2: failed attempts in a row, 3: formatted time. */
+                __(
+                    'Aura Historia did not confirm the webhook configuration: %1$s Delivery stays paused. Failed attempts so far: %2$d. The plugin retries on its own; the next attempt runs in the background at %3$s.',
+                    "aura-historia-partner-connect",
+                ),
+                "" !== $sync_error ? $sync_error : __("The request could not be confirmed.", "aura-historia-partner-connect"),
+                $sync["attempts"],
+                $next_at,
+            );
+
+            if ($sync["backoff_attempts"] && $sync["attempts"] >= $sync["backoff_attempts"]) {
+                $message .= " " . sprintf(
+                    /* translators: %d: retry interval in hours. */
+                    _n(
+                        "Aura Historia has been unavailable for a while, so it is now tried every %d hour.",
+                        "Aura Historia has been unavailable for a while, so it is now tried every %d hours.",
+                        $slow_hours,
+                        "aura-historia-partner-connect",
+                    ),
+                    $slow_hours,
+                );
+            }
+
+            return [
+                "type" => "warning",
+                "label" => __("Retry scheduled", "aura-historia-partner-connect"),
+                "message" => $message,
+            ];
+        }
+
+        // A queued fresh attempt is pending, even after an earlier error.
+        if ("yes" === get_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes")) {
+            return [
+                "type" => "warning",
+                "label" => __("Sync pending", "aura-historia-partner-connect"),
+                "message" => __(
+                    "The webhook configuration is queued for background synchronization. Product listing ingestion has not been admitted yet.",
+                    "aura-historia-partner-connect",
+                ),
+            ];
+        }
+
         if ("" !== $sync_error) {
             return [
                 "type" => "error",
@@ -1769,17 +1873,6 @@ class Plugin
                         "aura-historia-partner-connect",
                     ),
                     $sync_error,
-                ),
-            ];
-        }
-
-        if ("yes" === get_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes")) {
-            return [
-                "type" => "warning",
-                "label" => __("Sync pending", "aura-historia-partner-connect"),
-                "message" => __(
-                    "The connection is waiting for webhook sync. Product listing ingestion has not been admitted yet.",
-                    "aura-historia-partner-connect",
                 ),
             ];
         }
@@ -1870,6 +1963,56 @@ class Plugin
         $last_error = isset($details["last_error"])
             ? (string) $details["last_error"]
             : "";
+        $attempts = isset($details["attempts"]) ? absint($details["attempts"]) : 0;
+        $backoff_attempts = isset($details["backoff_attempts"]) ? absint($details["backoff_attempts"]) : 0;
+
+        if (Product_Backfill::STATUS_RETRY_SCHEDULED === $status) {
+            $message = sprintf(
+                /* translators: 1: error detail, 2: failed attempts in a row, 3: formatted time. */
+                __(
+                    '%1$s Failed attempts so far: %2$d. The unchanged batch is sent again automatically with the same retry key at %3$s.',
+                    "aura-historia-partner-connect",
+                ),
+                "" !== $last_error ? $last_error : __("The most recent product backfill batch could not be confirmed.", "aura-historia-partner-connect"),
+                $attempts,
+                "" !== $scheduled_at ? $scheduled_at : __("the next opportunity", "aura-historia-partner-connect"),
+            );
+
+            if ($backoff_attempts && $attempts >= $backoff_attempts) {
+                $slow_hours = (int) round(Product_Backfill::SLOW_RETRY_DELAY / HOUR_IN_SECONDS);
+                $message .= " " . sprintf(
+                    /* translators: %d: retry interval in hours. */
+                    _n(
+                        "Aura Historia has been unavailable for a while, so it is now tried every %d hour.",
+                        "Aura Historia has been unavailable for a while, so it is now tried every %d hours.",
+                        $slow_hours,
+                        "aura-historia-partner-connect",
+                    ),
+                    $slow_hours,
+                );
+            }
+
+            return [
+                "label" => __("Retry scheduled", "aura-historia-partner-connect"),
+                "message" => $message,
+            ];
+        }
+
+        if (Product_Backfill::STATUS_STOPPED === $status) {
+            $message = "" !== $last_error
+                ? $last_error
+                : __("The product backfill stopped.", "aura-historia-partner-connect");
+
+            $message .= " " . __(
+                "Use Re-send all existing products to resume it: a pending batch is sent again unchanged with its retry key, otherwise the run continues with its next page.",
+                "aura-historia-partner-connect",
+            );
+
+            return [
+                "label" => __("Stopped", "aura-historia-partner-connect"),
+                "message" => $message,
+            ];
+        }
 
         if (Product_Backfill::STATUS_SCHEDULED === $status) {
             $message = $scheduled_at
@@ -2002,13 +2145,9 @@ class Plugin
 
             $message .=
                 " " .
-                sprintf(
-                    /* translators: %s: Action Scheduler hook name. */
-                    __(
-                        'Action Scheduler hook "%s" will retry the batch if another attempt is allowed.',
-                        "aura-historia-partner-connect",
-                    ),
-                    $hook,
+                __(
+                    "It is not retried automatically. Use Re-send all existing products to resume retained work or start a fresh run.",
+                    "aura-historia-partner-connect",
                 );
 
             if ($completed_at) {

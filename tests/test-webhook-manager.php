@@ -10,9 +10,11 @@ use AuraHistoria\PartnerConnect\Product_Backfill;
 use AuraHistoria\PartnerConnect\Webhook_Manager;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
+use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
+use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
 
 /**
@@ -2487,7 +2489,13 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $this->assertCount(0, $this->backfill_actions($id, 1));
 
         $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+        // An ordinary request leaves the retry to the queued reconciliation.
         (new Plugin())->bootstrap_woocommerce();
+        $this->assertSame([], $this->backend_http_requests);
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        $this->assertCount(0, $this->backfill_actions($id, 1));
+        $this->run_sync_action();
+        $this->assertCount(1, $this->backend_http_requests);
         $this->assertSame("no", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
         $this->assertCount(1, $this->backfill_actions($id, 1));
         $this->assertSame([$id => true], get_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []));
@@ -2568,7 +2576,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH));
     }
 
-    public function test_woocommerce_bootstrap_waits_for_init_before_syncing()
+    public function test_woocommerce_bootstrap_waits_for_init_and_leaves_syncing_to_the_background()
     {
         global $wp_actions;
 
@@ -2581,6 +2589,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             $plugin->bootstrap_woocommerce();
             $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
             $this->assertSame([], (new Webhook_Manager())->get_webhook_ids());
+            $this->assertSame([], $this->sync_actions());
             $this->assertSame(-1, has_action("init", [$plugin, "bootstrap_woocommerce"]));
         } finally {
             $wp_actions["init"] = $init_count;
@@ -2588,6 +2597,9 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         }
 
         $plugin->bootstrap_woocommerce();
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        $this->assertSame([], (new Webhook_Manager())->get_webhook_ids());
+        $this->run_sync_action();
         $this->assertSame("no", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
         $this->assertCount(3, (new Webhook_Manager())->get_webhook_ids());
     }
@@ -3282,4 +3294,415 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             $this->assertSame("active", (new WC_Webhook($webhook_id))->get_status());
         }
     }
+
+    /** Returns the arguments of the pending webhook reconciliation actions. */
+    private function sync_actions()
+    {
+        return array_values(array_map(static function ($action) {
+            return $action->get_args();
+        }, as_get_scheduled_actions([
+            "hook" => Webhook_Manager::SYNC_ACTION_HOOK,
+            "group" => Webhook_Manager::SYNC_ACTION_GROUP,
+            "status" => ActionScheduler_Store::STATUS_PENDING,
+            "per_page" => 100,
+        ])));
+    }
+
+    /**
+     * Runs the only pending reconciliation the way Action Scheduler would.
+     *
+     * @return int Time the action was due.
+     */
+    private function run_sync_action()
+    {
+        $actions = $this->sync_actions();
+        $this->assertCount(1, $actions);
+        // Only a wake-up token, never a credential, travels with the action.
+        $this->assertCount(1, $actions[0]);
+        $this->assertStringStartsWith("wake-", $actions[0][0]);
+        $due = (int) as_next_scheduled_action(Webhook_Manager::SYNC_ACTION_HOOK, $actions[0], Webhook_Manager::SYNC_ACTION_GROUP);
+        as_unschedule_all_actions(Webhook_Manager::SYNC_ACTION_HOOK, $actions[0], Webhook_Manager::SYNC_ACTION_GROUP);
+        do_action_ref_array(Webhook_Manager::SYNC_ACTION_HOOK, $actions[0]);
+
+        return $due;
+    }
+
+    /** Stores a complete connection whose configuration is not confirmed yet. */
+    private function connect_without_sync($secret = "test-secret")
+    {
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => "ls_01jw7j4azge00800000000000g",
+            "access_token" => "test-token",
+            "secret" => $secret,
+        ], false);
+        update_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes", false);
+    }
+
+    private function assert_managed_webhooks_status($status)
+    {
+        $ids = (new Webhook_Manager())->get_webhook_ids();
+        $this->assertCount(3, $ids);
+        foreach ($ids as $webhook_id) {
+            $this->assertSame($status, (new WC_Webhook($webhook_id))->get_status());
+        }
+    }
+
+    /** Renders the settings page without marking the webhooks as synchronized. */
+    private function render_status_page()
+    {
+        update_option(Webhook_Manager::OPTION_PLUGIN_VERSION, AHPC_VERSION, false);
+        ob_start();
+        (new Plugin())->render_settings_page();
+
+        return (string) ob_get_clean();
+    }
+
+    public function test_storefront_requests_queue_one_reconciliation_without_backend_calls()
+    {
+        $this->connect_without_sync();
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+
+        // Repeated ordinary requests, as storefront visitors make them.
+        for ($request = 0; $request < 3; ++$request) {
+            (new Plugin())->bootstrap_woocommerce();
+        }
+
+        $this->assertSame([], $this->backend_http_requests);
+        $this->assertSame([], (new Webhook_Manager())->get_webhook_ids());
+        $this->assertCount(1, $this->sync_actions());
+        $this->assertSame(Webhook_Manager::SYNC_PENDING, (new Webhook_Manager())->get_sync_status()["status"]);
+
+        $this->assertLessThanOrEqual(time(), $this->run_sync_action());
+        $this->assertCount(1, $this->backend_http_requests);
+        $this->assert_managed_webhooks_status("active");
+        $this->assertSame(Webhook_Manager::SYNC_CONFIRMED, (new Webhook_Manager())->get_sync_status()["status"]);
+        $this->assertSame([], $this->sync_actions());
+
+        (new Plugin())->bootstrap_woocommerce();
+        $this->assertSame([], $this->sync_actions());
+        $this->assertCount(1, $this->backend_http_requests);
+    }
+
+    public function test_retryable_failures_back_off_then_retry_slowly_until_the_backend_recovers()
+    {
+        $this->connect_without_sync();
+        $request = new Request("PUT", "https://example.com");
+        $failures = [
+            new ConnectException("Timed out", $request),
+            $this->mock_backend_registration_response(503),
+            $this->mock_backend_registration_response(429),
+            $this->mock_backend_registration_response(500),
+            $this->mock_backend_registration_response(408),
+            $this->mock_backend_registration_response(502),
+            new ConnectException("Timed out", $request),
+            $this->mock_backend_registration_response(504),
+            $this->mock_backend_registration_response(503),
+            $this->mock_backend_registration_response(503),
+            $this->mock_backend_registration_response(503),
+        ];
+        $this->assertGreaterThan(Webhook_Manager::SYNC_BACKOFF_ATTEMPTS, count($failures));
+        $this->set_backend_mock_responses(array_merge($failures, [$this->mock_backend_registration_response()]));
+        (new Plugin())->bootstrap_woocommerce();
+        $delays = [];
+
+        foreach (array_keys($failures) as $index) {
+            $attempt = $index + 1;
+            $this->run_sync_action();
+            $this->assertCount($attempt, $this->backend_http_requests);
+            // A failed configuration never activates delivery.
+            $this->assert_managed_webhooks_status("paused");
+            $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+            $status = (new Webhook_Manager())->get_sync_status();
+            $this->assertSame($attempt, $status["attempts"]);
+            $this->assertSame(Webhook_Manager::SYNC_RETRYING, $status["status"]);
+
+            $actions = $this->sync_actions();
+            $this->assertCount(1, $actions);
+            $due = as_next_scheduled_action(Webhook_Manager::SYNC_ACTION_HOOK, $actions[0], Webhook_Manager::SYNC_ACTION_GROUP);
+            $this->assertSame($status["next_at"], $due);
+            $this->assertEqualsWithDelta(time() + Webhook_Manager::sync_retry_delay($attempt), $due, 5);
+            $delays[] = Webhook_Manager::sync_retry_delay($attempt);
+
+            // Ordinary requests meanwhile neither call the backend nor add actions.
+            (new Plugin())->bootstrap_woocommerce();
+            $this->assertSame($actions, $this->sync_actions());
+            $this->assertCount($attempt, $this->backend_http_requests);
+        }
+
+        // Exponential backoff, then a slow pace that never gives up.
+        $this->assertSame([60, 120, 240, 480, 960, 1920, 3600, 3600, 3600, 21600, 21600], $delays);
+
+        // Once the backend is back, the next attempt recovers without anyone acting.
+        $this->run_sync_action();
+        $this->assertCount(count($failures) + 1, $this->backend_http_requests);
+        $this->assert_managed_webhooks_status("active");
+        $this->assertSame(Webhook_Manager::SYNC_CONFIRMED, (new Webhook_Manager())->get_sync_status()["status"]);
+        $this->assertSame("", (new Webhook_Manager())->get_last_sync_error());
+        $this->assertSame([], $this->sync_actions());
+    }
+
+    public function test_interactive_sync_failure_starts_a_new_series_of_retries()
+    {
+        $this->connect_without_sync();
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response(401)]);
+        $this->assertInstanceOf(WP_Error::class, (new Webhook_Manager())->sync_webhooks());
+        $this->assertSame(Webhook_Manager::SYNC_NEEDS_ATTENTION, (new Webhook_Manager())->get_sync_status()["status"]);
+        $this->assertCount(1, $this->sync_actions());
+
+        $this->set_backend_mock_responses([
+            $this->mock_backend_registration_response(503),
+            $this->mock_backend_registration_response(),
+        ]);
+        $this->assertInstanceOf(WP_Error::class, (new Webhook_Manager())->sync_webhooks());
+        $status = (new Webhook_Manager())->get_sync_status();
+        $this->assertSame(Webhook_Manager::SYNC_RETRYING, $status["status"]);
+        $this->assertSame(1, $status["attempts"]);
+        $this->assertEqualsWithDelta(time() + Webhook_Manager::SYNC_RETRY_DELAY, $this->run_sync_action(), 5);
+        $this->assertCount(2, $this->backend_http_requests);
+        $this->assert_managed_webhooks_status("active");
+    }
+
+    public function test_non_retryable_failure_is_retried_slowly_and_a_context_change_at_once()
+    {
+        update_option("woocommerce_currency", "EUR", false);
+        $this->connect_without_sync();
+        (new Plugin())->boot();
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response(401)]);
+        (new Plugin())->bootstrap_woocommerce();
+        $this->run_sync_action();
+
+        $status = (new Webhook_Manager())->get_sync_status();
+        $this->assertSame(Webhook_Manager::SYNC_NEEDS_ATTENTION, $status["status"]);
+        $this->assertSame(1, $status["attempts"]);
+        $this->assert_managed_webhooks_status("paused");
+        $slow = $this->sync_actions();
+        $this->assertCount(1, $slow);
+        $this->assertEqualsWithDelta(
+            time() + Webhook_Manager::SYNC_SLOW_RETRY_DELAY,
+            as_next_scheduled_action(Webhook_Manager::SYNC_ACTION_HOOK, $slow[0], Webhook_Manager::SYNC_ACTION_GROUP),
+            5,
+        );
+        (new Plugin())->bootstrap_woocommerce();
+        $this->assertSame($slow, $this->sync_actions());
+        $this->assertCount(1, $this->backend_http_requests);
+
+        // A changed store context is a new configuration, attempted at once.
+        $this->set_backend_mock_responses([
+            $this->mock_backend_registration_response(401),
+            $this->mock_backend_registration_response(),
+        ]);
+        update_option("woocommerce_currency", "GBP", false);
+        (new Plugin())->bootstrap_woocommerce();
+        $this->assertLessThanOrEqual(time(), $this->run_sync_action());
+        $this->assertSame(Webhook_Manager::SYNC_NEEDS_ATTENTION, (new Webhook_Manager())->get_sync_status()["status"]);
+
+        // When the backend accepts the configuration again, the slow retry
+        // recovers delivery without anyone acting.
+        $this->assertEqualsWithDelta(time() + Webhook_Manager::SYNC_SLOW_RETRY_DELAY, $this->run_sync_action(), 5);
+        $this->assertCount(2, $this->backend_http_requests);
+        $body = json_decode((string) $this->backend_http_requests[1]["request"]->getBody(), true);
+        $this->assertSame("GBP", $body["currency"]);
+        $this->assert_managed_webhooks_status("active");
+        $this->assertSame(Webhook_Manager::SYNC_CONFIRMED, (new Webhook_Manager())->get_sync_status()["status"]);
+    }
+
+    public function test_reconnecting_pauses_delivery_until_the_background_sync_confirms_it()
+    {
+        $this->connect_without_sync("first-secret");
+        $this->assertTrue((new Webhook_Manager())->sync_webhooks());
+        $this->assert_managed_webhooks_status("active");
+
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+        $this->connect_without_sync("second-secret");
+        $this->assert_managed_webhooks_status("paused");
+        (new Plugin())->bootstrap_woocommerce();
+        $this->assertSame([], $this->backend_http_requests);
+
+        $this->run_sync_action();
+        $this->assertCount(1, $this->backend_http_requests);
+        $body = json_decode((string) $this->backend_http_requests[0]["request"]->getBody(), true);
+        $this->assertSame("second-secret", $body["webhookSecret"]);
+        $this->assert_managed_webhooks_status("active");
+        foreach ((new Webhook_Manager())->get_webhook_ids() as $webhook_id) {
+            $this->assertSame("second-secret", (new WC_Webhook($webhook_id))->get_secret());
+        }
+    }
+
+    public function test_connection_change_replaces_a_waiting_retry_and_fences_it()
+    {
+        $this->connect_without_sync("first-secret");
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response(503)]);
+        (new Plugin())->bootstrap_woocommerce();
+        $this->run_sync_action();
+        $previous = $this->sync_actions();
+        $this->assertCount(1, $previous);
+        $this->assertGreaterThan(time(), as_next_scheduled_action(Webhook_Manager::SYNC_ACTION_HOOK, $previous[0], Webhook_Manager::SYNC_ACTION_GROUP));
+
+        // The new connection is attempted at once instead of after the backoff.
+        $this->connect_without_sync("second-secret");
+        (new Plugin())->bootstrap_woocommerce();
+        $current = $this->sync_actions();
+        $this->assertCount(1, $current);
+        $this->assertNotSame($previous[0], $current[0]);
+        $this->assertSame(0, (new Webhook_Manager())->get_sync_status()["attempts"]);
+
+        // A copy of the replaced attempt that still runs does nothing.
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+        do_action_ref_array(Webhook_Manager::SYNC_ACTION_HOOK, $previous[0]);
+        $this->assertSame([], $this->backend_http_requests);
+        $this->assert_managed_webhooks_status("paused");
+
+        $this->assertLessThanOrEqual(time(), $this->run_sync_action());
+        $this->assertCount(1, $this->backend_http_requests);
+        $body = json_decode((string) $this->backend_http_requests[0]["request"]->getBody(), true);
+        $this->assertSame("second-secret", $body["webhookSecret"]);
+        $this->assert_managed_webhooks_status("active");
+    }
+
+    public function test_deactivation_stops_reconciliation_until_activation()
+    {
+        $this->connect_without_sync();
+        (new Plugin())->bootstrap_woocommerce();
+        $queued = $this->sync_actions();
+        $this->assertCount(1, $queued);
+
+        Plugin::deactivate();
+        $this->assertSame([], $this->sync_actions());
+        do_action_ref_array(Webhook_Manager::SYNC_ACTION_HOOK, $queued[0]);
+        $this->assertSame([], $this->backend_http_requests);
+        $this->assertSame([], (new Webhook_Manager())->get_webhook_ids());
+
+        Plugin::activate();
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+        (new Plugin())->bootstrap_woocommerce();
+        $this->run_sync_action();
+        $this->assertCount(1, $this->backend_http_requests);
+        $this->assert_managed_webhooks_status("active");
+    }
+
+    public function test_settings_page_distinguishes_pending_retry_stopped_and_confirmed()
+    {
+        $this->connect_without_sync();
+        $this->assertStringContainsString("<strong>Sync pending</strong>", $this->render_status_page());
+
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response(503)]);
+        $this->run_sync_action();
+        $page = $this->render_status_page();
+        $this->assertStringContainsString("<strong>Retry scheduled</strong>", $page);
+        $this->assertStringContainsString("Failed attempts so far: 1.", $page);
+
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response(403)]);
+        $this->run_sync_action();
+        $page = $this->render_status_page();
+        $this->assertStringContainsString("<strong>Needs attention</strong>", $page);
+        $this->assertStringContainsString("keeps trying on its own every 6 hours", $page);
+
+        $this->set_backend_mock_responses([$this->mock_backend_registration_response()]);
+        $this->assertTrue((new Webhook_Manager())->sync_webhooks());
+        $page = $this->render_status_page();
+        $this->assertStringContainsString("<strong>Connected</strong>", $page);
+        $this->assertStringNotContainsString("Needs attention", $page);
+        $this->assertSame([], $this->sync_actions());
+    }
+
+    public function test_deactivation_during_a_background_sync_keeps_delivery_paused()
+    {
+        $this->connect_without_sync();
+        (new Plugin())->bootstrap_woocommerce();
+        $deactivated = false;
+        $this->backend_guzzle_client = new Client([
+            "handler" => function ($request) use (&$deactivated) {
+                if (!$deactivated) {
+                    // The merchant deactivates while the registration is in flight.
+                    $deactivated = true;
+                    Plugin::deactivate();
+                }
+                return new \GuzzleHttp\Promise\FulfilledPromise(new Response(204));
+            },
+        ]);
+
+        $this->run_sync_action();
+
+        $this->assertTrue($deactivated);
+        $this->assert_managed_webhooks_status("paused");
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        $this->assertSame([], $this->sync_actions());
+    }
+
+    public function test_context_change_during_activation_pauses_and_queues_the_new_context()
+    {
+        $this->connect_without_sync("first-secret");
+        $this->set_backend_mock_responses([
+            $this->mock_backend_registration_response(),
+            $this->mock_backend_registration_response(),
+        ]);
+        (new Plugin())->bootstrap_woocommerce();
+        $changed = false;
+        $reconnect = function ($webhook_id) use (&$changed) {
+            if (!$changed && "active" === (new WC_Webhook($webhook_id))->get_status()) {
+                // Another request reconnects after the first webhook was activated.
+                $changed = true;
+                $this->connect_without_sync("second-secret");
+            }
+        };
+        add_action("woocommerce_webhook_updated", $reconnect);
+        try {
+            $this->run_sync_action();
+        } finally {
+            remove_action("woocommerce_webhook_updated", $reconnect);
+        }
+
+        $this->assertTrue($changed);
+        $this->assertCount(1, $this->backend_http_requests);
+        $this->assert_managed_webhooks_status("paused");
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        // The leftover error does not hide that a fresh attempt is queued.
+        $this->assertNotSame("", (new Webhook_Manager())->get_last_sync_error());
+        $this->assertStringContainsString("<strong>Sync pending</strong>", $this->render_status_page());
+
+        $this->assertLessThanOrEqual(time(), $this->run_sync_action());
+        $this->assertCount(2, $this->backend_http_requests);
+        $body = json_decode((string) $this->backend_http_requests[1]["request"]->getBody(), true);
+        $this->assertSame("second-secret", $body["webhookSecret"]);
+        $this->assert_managed_webhooks_status("active");
+    }
+
+    public function test_attempts_that_end_without_an_outcome_still_back_off()
+    {
+        $this->connect_without_sync();
+        $this->set_backend_mock_responses([]);
+        $fatal = static function () {
+            throw new RuntimeException("Simulated fatal error");
+        };
+        add_filter("woocommerce_currency", $fatal);
+        try {
+            (new Plugin())->bootstrap_woocommerce();
+            for ($attempt = 1; $attempt <= Webhook_Manager::SYNC_BACKOFF_ATTEMPTS + 1; ++$attempt) {
+                try {
+                    $this->run_sync_action();
+                    $this->fail("Expected the attempt to end without an outcome");
+                } catch (RuntimeException $exception) {
+                    $this->assertSame("Simulated fatal error", $exception->getMessage());
+                }
+                $this->assertSame($attempt, (new Webhook_Manager())->get_sync_status()["attempts"]);
+                $this->assertSame([], $this->sync_actions());
+
+                // The next request queues the attempt after its backoff, not at once.
+                (new Plugin())->bootstrap_woocommerce();
+                $actions = $this->sync_actions();
+                $this->assertCount(1, $actions);
+                $this->assertEqualsWithDelta(
+                    time() + Webhook_Manager::sync_retry_delay($attempt),
+                    as_next_scheduled_action(Webhook_Manager::SYNC_ACTION_HOOK, $actions[0], Webhook_Manager::SYNC_ACTION_GROUP),
+                    5,
+                );
+            }
+
+            $this->assertSame(Webhook_Manager::SYNC_SLOW_RETRY_DELAY, Webhook_Manager::sync_retry_delay($attempt - 1));
+            $this->assertSame([], $this->backend_http_requests);
+        } finally {
+            remove_filter("woocommerce_currency", $fatal);
+        }
+    }
+
 }

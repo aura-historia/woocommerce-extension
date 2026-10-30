@@ -7,14 +7,17 @@
 
 use AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData;
 use AuraHistoria\PartnerConnect\Option_Lease;
+use AuraHistoria\PartnerConnect\Plugin;
 use AuraHistoria\PartnerConnect\Product_Backfill;
 use AuraHistoria\PartnerConnect\Webhook_Manager;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
+use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
 use GuzzleHttp\Promise\FulfilledPromise;
+use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
 
 class Test_AHPC_Product_Backfill extends WP_UnitTestCase
@@ -1413,5 +1416,157 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         $this->assertSame("2", $state["last_completed_page"]);
         $this->assertSame("1", $state["permanent_failure_count"]);
         $this->assertNotSame("", $state["completed_at"]);
+    }
+
+    private function retryable_failures()
+    {
+        $request = new Request("POST", self::ENDPOINT);
+        $problem = static function ($status) {
+            return new Response($status, ["Content-Type" => "application/problem+json"], "{}");
+        };
+
+        return [
+            new ConnectException("Timed out", $request),
+            $problem(503),
+            $problem(429),
+            $problem(500),
+            $problem(408),
+            $problem(502),
+            new ConnectException("Timed out", $request),
+            $problem(504),
+            $problem(503),
+            $problem(503),
+        ];
+    }
+
+    public function test_retryable_failures_back_off_then_replay_the_same_batch_slowly_until_admitted()
+    {
+        $product = $this->add_product("Outage");
+        $failures = $this->retryable_failures();
+        $failures[] = new Response(503, ["Content-Type" => "application/problem+json"], "{}");
+        $this->assertGreaterThan(Product_Backfill::BACKOFF_ATTEMPTS, count($failures));
+        $this->mock_responses(array_merge($failures, [$this->admission(1)]));
+        $backfill = new Product_Backfill();
+        try {
+            $this->assertTrue($backfill->schedule_backfill(self::SOURCE_ID));
+            $delays = [];
+
+            foreach (array_keys($failures) as $index) {
+                $attempt = $index + 1;
+                $args = $this->queued_args(1);
+                try {
+                    $this->run_queued(1);
+                    $this->fail("Expected a retryable failure");
+                } catch (RuntimeException $exception) {
+                    $this->assertStringContainsString("request failed", $exception->getMessage());
+                }
+                $this->assertCount($attempt, $this->requests);
+                $snapshot = get_option(Product_Backfill::OPTION_BATCH);
+                $this->assertSame($this->request()->getHeaderLine("Idempotency-Key"), $snapshot["idempotency_key"]);
+                $this->assertSame($snapshot["idempotency_key"], $this->request($index)->getHeaderLine("Idempotency-Key"));
+                $this->assertSame((string) $this->request()->getBody(), (string) $this->request($index)->getBody());
+                $status = $backfill->get_status_details();
+                $this->assertSame((string) $attempt, $status["attempts"]);
+                $this->assertSame(Product_Backfill::STATUS_RETRY_SCHEDULED, $status["status"]);
+                $this->assertNotSame($args[2], $this->queued_args(1)[2]);
+                $this->assertEqualsWithDelta(time() + Product_Backfill::retry_delay($attempt), $status["next_scheduled_at"], 5);
+                $delays[] = Product_Backfill::retry_delay($attempt);
+
+                if (1 === $attempt) {
+                    // Edits after the first attempt never change the replayed request.
+                    $product->set_name("Edited during the outage");
+                    $product->save();
+                }
+            }
+
+            // Exponential backoff, then a slow pace that never gives up.
+            $this->assertSame([60, 120, 240, 480, 960, 1920, 3600, 3600, 3600, 21600, 21600], $delays);
+
+            // The superseded action of an earlier attempt cannot resend the batch.
+            do_action_ref_array(Product_Backfill::ACTION_HOOK, $args);
+            $this->assertCount(count($failures), $this->requests);
+
+            // Once the backend is back, the queued replay is admitted without anyone acting.
+            $this->run_queued(1);
+            $this->assertCount(count($failures) + 1, $this->requests);
+            $this->assertSame((string) $this->request()->getBody(), (string) $this->request(count($failures))->getBody());
+            $this->assertSame($snapshot["idempotency_key"], $this->request(count($failures))->getHeaderLine("Idempotency-Key"));
+            $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH));
+            $this->assertSame(Product_Backfill::STATUS_COMPLETE, $backfill->get_status_details()["status"]);
+            $this->assertSame("0", $backfill->get_status_details()["attempts"]);
+        } finally {
+            $product->delete(true);
+        }
+    }
+
+    public function test_deactivation_stops_the_backfill_until_a_manual_resume()
+    {
+        $product = $this->add_product("Paused by deactivation");
+        $this->mock_responses([
+            new Response(503, ["Content-Type" => "application/problem+json"], "{}"),
+            $this->admission(1),
+        ]);
+        $backfill = new Product_Backfill();
+        try {
+            $this->assertTrue($backfill->schedule_backfill(self::SOURCE_ID));
+            try {
+                $this->run_queued(1);
+                $this->fail("Expected a retryable failure");
+            } catch (RuntimeException $exception) {
+                $this->assertStringContainsString("request failed", $exception->getMessage());
+            }
+            $retry = $this->queued_args(1);
+            $snapshot = get_option(Product_Backfill::OPTION_BATCH);
+
+            Plugin::deactivate();
+            $this->assertSame([], $this->queued_actions(1));
+            $status = $backfill->get_status_details();
+            $this->assertSame(Product_Backfill::STATUS_STOPPED, $status["status"]);
+            $this->assertStringContainsString("deactivated", $status["last_error"]);
+            $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
+            do_action_ref_array(Product_Backfill::ACTION_HOOK, $retry);
+            $this->assertCount(1, $this->requests);
+
+            $this->assertSame(Product_Backfill::START_RESUMED, $backfill->start_or_resume_backfill(self::SOURCE_ID));
+            $this->run_queued(1);
+            $this->assertCount(2, $this->requests);
+            $this->assertSame($snapshot["idempotency_key"], $this->request(1)->getHeaderLine("Idempotency-Key"));
+            $this->assertSame((string) $this->request()->getBody(), (string) $this->request(1)->getBody());
+            $this->assertSame(Product_Backfill::STATUS_COMPLETE, $backfill->get_status_details()["status"]);
+        } finally {
+            $product->delete(true);
+        }
+    }
+
+    public function test_run_stopped_between_batches_resumes_at_its_next_page()
+    {
+        $first = $this->add_product("Already admitted");
+        $second = $this->add_product("Next page");
+        $this->mock_responses([$this->admission(1)]);
+        $backfill = new Product_Backfill();
+        try {
+            // Page 1 was admitted and page 2 queued when work was stopped.
+            update_option(Product_Backfill::OPTION_STATE, [
+                "status" => Product_Backfill::STATUS_SCHEDULED,
+                "last_completed_page" => "1",
+                "last_product_id" => (string) $first->get_id(),
+                "wake" => "wake-page-two",
+            ], false);
+            $backfill->stop_backfill("Stopped for this test.");
+            $this->assertSame(Product_Backfill::STATUS_STOPPED, $backfill->get_status_details()["status"]);
+            do_action_ref_array(Product_Backfill::ACTION_HOOK, [self::SOURCE_ID, 2, "wake-page-two"]);
+            $this->assertSame([], $this->requests);
+
+            $this->assertSame(Product_Backfill::START_RESUMED, $backfill->start_or_resume_backfill(self::SOURCE_ID));
+            $this->run_queued(2);
+            $body = json_decode((string) $this->request()->getBody(), true);
+            $this->assertSame([(string) $second->get_id()], array_column($body, "sourceListingId"));
+            $state = $backfill->get_status_details();
+            $this->assertSame(Product_Backfill::STATUS_COMPLETE, $state["status"]);
+            $this->assertSame("2", $state["last_completed_page"]);
+        } finally {
+            $first->delete(true);
+            $second->delete(true);
+        }
     }
 }

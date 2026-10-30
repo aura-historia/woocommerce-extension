@@ -27,6 +27,11 @@ if (!defined("ABSPATH")) {
  * superseded retries and actions of a cancelled or replaced run do nothing.
  * Credentials are read at execution time, never stored in action arguments.
  *
+ * A retryable failure replays the unchanged batch with exponential backoff.
+ * After {@see BACKOFF_ATTEMPTS} failed attempts in a row it keeps replaying
+ * every {@see SLOW_RETRY_DELAY} seconds until the backend admits it; the
+ * snapshot and its key never change meanwhile.
+ *
  * Action Scheduler (bundled with WooCommerce) is used so that large catalogs
  * do not block the HTTP response and can be retried automatically on failure.
  */
@@ -78,6 +83,12 @@ class Product_Backfill
      */
     const STATUS_FAILED = "failed";
 
+    /** Backfill status: a retryable failure, the unchanged batch is queued again. */
+    const STATUS_RETRY_SCHEDULED = "retry_scheduled";
+
+    /** Backfill status: stopped, for example by deactivation; the retained work awaits a manual resume. */
+    const STATUS_STOPPED = "stopped";
+
     /** Start outcome: an idle source queued a fresh full catalog run. */
     const START_FRESH = "started";
 
@@ -92,8 +103,20 @@ class Product_Backfill
      */
     const BATCH_SIZE = 100;
 
-    /** Seconds between attempts to replay an unchanged batch. */
+    /**
+     * Seconds before the first replay of an unchanged batch; each further
+     * replay waits twice as long. Also the delay of a busy or fenced callback.
+     */
     const RETRY_DELAY = 60;
+
+    /** Longest wait between the backed-off replays. */
+    const MAX_RETRY_DELAY = 3600;
+
+    /** Failed attempts of one batch in a row that back off; later replays wait SLOW_RETRY_DELAY. */
+    const BACKOFF_ATTEMPTS = 10;
+
+    /** Seconds between replays after the backoff. */
+    const SLOW_RETRY_DELAY = 21600;
 
     /** Lease lifetime; far longer than building and admitting one batch. */
     const LOCK_SECONDS = 120;
@@ -334,6 +357,44 @@ class Product_Backfill
     }
 
     /**
+     * Stops automatic work, for example on deactivation, without discarding
+     * the retained batch. Queued and running actions lose the wake-up; a
+     * manual start resumes the unchanged request and key, or the next page.
+     *
+     * @param string $message Safe reason shown with the stopped status.
+     * @return void
+     */
+    public function stop_backfill($message)
+    {
+        $this->lease->seize(self::LOCK_SECONDS);
+
+        try {
+            $state = $this->get_state();
+            $active = false !== Option_Lease::read(self::OPTION_BATCH, false) || in_array(
+                $state["status"],
+                [self::STATUS_SCHEDULED, self::STATUS_RUNNING, self::STATUS_RETRY_SCHEDULED],
+                true,
+            );
+            $changes = ["wake" => self::new_wake()];
+
+            // An already stopped run keeps the reason it stopped for.
+            if ($active && self::STATUS_STOPPED !== $state["status"]) {
+                $changes = array_merge($this->failed_changes($message), $changes, [
+                    "status" => self::STATUS_STOPPED,
+                ]);
+            }
+
+            $this->update_state($changes);
+
+            if (function_exists("as_unschedule_all_actions") && $this->is_action_scheduler_ready()) {
+                $this->cancel_backfill_actions();
+            }
+        } finally {
+            $this->lease->release();
+        }
+    }
+
+    /**
      * Returns whether a backfill batch is currently scheduled or running.
      *
      * @return bool
@@ -387,13 +448,19 @@ class Product_Backfill
             if (true === $next_action) {
                 $state["status"] = self::STATUS_RUNNING;
             } elseif (is_numeric($next_action) && (int) $next_action > 0) {
-                $state["status"] = self::STATUS_SCHEDULED;
+                $state["status"] = self::STATUS_RETRY_SCHEDULED === $state["status"]
+                    ? self::STATUS_RETRY_SCHEDULED
+                    : self::STATUS_SCHEDULED;
                 $next_scheduled_at = (int) $next_action;
+            } elseif (self::STATUS_RETRY_SCHEDULED === $state["status"]) {
+                // The replay is no longer queued; only a manual start continues.
+                $state["status"] = self::STATUS_STOPPED;
             }
         }
 
         $state["hook"] = self::ACTION_HOOK;
         $state["next_scheduled_at"] = $next_scheduled_at;
+        $state["backoff_attempts"] = self::BACKOFF_ATTEMPTS;
 
         return $state;
     }
@@ -682,8 +749,26 @@ class Product_Backfill
     }
 
     /**
-     * Queues a delayed replay under a new wake-up. The persisted request, its
-     * payload and idempotency key stay unchanged.
+     * Returns the seconds to wait after a number of failed attempts in a row.
+     *
+     * @param int $attempts Failed attempts of the batch, at least one.
+     * @return int
+     */
+    public static function retry_delay($attempts)
+    {
+        if ((int) $attempts >= self::BACKOFF_ATTEMPTS) {
+            return self::SLOW_RETRY_DELAY;
+        }
+
+        $exponent = min(max(0, (int) $attempts - 1), 16);
+
+        return (int) min(self::RETRY_DELAY * (2 ** $exponent), self::MAX_RETRY_DELAY);
+    }
+
+    /**
+     * Queues a delayed replay under a new wake-up; replays slow down after
+     * BACKOFF_ATTEMPTS failures in a row but never stop on their own. The
+     * persisted request, its payload and idempotency key stay unchanged.
      *
      * @param string $listing_source_id Listing source TypeID.
      * @param int    $page Catalog page.
@@ -692,7 +777,13 @@ class Product_Backfill
      */
     private function schedule_retry($listing_source_id, $page, $message)
     {
-        if (!$this->queue_wake($listing_source_id, $page, self::RETRY_DELAY, $this->failed_changes($message))) {
+        $attempts = (int) $this->get_state()["attempts"] + 1;
+        $changes = array_merge($this->failed_changes($message), [
+            "status" => self::STATUS_RETRY_SCHEDULED,
+            "attempts" => $attempts,
+        ]);
+
+        if (!$this->queue_wake($listing_source_id, $page, self::retry_delay($attempts), $changes)) {
             $this->assert_owner();
             $failure = sprintf("Aura Historia backfill batch (page %d) could not schedule its retry.", $page);
             $this->record_failed($failure);
@@ -1301,7 +1392,10 @@ class Product_Backfill
             }
 
             $snapshot = Option_Lease::read(self::OPTION_BATCH, false);
-            $page = 1;
+            $state = $this->get_state();
+            // A stopped run between batches continues after its last page.
+            $continue = false === $snapshot && self::STATUS_STOPPED === $state["status"];
+            $page = $continue ? (int) $state["last_completed_page"] + 1 : 1;
 
             if (false !== $snapshot) {
                 if (
@@ -1324,7 +1418,6 @@ class Product_Backfill
                 }
 
                 $page = (int) $snapshot["page"];
-                $state = $this->get_state();
                 if ($page <= (int) $state["last_completed_page"] && !self::is_handoff_pending($snapshot, $state)) {
                     $this->record_failed(__(
                         "A saved product backfill batch could not be safely resumed.",
@@ -1334,7 +1427,8 @@ class Product_Backfill
                 }
             }
 
-            $changes = false === $snapshot ? $this->fresh_run_changes() : $this->scheduled_changes();
+            $fresh = false === $snapshot && !$continue;
+            $changes = $fresh ? $this->fresh_run_changes() : $this->scheduled_changes();
 
             if (!$this->queue_wake($listing_source_id, $page, 0, $changes)) {
                 $this->record_failed(__(
@@ -1344,7 +1438,7 @@ class Product_Backfill
                 return false;
             }
 
-            return false === $snapshot ? self::START_FRESH : self::START_RESUMED;
+            return $fresh ? self::START_FRESH : self::START_RESUMED;
         } finally {
             $this->lease->release();
         }
@@ -1431,6 +1525,8 @@ class Product_Backfill
             "completed_at" => "",
             "failed_at" => "",
             "last_error" => "",
+            // Failed attempts of the current batch in a row.
+            "attempts" => "0",
             // The only queued action allowed to process next. A run that has
             // stopped holds a value that no action carries.
             "wake" => "",
@@ -1500,6 +1596,7 @@ class Product_Backfill
             "status" => self::STATUS_SCHEDULED,
             "scheduled_at" => current_time("mysql"),
             "started_at" => "",
+            "attempts" => "0",
         ];
 
         if (0 === (int) $this->get_state()["permanent_failure_count"]) {
@@ -1547,6 +1644,7 @@ class Product_Backfill
             "scheduled_at" => "",
             "started_at" => "",
             "completed_at" => current_time("mysql"),
+            "attempts" => "0",
             "wake" => self::new_wake(),
         ];
 
@@ -1584,6 +1682,7 @@ class Product_Backfill
             "permanent_failure_count" => "0",
             "last_counted_batch" => "",
             "submission_id" => "",
+            "attempts" => "0",
             "wake" => self::new_wake(),
         ]);
     }
