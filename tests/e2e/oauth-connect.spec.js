@@ -99,12 +99,15 @@ test("connecting through the broker stores the connection and cleans the address
     expect(html).not.toContain("aurahistoria_e2e_fake_token");
 
     // Replaying the callback never redeems again and keeps the connection.
+    // The rejection is reported once and not stored.
     await page.goto(callbacks[0].toString());
     await expect(page).toHaveURL(
-        (url) => isSettingsUrl(url) && url.searchParams.get("ahpc_oauth") === "failed",
+        (url) => isSettingsUrl(url) && url.searchParams.get("ahpc_oauth") === "rejected",
     );
     await expect(page.getByText("has expired")).toBeVisible();
     await expect(page.getByText(SOURCE_ID, { exact: true })).toBeVisible();
+    await page.reload();
+    await expect(page.getByText("has expired")).toHaveCount(0);
 });
 
 test("a browser-supplied listing source cannot complete or change the connection", async ({
@@ -117,7 +120,7 @@ test("a browser-supplied listing source cannot complete or change the connection
 
     await page.goto(tampered.toString());
     await expect(page).toHaveURL(
-        (url) => isSettingsUrl(url) && url.searchParams.get("ahpc_oauth") === "failed",
+        (url) => isSettingsUrl(url) && url.searchParams.get("ahpc_oauth") === "rejected",
     );
     await expect(page.getByText("no longer accepts")).toBeVisible();
     await expect(page.getByRole("button", { name: "Connect with Aura Historia" })).toBeVisible();

@@ -11,6 +11,8 @@ use AuraHistoria\PartnerConnect\OAuth_Broker_Client;
 use AuraHistoria\PartnerConnect\Option_Lease;
 use AuraHistoria\PartnerConnect\Plugin;
 use AuraHistoria\PartnerConnect\Product_Backfill;
+use AuraHistoria\PartnerConnect\Shipping_Publisher;
+use AuraHistoria\PartnerConnect\Shipping_Sync;
 use AuraHistoria\PartnerConnect\Webhook_Manager;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\ConnectException;
@@ -60,6 +62,9 @@ class Test_AHPC_OAuth_Connection extends WP_UnitTestCase
     /** @var string */
     protected $admin_base_url = self::ADMIN_BASE_URL;
 
+    /** @var string Static query appended to admin URLs, as some plugins do. */
+    protected $admin_url_suffix = "";
+
     /** @var array<int,array<string,mixed>> */
     protected $backend_requests = [];
 
@@ -103,7 +108,7 @@ class Test_AHPC_OAuth_Connection extends WP_UnitTestCase
         });
         add_filter("admin_url", function ($url, $path = "") {
             unset($url);
-            return $this->admin_base_url . ltrim((string) $path, "/");
+            return $this->admin_base_url . ltrim((string) $path, "/") . $this->admin_url_suffix;
         }, 10, 2);
         add_filter("ahpc_backend_base_url", static function () {
             return "https://example.com";
@@ -247,6 +252,14 @@ class Test_AHPC_OAuth_Connection extends WP_UnitTestCase
         }
 
         return $location;
+    }
+
+    /**
+     * @return string One-time callback notice for the current user.
+     */
+    protected function callback_notice()
+    {
+        return (string) get_transient(Plugin::OAUTH_NOTICE_TRANSIENT_PREFIX . get_current_user_id());
     }
 
     /**
@@ -527,6 +540,7 @@ class Test_AHPC_OAuth_Connection extends WP_UnitTestCase
             [AHPC_Fake_OAuth_Broker::json(400, ["error" => "unsupported_protocol_version"]), "ahpc_oauth_broker_rejected"],
             [new Response(302, ["Location" => "https://evil.example/collect"]), "ahpc_oauth_broker_rejected"],
             [new Response(201, ["Content-Type" => "application/json"], str_repeat(" ", OAuth_Broker_Client::MAX_RESPONSE_BYTES + 1) . "{}"), "ahpc_oauth_broker_invalid_response"],
+            [new Response(201, ["Content-Type" => "application/json", "Content-Length" => (string) (OAuth_Broker_Client::MAX_RESPONSE_BYTES + 1)], "{}"), "ahpc_oauth_broker_invalid_response"],
         ];
 
         foreach ($cases as $index => [$response, $code]) {
@@ -626,6 +640,66 @@ class Test_AHPC_OAuth_Connection extends WP_UnitTestCase
         }
         $this->assertSame([self::SOURCE_A => true], get_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []));
         $this->assertSame(1, $this->count_initial_backfill_actions(self::SOURCE_A));
+        $this->assertTrue((bool) as_has_scheduled_action(Shipping_Publisher::ACTION_HOOK, null, Shipping_Publisher::ACTION_GROUP));
+    }
+
+    public function test_static_callback_query_parameters_must_come_back_unchanged()
+    {
+        // An admin URL filter, such as a multilingual plugin, adds a parameter.
+        $this->admin_url_suffix = "&lang=de";
+        $this->start();
+        $this->assertSame(self::SETTINGS_URL . "&lang=de", $this->broker->requests[0]["body"]["merchant_redirect_uri"]);
+        $callback = $this->broker->approve();
+        $query = $this->callback_query($callback);
+        $settings_url = self::SETTINGS_URL . "&lang=de";
+
+        $this->assertSame($settings_url . "&ahpc_oauth=rejected", $this->run_callback($query));
+        $this->assertSame($settings_url . "&ahpc_oauth=rejected", $this->run_callback($query . "&lang=fr"));
+        $this->assertSame([], $this->broker->completion_requests());
+
+        $this->assertSame($settings_url . "&ahpc_oauth=connected", $this->run_callback($query . "&lang=de"));
+        $this->assertSame(self::SOURCE_A, $this->settings()["listing_source_id"]);
+    }
+
+    public function test_a_start_that_cannot_store_its_attempt_fails_without_redirecting()
+    {
+        $break_insert = static function ($sql) {
+            return false !== strpos($sql, Plugin::OPTION_OAUTH_ATTEMPT) && 0 === stripos(ltrim($sql), "INSERT")
+                ? "SELECT * FROM ahpc_missing_table"
+                : $sql;
+        };
+        add_filter("query", $break_insert);
+        try {
+            $result = (new Plugin())->start_oauth_connection();
+        } finally {
+            remove_filter("query", $break_insert);
+        }
+
+        $this->assertWPError($result);
+        $this->assertSame("ahpc_oauth_storage_failed", $result->get_error_code());
+        $this->assertNull($this->attempt());
+        $this->assertFalse(Option_Lease::read(Plugin::OPTION_OAUTH_LOCK, false));
+    }
+
+    public function test_an_abandoned_attempt_is_removed_after_it_expires()
+    {
+        $this->start();
+        $attempt = $this->attempt();
+        $scheduled = wp_next_scheduled(Plugin::OAUTH_CLEANUP_HOOK);
+        $this->assertSame($attempt["expires_at"] + MINUTE_IN_SECONDS, $scheduled);
+
+        // Too early: the attempt stays and the cleanup is kept.
+        do_action(Plugin::OAUTH_CLEANUP_HOOK);
+        $this->assertIsArray($this->attempt());
+        $this->assertSame($scheduled, wp_next_scheduled(Plugin::OAUTH_CLEANUP_HOOK));
+
+        $attempt["expires_at"] = time() - 1;
+        update_option(Plugin::OPTION_OAUTH_ATTEMPT, $attempt, false);
+        do_action(Plugin::OAUTH_CLEANUP_HOOK);
+        $this->assertNull($this->attempt());
+
+        Plugin::deactivate();
+        $this->assertFalse(wp_next_scheduled(Plugin::OAUTH_CLEANUP_HOOK));
     }
 
     public function test_callback_handler_completes_and_redirects_to_a_clean_settings_url()
@@ -680,10 +754,12 @@ class Test_AHPC_OAuth_Connection extends WP_UnitTestCase
             "page=aura-historia-partner-connect&access_token=" . self::TOKEN . "&listing_source_id=" . self::SOURCE_B,
         ] as $query) {
             $location = $this->run_callback($query);
-            $this->assertSame(self::SETTINGS_URL . "&ahpc_oauth=failed", $location, $query);
+            $this->assertSame(self::SETTINGS_URL . "&ahpc_oauth=rejected", $location, $query);
         }
 
-        $this->assertStringContainsString("no longer accepts", get_option(Webhook_Manager::OPTION_LAST_OAUTH_ERROR));
+        // Nothing changed, so the rejection is shown once instead of stored.
+        $this->assertStringContainsString("no longer accepts", $this->callback_notice());
+        $this->assertFalse(get_option(Webhook_Manager::OPTION_LAST_OAUTH_ERROR, false));
         $this->assertSame([], $this->broker->completion_requests());
         $this->assertSame([], $this->backend_requests);
         $this->assertSame(self::SOURCE_B, $this->settings()["listing_source_id"]);
@@ -713,7 +789,7 @@ class Test_AHPC_OAuth_Connection extends WP_UnitTestCase
             str_replace($callback["transaction_id"], "obt_..%2F..%2Fadmin", $query),
             str_replace($callback["state"], $callback["state"] . "x", $query),
         ] as $tampered) {
-            $this->assertSame(self::SETTINGS_URL . "&ahpc_oauth=failed", $this->run_callback($tampered), $tampered);
+            $this->assertSame(self::SETTINGS_URL . "&ahpc_oauth=rejected", $this->run_callback($tampered), $tampered);
         }
 
         $this->assertSame([], $this->broker->completion_requests());
@@ -976,6 +1052,8 @@ class Test_AHPC_OAuth_Connection extends WP_UnitTestCase
         $this->assertNull($this->attempt());
         $this->assertSame("ahpc_oauth_expired_state", $this->complete($callback)->get_error_code());
         $this->assertCount(1, $this->broker->completion_requests());
+        // Initiation and one completion: a redirect is never followed.
+        $this->assertCount(2, $this->broker->requests);
         foreach ([$result->get_error_message(), wp_json_encode($result->get_error_data())] as $text) {
             $this->assertStringNotContainsString($callback["completion_code"], $text);
             $this->assertStringNotContainsString(self::TOKEN, $text);
@@ -1013,15 +1091,41 @@ class Test_AHPC_OAuth_Connection extends WP_UnitTestCase
         $backend_requests = count($this->backend_requests);
         $settings = $this->settings();
 
-        $this->assertSame(self::SETTINGS_URL . "&ahpc_oauth=failed", $this->run_callback($this->callback_query($callback)));
+        $this->assertSame(self::SETTINGS_URL . "&ahpc_oauth=rejected", $this->run_callback($this->callback_query($callback)));
         $this->assertSame("ahpc_oauth_expired_state", $this->complete($callback)->get_error_code());
 
         $this->assertCount(1, $this->broker->completion_requests());
         $this->assertCount($backend_requests, $this->backend_requests);
         $this->assertSame($settings, $this->settings());
         $this->assertSame(1, $this->count_initial_backfill_actions(self::SOURCE_A));
-        // The replay is reported, but the connection stays as it was.
-        $this->assertNotSame("", get_option(Webhook_Manager::OPTION_LAST_OAUTH_ERROR, ""));
+        // The replay is reported once; no error stays on the connected store.
+        $this->assertStringContainsString("has expired", $this->callback_notice());
+        $this->assertFalse(get_option(Webhook_Manager::OPTION_LAST_OAUTH_ERROR, false));
+    }
+
+    public function test_a_rejected_callback_notice_is_shown_once_without_starting_oauth()
+    {
+        $this->store_connection("", "");
+        $this->assertSame(self::SETTINGS_URL . "&ahpc_oauth=rejected", $this->run_callback("page=aura-historia-partner-connect&error=access_denied"));
+        update_option(Webhook_Manager::OPTION_NEEDS_SYNC, "no", false);
+
+        $_GET = ["page" => Plugin::PAGE_SLUG, "ahpc_oauth" => "rejected"];
+        ob_start();
+        (new Plugin())->render_settings_page();
+        $first = (string) ob_get_clean();
+        ob_start();
+        (new Plugin())->render_settings_page();
+        $second = (string) ob_get_clean();
+        $_GET = ["page" => Plugin::PAGE_SLUG];
+        ob_start();
+        (new Plugin())->render_settings_page();
+        $later = (string) ob_get_clean();
+
+        $this->assertStringContainsString("no longer accepts", $first);
+        $this->assertStringNotContainsString("ahpcOauthAutoStart", $first);
+        $this->assertStringNotContainsString("no longer accepts", $second);
+        // Nothing was stored, so a later visit may start OAuth again.
+        $this->assertStringContainsString("ahpcOauthAutoStart", $later);
     }
 
     public function test_a_simultaneous_callback_sees_the_claim_and_does_not_redeem()
@@ -1072,6 +1176,36 @@ class Test_AHPC_OAuth_Connection extends WP_UnitTestCase
         $this->assertSame("aurahistoria_newer_connection_token", $this->settings()["access_token"]);
         $this->assertSame([], $this->backend_requests);
         $this->assertSame("ahpc_oauth_attempt_used", $this->complete($callback)->get_error_code());
+    }
+
+    public function test_losing_the_lease_while_replacing_keeps_the_previous_connection_state()
+    {
+        $this->store_connection();
+        update_option(Plugin::OPTION_INITIAL_BACKFILL_PENDING_SOURCE, self::SOURCE_B, false);
+        $snapshot = ["idempotency_key" => "previous-key", "payloads" => [["sourceListingId" => "42"]]];
+        update_option(Product_Backfill::OPTION_BATCH, $snapshot, false);
+        $this->start();
+        $callback = $this->broker->approve();
+        $seized = false;
+        // A successor takes over the lease after the completion checked it,
+        // while the previous source's shipping is being stopped.
+        $seize = function () use (&$seized) {
+            if (!$seized) {
+                $seized = (new Option_Lease(Plugin::OPTION_OAUTH_LOCK))->seize(60);
+            }
+        };
+        add_action("add_option_" . Shipping_Sync::OPTION_BINDING, $seize);
+        add_action("update_option_" . Shipping_Sync::OPTION_BINDING, $seize);
+
+        $result = $this->complete($callback);
+
+        $this->assertTrue($seized);
+        $this->assertSame("ahpc_oauth_not_saved", $result->get_error_code());
+        $this->assertSame(self::SOURCE_B, $this->settings()["listing_source_id"]);
+        $this->assertSame(self::OLD_TOKEN, $this->settings()["access_token"]);
+        $this->assertSame(self::SOURCE_B, get_option(Plugin::OPTION_INITIAL_BACKFILL_PENDING_SOURCE));
+        $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
+        $this->assertSame([], $this->backend_requests);
     }
 
     public function test_follow_up_sync_failure_keeps_the_saved_connection_without_a_second_redemption()

@@ -37,6 +37,25 @@ class Plugin
     const OAUTH_LEGACY_PARAMETERS = ["third_party_exchange_code", "listing_source_id", "code", "error", "error_description", "access_token"];
     /** 32 random bytes as base64url without padding. */
     const OAUTH_STATE_PATTERN = '/\A[A-Za-z0-9_-]{43}\z/';
+    /**
+     * Callback rejections that happen before the attempt is claimed. They
+     * change nothing, so they are shown once instead of being stored.
+     */
+    const OAUTH_REJECTION_CODES = [
+        "ahpc_oauth_legacy_callback",
+        "ahpc_oauth_invalid_callback",
+        "ahpc_oauth_invalid_state",
+        "ahpc_oauth_expired_state",
+        "ahpc_oauth_user_mismatch",
+        "ahpc_oauth_transaction_mismatch",
+        "ahpc_oauth_context_changed",
+        "ahpc_oauth_attempt_used",
+        "ahpc_oauth_busy",
+    ];
+    /** Per-user transient prefix for a one-time callback rejection notice. */
+    const OAUTH_NOTICE_TRANSIENT_PREFIX = "ahpc_oauth_notice_";
+    /** WP-Cron hook that removes an abandoned attempt once it expired. */
+    const OAUTH_CLEANUP_HOOK = "ahpc_discard_expired_oauth_attempt";
     const OPTION_INITIAL_BACKFILL_PENDING_SOURCE = "ahpc_initial_backfill_pending_source";
     const OPTION_INITIAL_BACKFILL_STARTED_SOURCES = "ahpc_initial_backfill_started_sources";
     const OPTION_INITIAL_BACKFILL_ERROR = "ahpc_initial_backfill_error";
@@ -142,6 +161,7 @@ class Plugin
         (new Shipping_Publisher())->withdraw();
         // A pending connection attempt holds a completion secret.
         delete_option(self::OPTION_OAUTH_ATTEMPT);
+        wp_clear_scheduled_hook(self::OAUTH_CLEANUP_HOOK);
     }
 
     /**
@@ -188,6 +208,7 @@ class Plugin
             2,
         );
         add_action("woocommerce_loaded", [$this, "bootstrap_woocommerce"]);
+        add_action(self::OAUTH_CLEANUP_HOOK, [$this, "discard_expired_oauth_attempt"]);
         add_action("update_option_woocommerce_currency", [$this, "on_store_locale_option_updated"], 10, 2);
         add_action("update_option_WPLANG", [$this, "on_store_locale_option_updated"], 10, 2);
         add_action("added_option", [$this, "on_store_locale_option_added"], 10, 2);
@@ -689,7 +710,11 @@ class Plugin
         }
 
         $query = OAuth_Broker_Client::parse_unique_query($this->get_raw_query_string());
-        $expected = array_merge(["page"], self::OAUTH_CALLBACK_PARAMETERS);
+        // The callback URL's own query, such as page, must come back
+        // unchanged next to exactly the three handoff fields.
+        $static = OAuth_Broker_Client::parse_unique_query(
+            (string) wp_parse_url($this->get_oauth_callback_url(), PHP_URL_QUERY),
+        );
 
         if (array_intersect($present, self::OAUTH_LEGACY_PARAMETERS)) {
             $result = new WP_Error(
@@ -701,8 +726,11 @@ class Plugin
             );
         } elseif (
             null === $query ||
-            count($query) !== count($expected) ||
-            array_diff($expected, array_keys($query))
+            null === $static ||
+            array_intersect(array_keys($static), self::OAUTH_CALLBACK_PARAMETERS) ||
+            count($query) !== count($static) + count(self::OAUTH_CALLBACK_PARAMETERS) ||
+            array_diff(self::OAUTH_CALLBACK_PARAMETERS, array_keys($query)) ||
+            array_diff_assoc($static, $query)
         ) {
             $result = new WP_Error(
                 "ahpc_oauth_invalid_callback",
@@ -728,13 +756,22 @@ class Plugin
                 // The credentials were stored; only the follow-up setup failed.
                 // Its status is shown separately and retried in the background.
                 $status = "saved";
+            } elseif (in_array($result->get_error_code(), self::OAUTH_REJECTION_CODES, true)) {
+                // Nothing was consumed or changed, for example on a replay or
+                // a crafted link, so the message is shown only once.
+                set_transient(
+                    self::OAUTH_NOTICE_TRANSIENT_PREFIX . get_current_user_id(),
+                    sanitize_text_field($result->get_error_message()),
+                    5 * MINUTE_IN_SECONDS,
+                );
+                $status = "rejected";
             } else {
                 $this->store_oauth_error($result->get_error_message());
                 $status = "failed";
             }
         }
 
-        if ("failed" !== $status) {
+        if ("connected" === $status || "saved" === $status) {
             delete_option(Webhook_Manager::OPTION_LAST_OAUTH_ERROR);
         }
 
@@ -833,6 +870,8 @@ class Plugin
                 return $this->oauth_storage_error();
             }
 
+            $this->schedule_oauth_attempt_cleanup($attempt["expires_at"]);
+
             return $transaction["authorization_url"];
         } finally {
             $lease->release();
@@ -858,8 +897,8 @@ class Plugin
      */
     public function complete_oauth_connection(
         $transaction_id,
-        $client_state,
-        $completion_code,
+        #[\SensitiveParameter] $client_state,
+        #[\SensitiveParameter] $completion_code,
     ) {
         if (!current_user_can("manage_woocommerce")) {
             return $this->oauth_forbidden_error();
@@ -1160,7 +1199,9 @@ class Plugin
     /**
      * Replaces the stored connection while the attempt lease is held. The
      * settings write is fenced by the lease, so a completion that outlived its
-     * lease cannot overwrite a newer connection.
+     * lease cannot overwrite a newer connection. Only the shipping withdrawal,
+     * which needs the previous credentials, happens before that write; the
+     * remaining source-change cleanup follows only once the write succeeded.
      *
      * @param Option_Lease $lease             Held attempt lease.
      * @param string       $listing_source_id Validated ListingSource ID.
@@ -1169,33 +1210,23 @@ class Plugin
      */
     private function save_oauth_connection(Option_Lease $lease, $listing_source_id, $access_token)
     {
-        $not_saved = new WP_Error(
-            "ahpc_oauth_not_saved",
-            __(
-                "Aura Historia approved the connection, but this site could not save it, so the previous connection is unchanged. Start the connection again from this page.",
-                "aura-historia-partner-connect",
-            ),
-        );
-
         if (!$lease->held()) {
-            return $not_saved;
+            return new WP_Error(
+                "ahpc_oauth_not_saved",
+                __(
+                    "Aura Historia approved the connection, but this site could not save it, so the previous connection is unchanged. Start the connection again from this page.",
+                    "aura-historia-partner-connect",
+                ),
+            );
         }
 
         $previous = Option_Lease::read(Webhook_Manager::OPTION_SETTINGS, []);
         $settings = $this->get_current_settings();
+        $previous_source = $settings["listing_source_id"];
+        $withdrawn = Webhook_Manager::is_valid_listing_source_id($previous_source);
         Shipping_Sync::stop();
-        if (Webhook_Manager::is_valid_listing_source_id($settings["listing_source_id"])) {
+        if ($withdrawn) {
             (new Shipping_Publisher())->withdraw();
-        }
-        if ($settings["listing_source_id"] !== $listing_source_id) {
-            if (class_exists(Product_Backfill::class)) {
-                (new Product_Backfill())->cancel_backfill();
-            }
-            delete_option(self::OPTION_INITIAL_BACKFILL_PENDING_SOURCE);
-        }
-        $started = get_option(self::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []);
-        if (!is_array($started) || !isset($started[$listing_source_id])) {
-            update_option(self::OPTION_INITIAL_BACKFILL_PENDING_SOURCE, $listing_source_id, false);
         }
 
         $settings["listing_source_id"] = $listing_source_id;
@@ -1206,13 +1237,36 @@ class Plugin
         }
 
         if (!$lease->write(Webhook_Manager::OPTION_SETTINGS, $settings)) {
+            // The previous connection is still stored; resume its shipping.
             (new Shipping_Sync())->initialize(true);
-            return $not_saved;
+
+            return new WP_Error(
+                "ahpc_oauth_not_saved",
+                $withdrawn
+                    ? __(
+                        "Aura Historia approved the connection, but this site could not save it. The previous connection is still stored, but its shipping was withdrawn while it was being replaced; use Import shipping to publish it again, or start the connection again from this page.",
+                        "aura-historia-partner-connect",
+                    )
+                    : __(
+                        "Aura Historia approved the connection, but this site could not save it, so the previous connection is unchanged. Start the connection again from this page.",
+                        "aura-historia-partner-connect",
+                    ),
+            );
         }
 
         // The fenced write bypasses update_option(), so apply its connection
         // change handling explicitly.
         Webhook_Manager::connection_settings_changed($previous, $settings);
+        if ($previous_source !== $listing_source_id) {
+            if (class_exists(Product_Backfill::class)) {
+                (new Product_Backfill())->cancel_backfill();
+            }
+            delete_option(self::OPTION_INITIAL_BACKFILL_PENDING_SOURCE);
+        }
+        $started = get_option(self::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []);
+        if (!is_array($started) || !isset($started[$listing_source_id])) {
+            update_option(self::OPTION_INITIAL_BACKFILL_PENDING_SOURCE, $listing_source_id, false);
+        }
         (new Shipping_Sync())->initialize(true);
         update_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes", false);
         delete_option(Webhook_Manager::OPTION_LAST_SYNC_ERROR);
@@ -1572,6 +1626,11 @@ class Plugin
             $this->get_query_param("ahpc_backfill"),
         );
         $oauth_status = sanitize_key($this->get_query_param("ahpc_oauth"));
+        $oauth_notice = "";
+        if ("rejected" === $oauth_status) {
+            $oauth_notice = (string) get_transient(self::OAUTH_NOTICE_TRANSIENT_PREFIX . get_current_user_id());
+            delete_transient(self::OAUTH_NOTICE_TRANSIENT_PREFIX . get_current_user_id());
+        }
         $oauth_error = (string) get_option(
             Webhook_Manager::OPTION_LAST_OAUTH_ERROR,
             "",
@@ -1587,7 +1646,7 @@ class Plugin
         $should_auto_start_oauth =
             $this->is_woocommerce_available() &&
             !$is_connected &&
-            "failed" !== $oauth_status &&
+            !in_array($oauth_status, ["failed", "rejected"], true) &&
             "" === $oauth_error &&
             !empty($backend_base_url) &&
             "" !== $oauth_broker_base_url &&
@@ -1686,6 +1745,8 @@ class Plugin
             "aura-historia-partner-connect",
         ),
     ); ?>
+			<?php elseif ("rejected" === $oauth_status && "" !== $oauth_notice): ?>
+				<?php $this->render_inline_notice("error", esc_html($oauth_notice)); ?>
 			<?php elseif ("saved" === $oauth_status): ?>
 				<?php $this->render_inline_notice(
         "warning",
@@ -2842,22 +2903,30 @@ class Plugin
     }
 
     /**
-     * Removes an expired attempt and its completion secret. Skipped while a
-     * start or completion holds the lease.
+     * Removes an expired attempt and its completion secret, so an abandoned
+     * attempt does not outlive its expiry. Runs from WP-Cron, the settings
+     * page and expired callbacks. While a start or completion holds the lease
+     * or a newer attempt is still valid, it checks again later.
      *
      * @return void
      */
-    private function discard_expired_oauth_attempt()
+    public function discard_expired_oauth_attempt()
     {
         $attempt = Option_Lease::read(self::OPTION_OAUTH_ATTEMPT, null);
 
-        if (null === $attempt || (is_array($attempt) && isset($attempt["expires_at"]) && (int) $attempt["expires_at"] > time())) {
+        if (null === $attempt) {
+            return;
+        }
+
+        if (is_array($attempt) && isset($attempt["expires_at"]) && (int) $attempt["expires_at"] > time()) {
+            $this->schedule_oauth_attempt_cleanup((int) $attempt["expires_at"]);
             return;
         }
 
         $lease = new Option_Lease(self::OPTION_OAUTH_LOCK);
 
         if (!$lease->acquire(self::OAUTH_LOCK_SECONDS)) {
+            $this->schedule_oauth_attempt_cleanup(time() + MINUTE_IN_SECONDS);
             return;
         }
 
@@ -2869,6 +2938,24 @@ class Plugin
         } finally {
             $lease->release();
         }
+    }
+
+    /**
+     * Schedules the removal of the attempt shortly after it expires.
+     *
+     * @param int $expires_at Attempt expiry.
+     * @return void
+     */
+    private function schedule_oauth_attempt_cleanup($expires_at)
+    {
+        $next = wp_next_scheduled(self::OAUTH_CLEANUP_HOOK);
+
+        if (false !== $next && $next <= $expires_at + MINUTE_IN_SECONDS) {
+            return;
+        }
+
+        wp_clear_scheduled_hook(self::OAUTH_CLEANUP_HOOK);
+        wp_schedule_single_event($expires_at + MINUTE_IN_SECONDS, self::OAUTH_CLEANUP_HOOK);
     }
 
     /**

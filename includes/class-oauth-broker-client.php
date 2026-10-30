@@ -201,8 +201,11 @@ class OAuth_Broker_Client
      * @param string $completion_secret Locally retained completion secret.
      * @return array<string,string>|WP_Error An approved, denied or failed outcome.
      */
-    public function complete($transaction_id, $completion_code, $completion_secret)
-    {
+    public function complete(
+        $transaction_id,
+        #[\SensitiveParameter] $completion_code,
+        #[\SensitiveParameter] $completion_secret
+    ) {
         $response = $this->post($this->get_completion_url(), [
             "protocol_version" => self::PROTOCOL_VERSION,
             "transaction_id" => (string) $transaction_id,
@@ -377,7 +380,7 @@ class OAuth_Broker_Client
      * @param array<int>    $statuses Accepted HTTP statuses.
      * @return array<string,mixed>|WP_Error
      */
-    private function post($url, array $body, array $statuses)
+    private function post($url, #[\SensitiveParameter] array $body, array $statuses)
     {
         if ("" === $url) {
             return new WP_Error(
@@ -393,12 +396,14 @@ class OAuth_Broker_Client
             );
         }
 
-        $client = new GuzzleClient();
-        $filtered = apply_filters("ahpc_oauth_broker_guzzle_client", $client, $url);
-        $client = $filtered instanceof ClientInterface ? $filtered : $client;
         $limit = self::MAX_RESPONSE_BYTES;
+        $sink = self::bounded_sink($limit);
 
         try {
+            $client = new GuzzleClient();
+            $filtered = apply_filters("ahpc_oauth_broker_guzzle_client", $client, $url);
+            $client = $filtered instanceof ClientInterface ? $filtered : $client;
+
             // Request options override any client defaults: a redirect must
             // never forward the secret-bearing body to another endpoint.
             $response = $client->request("POST", $url, [
@@ -414,23 +419,24 @@ class OAuth_Broker_Client
                 "timeout" => self::TIMEOUT,
                 "connect_timeout" => self::CONNECT_TIMEOUT,
                 "version" => "1.1",
-                "on_headers" => static function ($response) use ($limit) {
+                "on_headers" => static function ($response) use ($limit, $sink) {
                     $length = $response->getHeaderLine("Content-Length");
                     if ("" !== $length && (!ctype_digit($length) || (int) $length > $limit)) {
+                        $sink->exceeded = true;
                         throw new \RuntimeException("Response too large.");
                     }
                 },
-                "sink" => self::bounded_sink($limit),
+                "sink" => $sink,
             ]);
+            $status = (int) $response->getStatusCode();
+            $raw = (string) $response->getBody();
         } catch (\Throwable $exception) {
             unset($exception);
-            return self::unavailable_error();
+            // An oversized body is a malformed answer, not an outage.
+            return $sink->exceeded ? self::invalid_response_error() : self::unavailable_error();
         }
 
-        $status = (int) $response->getStatusCode();
-        $raw = (string) $response->getBody();
-
-        if (strlen($raw) > $limit) {
+        if ($sink->exceeded || strlen($raw) > $limit) {
             return self::invalid_response_error();
         }
 
@@ -444,7 +450,8 @@ class OAuth_Broker_Client
     }
 
     /**
-     * A response sink that stops the transfer once it exceeds the limit.
+     * A response sink that stops the transfer once it exceeds the limit and
+     * records that it did.
      *
      * @param int $limit Maximum body bytes.
      * @return StreamInterface
@@ -462,6 +469,9 @@ class OAuth_Broker_Client
             /** @var int */
             private $limit;
 
+            /** @var bool Whether the body exceeded the limit. */
+            public $exceeded = false;
+
             public function __construct(StreamInterface $stream, $limit)
             {
                 $this->decorate($stream);
@@ -472,6 +482,7 @@ class OAuth_Broker_Client
             {
                 // A short write makes cURL abort the transfer.
                 if ((int) $this->stream->getSize() + strlen((string) $string) > $this->limit) {
+                    $this->exceeded = true;
                     return 0;
                 }
 
