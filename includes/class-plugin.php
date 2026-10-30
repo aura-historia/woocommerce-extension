@@ -1279,7 +1279,6 @@ class Plugin
             $last_sync_at,
         );
         $backfill_status = $this->get_backfill_status($settings);
-        $hide_default_updated_notice = false;
         ?>
 		<div class="wrap">
 			<h1><?php echo esc_html__(
@@ -1290,7 +1289,7 @@ class Plugin
        "Connect this WooCommerce store to Aura Historia so your products can appear there and stay up to date automatically.",
        "aura-historia-partner-connect",
    ); ?></p>
-			<?php $this->render_setting_messages($hide_default_updated_notice); ?>
+			<?php $this->render_setting_messages(); ?>
 
 			<?php if (!$this->is_woocommerce_available()): ?>
 				<?php $this->render_inline_notice(
@@ -1688,10 +1687,9 @@ class Plugin
     /**
      * Renders settings messages for the plugin page.
      *
-     * @param bool $hide_updated_notice Whether the generic updated notice should be hidden.
      * @return void
      */
-    private function render_setting_messages($hide_updated_notice = false)
+    private function render_setting_messages()
     {
         if (!function_exists("get_settings_errors")) {
             return;
@@ -1701,15 +1699,10 @@ class Plugin
             get_settings_errors(Webhook_Manager::OPTION_SETTINGS)
             as $error
         ) {
-            $code = isset($error["code"]) ? (string) $error["code"] : "";
             $type = isset($error["type"]) ? (string) $error["type"] : "error";
             $message = isset($error["message"])
                 ? (string) $error["message"]
                 : "";
-
-            if ($hide_updated_notice && "settings_updated" === $code) {
-                continue;
-            }
 
             $this->render_inline_notice(
                 "updated" === $type ? "success" : $type,
@@ -2196,7 +2189,7 @@ class Plugin
         }
 
         if (
-            !isset($_GET[$key]) // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only admin notice query parameter.
+            !isset($_GET[$key]) || !is_string($_GET[$key]) // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- OAuth state is checked separately; other parameters select notices only.
         ) {
             return "";
         }

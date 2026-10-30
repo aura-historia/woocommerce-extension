@@ -966,6 +966,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             ["url" => $url, "args" => array_merge($args, ["body" => "changed"])],
             ["url" => $url, "args" => array_replace_recursive($args, ["headers" => ["x-wc-webhook-id" => "999999"]])],
             ["url" => $url, "args" => ["headers" => [], "body" => "ping"]],
+            ["url" => $url, "args" => array_replace_recursive($args, ["headers" => ["x-wc-webhook-topic" => ["product.created"]]])],
         ] as $case) {
             $this->assertSame($case["args"], apply_filters("http_request_args", $case["args"], $case["url"]));
         }
@@ -1292,6 +1293,51 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         foreach ($webhook_ids as $webhook_id) {
             $webhook = new WC_Webhook($webhook_id);
             $this->assertSame(0, $webhook->get_id());
+        }
+    }
+
+    public function test_failed_webhook_insert_is_not_reported_as_a_successful_sync()
+    {
+        global $wpdb;
+        $manager = new Webhook_Manager();
+        $manager->delete_webhooks();
+        $break_insert = static function ($sql) use ($wpdb) {
+            return str_starts_with($sql, "INSERT INTO `{$wpdb->prefix}wc_webhooks`")
+                ? "INSERT INTO ahpc_missing_test_table VALUES (1)" : $sql;
+        };
+        add_filter("query", $break_insert);
+        $suppressed = $wpdb->suppress_errors(true);
+        try {
+            $result = $manager->sync_webhooks();
+        } finally {
+            remove_filter("query", $break_insert);
+            $wpdb->suppress_errors($suppressed);
+        }
+        $this->assertWPError($result);
+        $this->assertSame("ahpc_webhook_save_failed", $result->get_error_code());
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        $this->assertSame([], $manager->get_webhook_ids());
+    }
+
+    public function test_webhook_user_lookup_accepts_direct_capabilities()
+    {
+        $manager = new Webhook_Manager();
+        delete_option(Webhook_Manager::OPTION_WEBHOOK_USER_ID);
+        wp_set_current_user(0);
+        $user = self::factory()->user->create_and_get(["role" => "subscriber"]);
+        $user->add_cap("manage_woocommerce");
+        // Other administrators can be temporarily denied by a permissions plugin.
+        $deny_others = static function ($caps, $requested, $args, $candidate) use ($user) {
+            if ($candidate->ID !== $user->ID) {
+                $caps["manage_woocommerce"] = false;
+            }
+            return $caps;
+        };
+        add_filter("user_has_cap", $deny_others, 10, 4);
+        try {
+            $this->assertSame($user->ID, $manager->resolve_webhook_user_id());
+        } finally {
+            remove_filter("user_has_cap", $deny_others, 10);
         }
     }
 

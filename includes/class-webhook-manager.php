@@ -31,7 +31,6 @@ class Webhook_Manager
     const OPTION_LAST_SYNC_AT = "ahpc_last_sync_at";
     const OPTION_LAST_OAUTH_ERROR = "ahpc_last_oauth_error";
     const SETTINGS_GROUP = "ahpc_settings_group";
-    const TEXT_DOMAIN = "aura-historia-partner-connect";
     const API_VERSION = 3;
     const PRODUCT_DELETED_HOOK = "ahpc_product_permanently_deleted";
 
@@ -218,6 +217,7 @@ class Webhook_Manager
             : "";
         if (
             !$id ||
+            !is_string($topic) ||
             !isset($ids[$topic]) ||
             $ids[$topic] !== $id ||
             !is_string($signature) ||
@@ -1040,7 +1040,9 @@ class Webhook_Manager
     private function persist_managed_webhook($webhook)
     {
         try {
-            $webhook->save();
+            if (!$webhook->save()) {
+                throw new \RuntimeException("Managed webhook was not persisted");
+            }
         } catch (\Throwable $exception) {
             return new WP_Error(
                 "ahpc_webhook_save_failed",
@@ -1130,7 +1132,7 @@ class Webhook_Manager
                             continue;
                         }
 
-                        if ($this->is_managed_webhook($webhook)) {
+                        if ($this->get_webhook_name($topic) === $webhook->get_name("edit") && $topic === $webhook->get_topic("edit")) {
                             return absint($webhook->get_id());
                         }
                     }
@@ -1285,6 +1287,7 @@ class Webhook_Manager
         }
 
         $candidate_ids = get_users([
+            "capability" => "manage_woocommerce",
             "fields" => "ID",
             "orderby" => "ID",
             "order" => "ASC",
@@ -1376,7 +1379,7 @@ class Webhook_Manager
         $table_name = $wpdb->prefix . "wc_webhooks";
         // phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange -- This table-existence check is only used to guard the narrow direct-database fallback paths in this class.
         $found_table = $wpdb->get_var(
-            $wpdb->prepare("SHOW TABLES LIKE %s", $table_name),
+            $wpdb->prepare("SHOW TABLES LIKE %s", $wpdb->esc_like($table_name)),
         );
         // phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange
 
