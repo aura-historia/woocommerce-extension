@@ -3186,4 +3186,100 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         // The stalled sync cannot vouch for the result and asks for another pass.
         $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
     }
+
+    public function test_sync_does_not_activate_a_currency_changed_during_registration()
+    {
+        update_option("woocommerce_currency", "EUR", false);
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => "ls_01jw7j4azge00800000000000g",
+            "access_token" => "test-token",
+            "secret" => "test-secret",
+        ]);
+        $currencies = [];
+        $this->backend_guzzle_client = new Client([
+            "handler" => function ($request) use (&$currencies) {
+                $currencies[] = json_decode((string) $request->getBody(), true)["currency"];
+                if (1 === count($currencies)) {
+                    // A merchant changes the store currency in another request.
+                    update_option("woocommerce_currency", "GBP", false);
+                }
+                return new \GuzzleHttp\Promise\FulfilledPromise(new Response(204));
+            },
+        ]);
+        $manager = new Webhook_Manager();
+
+        $result = $manager->sync_webhooks();
+        $this->assertInstanceOf(WP_Error::class, $result);
+        $this->assertSame("ahpc_connection_changed", $result->get_error_code());
+        $this->assertSame("yes", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        $ids = $manager->get_webhook_ids();
+        foreach ($ids as $webhook_id) {
+            $this->assertSame("paused", (new WC_Webhook($webhook_id))->get_status());
+        }
+
+        $this->assertTrue($manager->maybe_sync_webhooks());
+        $this->assertSame(["EUR", "GBP"], $currencies);
+        $this->assertSame("no", get_option(Webhook_Manager::OPTION_NEEDS_SYNC));
+        foreach ($ids as $webhook_id) {
+            $this->assertSame("active", (new WC_Webhook($webhook_id))->get_status());
+        }
+    }
+
+    public function test_interactive_sync_waits_for_another_request_to_finish()
+    {
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => "ls_01jw7j4azge00800000000000g",
+            "access_token" => "test-token",
+            "secret" => "test-secret",
+        ]);
+        // Another request holds the sync lease for about one more second.
+        $holder = new \AuraHistoria\PartnerConnect\Option_Lease(Webhook_Manager::OPTION_SYNC_LOCK);
+        $this->assertTrue($holder->acquire(1));
+        $manager = new Webhook_Manager();
+
+        $busy = $manager->sync_webhooks();
+        $this->assertSame("ahpc_sync_in_progress", $busy->get_error_code());
+        $this->assertSame([], $manager->get_webhook_ids());
+        $this->assertSame("", $manager->get_last_sync_error());
+        $this->assertSame([], $this->backend_http_requests);
+
+        $this->assertTrue($manager->sync_webhooks(Webhook_Manager::SYNC_WAIT_SECONDS));
+        $this->assertCount(3, $manager->get_webhook_ids());
+        $this->assertCount(1, $this->backend_http_requests);
+    }
+
+    public function test_stalled_sync_failure_leaves_its_successors_webhooks_active()
+    {
+        $id = "ls_01jw7j4azge00800000000000g";
+        update_option(Webhook_Manager::OPTION_SETTINGS, [
+            "listing_source_id" => $id,
+            "access_token" => "test-token",
+            "secret" => "test-secret",
+        ]);
+        $successor = null;
+        $registrations = 0;
+        $this->backend_guzzle_client = new Client([
+            "handler" => function ($request) use (&$successor, &$registrations) {
+                if (1 === ++$registrations) {
+                    // The first registration stalls past its lease and then
+                    // fails, after a successor has activated delivery.
+                    $this->expire_sync_lease();
+                    $successor = (new Webhook_Manager())->sync_webhooks();
+                    return new \GuzzleHttp\Promise\FulfilledPromise(new Response(503));
+                }
+                return new \GuzzleHttp\Promise\FulfilledPromise(new Response(204));
+            },
+        ]);
+        $manager = new Webhook_Manager();
+
+        $result = $manager->sync_webhooks();
+
+        $this->assertTrue($successor);
+        $this->assertSame("ahpc_sync_superseded", $result->get_error_code());
+        $this->assertSame("", $manager->get_last_sync_error());
+        $this->assertSame(3, $this->count_managed_webhook_rows());
+        foreach ($manager->get_webhook_ids() as $webhook_id) {
+            $this->assertSame("active", (new WC_Webhook($webhook_id))->get_status());
+        }
+    }
 }

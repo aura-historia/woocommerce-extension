@@ -154,6 +154,12 @@ class Plugin
             10,
             2,
         );
+        add_action(
+            "update_option_" . Webhook_Manager::OPTION_SETTINGS,
+            [Webhook_Manager::class, "connection_settings_changed"],
+            10,
+            2,
+        );
         add_action("woocommerce_loaded", [$this, "bootstrap_woocommerce"]);
         add_action("update_option_woocommerce_currency", [$this, "on_store_locale_option_updated"], 10, 2);
         add_action("update_option_WPLANG", [$this, "on_store_locale_option_updated"], 10, 2);
@@ -284,7 +290,7 @@ class Plugin
         $manager = $this->manager instanceof Webhook_Manager
             ? $this->manager
             : new Webhook_Manager();
-        $manager->mark_sync_required();
+        $manager->mark_context_changed();
         $manager->pause_webhooks();
     }
 
@@ -519,7 +525,7 @@ class Plugin
 
         $result =
             $this->manager instanceof Webhook_Manager
-                ? $this->manager->sync_webhooks()
+                ? $this->manager->sync_webhooks(Webhook_Manager::SYNC_WAIT_SECONDS)
                 : new WP_Error(
                     "ahpc_missing_manager",
                     __(
@@ -892,7 +898,7 @@ class Plugin
             $this->bootstrap_woocommerce();
 
             if ($was_bootstrapped && $this->manager instanceof Webhook_Manager) {
-                $sync_result = $this->manager->sync_webhooks();
+                $sync_result = $this->manager->sync_webhooks(Webhook_Manager::SYNC_WAIT_SECONDS);
 
                 if (is_wp_error($sync_result)) {
                     return $sync_result;
@@ -1062,7 +1068,7 @@ class Plugin
             );
         }
 
-        $sync_result = $this->manager->sync_webhooks();
+        $sync_result = $this->manager->sync_webhooks(Webhook_Manager::SYNC_WAIT_SECONDS);
 
         if (is_wp_error($sync_result)) {
             return $sync_result;
@@ -1099,7 +1105,7 @@ class Plugin
             return Shipping_Mapper::error("not_connected");
         }
         $this->bootstrap_woocommerce();
-        $result = $this->manager->maybe_sync_webhooks();
+        $result = $this->manager->maybe_sync_webhooks(Webhook_Manager::SYNC_WAIT_SECONDS);
         if (!$result) {
             return Shipping_Mapper::error("configuration_not_ready");
         }

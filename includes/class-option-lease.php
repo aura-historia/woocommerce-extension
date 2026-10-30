@@ -40,12 +40,32 @@ class Option_Lease
     }
 
     /**
-     * Takes the lease when it is free or expired.
+     * Takes the lease when it is free or expired, optionally waiting briefly
+     * for the current holder to finish.
      *
-     * @param int $seconds Lease lifetime; longer than any work done under it.
+     * @param int       $seconds Lease lifetime; longer than any work done under it.
+     * @param int|float $wait    Seconds to keep trying while another holder's lease is unexpired.
      * @return bool False while another holder's lease is unexpired.
      */
-    public function acquire($seconds)
+    public function acquire($seconds, $wait = 0)
+    {
+        $deadline = microtime(true) + max(0, $wait);
+
+        while (!$this->try_acquire($seconds)) {
+            if (microtime(true) >= $deadline) {
+                return false;
+            }
+            usleep(250000);
+        }
+
+        return true;
+    }
+
+    /**
+     * @param int $seconds Lease lifetime.
+     * @return bool
+     */
+    private function try_acquire($seconds)
     {
         global $wpdb;
         $value = self::new_value($seconds);

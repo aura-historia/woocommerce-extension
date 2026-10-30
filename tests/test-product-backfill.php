@@ -175,6 +175,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         $this->assertCount(1, $matches);
         // Only the wake-up token, never a credential, travels with the action.
         $this->assertCount(3, $matches[0]);
+        $this->assertStringStartsWith("wake-", $matches[0][2]);
         $this->assertStringNotContainsString(self::TOKEN, wp_json_encode($matches[0]));
 
         return $matches[0];
@@ -1376,5 +1377,41 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         do_action_ref_array(Product_Backfill::ACTION_HOOK, $legacy_retry);
         $this->assertCount(1, $this->requests);
         $this->assertSame(Product_Backfill::STATUS_COMPLETE, (new Product_Backfill())->get_status_details()["status"]);
+    }
+
+    public function test_counted_batch_left_by_a_stalled_holder_is_handed_off_without_resending()
+    {
+        // The holder counted page 1, then stalled before clearing the
+        // snapshot or queueing page 2, and its lease expired.
+        update_option(Product_Backfill::OPTION_BATCH, [
+            "listing_source_id" => self::SOURCE_ID,
+            "page" => 1,
+            "product_count" => Product_Backfill::BATCH_SIZE,
+            "last_product_id" => PHP_INT_MAX - 1,
+            "local_failures" => 0,
+            "payloads" => [["sourceListingId" => "counted", "url" => "https://example.com/counted", "images" => []]],
+            "idempotency_key" => "counted-key",
+        ], false);
+        update_option(Product_Backfill::OPTION_STATE, [
+            "status" => Product_Backfill::STATUS_RUNNING,
+            "last_completed_page" => "1",
+            "last_product_id" => (string) (PHP_INT_MAX - 1),
+            "last_counted_batch" => hash("sha256", "counted-key"),
+            "permanent_failure_count" => "1",
+        ], false);
+        $backfill = new Product_Backfill();
+
+        $this->assertSame(Product_Backfill::START_RESUMED, $backfill->start_or_resume_backfill(self::SOURCE_ID));
+        $this->run_queued(1);
+
+        $this->assertSame([], $this->requests);
+        $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH, false));
+        $this->assertSame("1", $backfill->get_status_details()["permanent_failure_count"]);
+        $this->run_queued(2);
+        $this->assertSame([], $this->requests);
+        $state = $backfill->get_status_details();
+        $this->assertSame("2", $state["last_completed_page"]);
+        $this->assertSame("1", $state["permanent_failure_count"]);
+        $this->assertNotSame("", $state["completed_at"]);
     }
 }

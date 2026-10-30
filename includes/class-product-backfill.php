@@ -98,6 +98,9 @@ class Product_Backfill
     /** Lease lifetime; far longer than building and admitting one batch. */
     const LOCK_SECONDS = 120;
 
+    /** Seconds a start or resume waits for another request's brief lease. */
+    const START_WAIT_SECONDS = 2;
+
     /** Internal signal: the lease or connection changed while a batch ran. */
     private const STALE_WORKER = "ahpc_backfill_stale_worker";
 
@@ -214,7 +217,7 @@ class Product_Backfill
             try {
                 $this->update_state(array_merge(
                     $this->fresh_run_changes(),
-                    ["wake" => wp_generate_uuid4()],
+                    ["wake" => self::new_wake()],
                 ));
             } finally {
                 $this->lease->release();
@@ -468,17 +471,13 @@ class Product_Backfill
         }
 
         $snapshot = Option_Lease::read(self::OPTION_BATCH, []);
+        $handoff_pending = is_array($snapshot) &&
+            isset($snapshot["listing_source_id"], $snapshot["page"]) &&
+            $snapshot["listing_source_id"] === $listing_source_id &&
+            (int) $snapshot["page"] === $page &&
+            self::is_handoff_pending($snapshot, $state);
 
-        if (
-            $page <= (int) $state["last_completed_page"] &&
-            !(
-                is_array($snapshot) &&
-                isset($snapshot["listing_source_id"], $snapshot["page"]) &&
-                $snapshot["listing_source_id"] === $listing_source_id &&
-                (int) $snapshot["page"] === $page &&
-                !empty($snapshot["handoff_pending"])
-            )
-        ) {
+        if ($page <= (int) $state["last_completed_page"] && !$handoff_pending) {
             // Ignore a delayed duplicate after this page has already advanced.
             return;
         }
@@ -551,8 +550,9 @@ class Product_Backfill
             ? (int) $snapshot["local_failures"]
             : 0;
 
-        if (!empty($snapshot["handoff_pending"])) {
-            $this->schedule_next_page($snapshot, $listing_source_id, $page);
+        if ($handoff_pending) {
+            // Admitted and counted already; only the handoff remains.
+            $this->finish_page($snapshot, $listing_source_id, $page);
             return;
         }
 
@@ -598,7 +598,7 @@ class Product_Backfill
                     // Retire the wake-up: no copy may rebuild a failed page.
                     $this->update_state(array_merge(
                         $this->failed_changes($message),
-                        ["wake" => wp_generate_uuid4()],
+                        ["wake" => self::new_wake()],
                     ));
                     $this->lease->delete(self::OPTION_BATCH);
                     return;
@@ -625,7 +625,20 @@ class Product_Backfill
             count($report["failures"]) + (int) $snapshot["local_failures"],
             $page,
         );
+        $this->finish_page($snapshot, $listing_source_id, $page);
+    }
 
+    /**
+     * Hands a counted page off to the next one, or completes the run after
+     * the last page.
+     *
+     * @param array  $snapshot Persisted batch snapshot.
+     * @param string $listing_source_id Listing source TypeID.
+     * @param int    $page Counted catalog page.
+     * @return void
+     */
+    private function finish_page(array $snapshot, $listing_source_id, $page)
+    {
         if ((int) $snapshot["product_count"] >= self::BATCH_SIZE) {
             $this->schedule_next_page($snapshot, $listing_source_id, $page);
             return;
@@ -638,6 +651,34 @@ class Product_Backfill
             throw new \RuntimeException(esc_html($message));
         }
         $this->record_complete($page);
+    }
+
+    /**
+     * Whether a saved batch only awaits its handoff. Besides an explicit
+     * marker, this covers a batch whose outcome was counted before the
+     * worker stopped, so a successor never resends it or gets stuck.
+     *
+     * @param array $snapshot Persisted batch snapshot.
+     * @param array $state Backfill state.
+     * @return bool
+     */
+    private static function is_handoff_pending(array $snapshot, array $state)
+    {
+        return !empty($snapshot["handoff_pending"]) || (
+            isset($snapshot["idempotency_key"]) &&
+            is_string($snapshot["idempotency_key"]) &&
+            (int) $snapshot["page"] === (int) $state["last_completed_page"] &&
+            hash("sha256", $snapshot["idempotency_key"]) === $state["last_counted_batch"]
+        );
+    }
+
+    /**
+     * @return string A wake-up token. The prefix keeps Action Scheduler's
+     *     search from reading it as an action ID.
+     */
+    private static function new_wake()
+    {
+        return "wake-" . wp_generate_uuid4();
     }
 
     /**
@@ -671,7 +712,7 @@ class Product_Backfill
      */
     private function queue_wake($listing_source_id, $page, $delay, array $changes = [])
     {
-        $wake = wp_generate_uuid4();
+        $wake = self::new_wake();
         $changes["wake"] = $wake;
 
         if (!$this->update_state($changes) || !function_exists("as_schedule_single_action")) {
@@ -702,7 +743,12 @@ class Product_Backfill
         }
 
         // Not unique: the running action itself still has these arguments.
-        as_schedule_single_action(time() + self::RETRY_DELAY, self::ACTION_HOOK, $args, self::ACTION_GROUP);
+        if (!as_schedule_single_action(time() + self::RETRY_DELAY, self::ACTION_HOOK, $args, self::ACTION_GROUP)) {
+            throw new \RuntimeException(esc_html(sprintf(
+                "Aura Historia backfill batch (page %d) could not be queued again.",
+                $args[1],
+            )));
+        }
     }
 
     /**
@@ -734,11 +780,17 @@ class Product_Backfill
             "group" => self::ACTION_GROUP,
             "status" => [\ActionScheduler_Store::STATUS_PENDING, \ActionScheduler_Store::STATUS_RUNNING],
             "search" => $wake,
-            "per_page" => 1,
+            "per_page" => 10,
         ]);
-        $action = is_array($actions) ? reset($actions) : false;
 
-        return $action instanceof \ActionScheduler_Action ? $action->get_args() : null;
+        foreach (is_array($actions) ? $actions : [] as $action) {
+            // The search is a substring match; require the exact argument.
+            if ($action instanceof \ActionScheduler_Action && in_array($wake, $action->get_args(), true)) {
+                return $action->get_args();
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -1237,9 +1289,9 @@ class Product_Backfill
             return self::START_ALREADY_QUEUED;
         }
 
-        if (!$this->lease->acquire(self::LOCK_SECONDS)) {
-            // A callback is between its checks and nothing current is queued.
-            // Report that nothing started, so the caller can try again later.
+        if (!$this->lease->acquire(self::LOCK_SECONDS, self::START_WAIT_SECONDS)) {
+            // Nothing current is queued, yet another request still holds the
+            // batch. Report that nothing started, so the caller retries later.
             return false;
         }
 
@@ -1272,7 +1324,8 @@ class Product_Backfill
                 }
 
                 $page = (int) $snapshot["page"];
-                if ($page <= (int) $this->get_state()["last_completed_page"] && empty($snapshot["handoff_pending"])) {
+                $state = $this->get_state();
+                if ($page <= (int) $state["last_completed_page"] && !self::is_handoff_pending($snapshot, $state)) {
                     $this->record_failed(__(
                         "A saved product backfill batch could not be safely resumed.",
                         "aura-historia-partner-connect",
@@ -1494,7 +1547,7 @@ class Product_Backfill
             "scheduled_at" => "",
             "started_at" => "",
             "completed_at" => current_time("mysql"),
-            "wake" => wp_generate_uuid4(),
+            "wake" => self::new_wake(),
         ];
 
         if ($has_permanent_failures) {
@@ -1531,7 +1584,7 @@ class Product_Backfill
             "permanent_failure_count" => "0",
             "last_counted_batch" => "",
             "submission_id" => "",
-            "wake" => wp_generate_uuid4(),
+            "wake" => self::new_wake(),
         ]);
     }
 
