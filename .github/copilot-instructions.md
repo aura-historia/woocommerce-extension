@@ -18,7 +18,7 @@ Keep the plugin small and follow the current structure:
 
 - `aura-historia-partner-connect.php` — plugin header, bootstrap, and hardcoded backend base URL constant
 - `includes/class-plugin.php` — WordPress/WooCommerce bootstrapping, admin UI, settings page, lightweight validation, and manual sync action
-- `includes/class-webhook-manager.php` — webhook ownership, idempotent sync, backend secret registration, pause/delete behavior, drift recovery, and endpoint resolution
+- `includes/class-webhook-manager.php` — webhook ownership, idempotent sync, background reconciliation with bounded retries, backend secret registration, pause/delete behavior, drift recovery, and endpoint resolution
 - `includes/class-product-backfill.php` — separate asynchronous catalog CREATE admission
 - `includes/class-option-lease.php` — expiring option-row leases and lease-fenced checkpoints; backfill and webhook sync each use their own lease
 - `includes/class-shipping-{acquisition,mapper,publisher}.php` — local shipping reads, conservative mapping and resumable typed publication shared with ongoing reconciliation
@@ -89,6 +89,7 @@ That means:
 - WooCommerce signs deliveries with `X-WC-Webhook-Signature`.
 - The generated secret is a signing secret, not a standalone Authorization header.
 - Keep catalog backfill separate from live webhooks and shipping publication. Shipping must never restart catalog CREATE work.
+- Ordinary requests never call the backend. Automatic webhook reconciliation runs in the `Webhook_Manager::SYNC_ACTION_HOOK` Action Scheduler action, fenced by a wake-up token per attempt; only interactive admin actions sync synchronously. Webhook reconciliation and backfill batches retry only retryable failures, with exponential backoff, and stop after their attempt limit, keeping the backfill snapshot and key for a manual resume. Deactivation retires both wake-ups.
 - Backfill batches and webhook syncs are serialized by their own `Option_Lease`. Write their checkpoints through the lease, recheck it and the connection before outbound calls, and keep backfill action arguments to the source, page and wake-up token.
 - Shipping uses the pinned API contract, stable profile identity, immutable retry requests, actual acquisition times and `observation: {}`; do not add expiry fields or a backend-to-plugin callback.
 - Failed or incomplete shipping reads preserve existing assertions. Respect component ownership and reacquire after conflicts; use the shared publisher source lock and ordering for all shipping work.

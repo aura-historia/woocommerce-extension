@@ -38,6 +38,26 @@ class Webhook_Manager
     const SYNC_WAIT_SECONDS = 20;
     /** Changes whenever the connection or store context changes. */
     const OPTION_SYNC_CONTEXT = "ahpc_sync_context";
+    /** Background reconciliation attempts of the current context. */
+    const OPTION_SYNC_RETRY = "ahpc_webhook_sync_retry";
+    /** Action Scheduler hook of the background reconciliation. */
+    const SYNC_ACTION_HOOK = "ahpc_reconcile_webhooks";
+    /** Shared with the catalog backfill; the hook keeps the actions apart. */
+    const SYNC_ACTION_GROUP = "ahpc-partner-connect";
+    /** Seconds before the first automatic retry; each further retry waits twice as long. */
+    const SYNC_RETRY_DELAY = 60;
+    /** Longest wait between automatic attempts. */
+    const SYNC_MAX_RETRY_DELAY = 3600;
+    /** Failed attempts in a row after which automatic reconciliation stops. */
+    const SYNC_MAX_ATTEMPTS = 10;
+    /** Reconciliation status: queued for the first attempt. */
+    const SYNC_PENDING = "pending";
+    /** Reconciliation status: a retryable failure, another attempt is queued. */
+    const SYNC_RETRYING = "retrying";
+    /** Reconciliation status: no automatic attempt follows until resumed. */
+    const SYNC_STOPPED = "stopped";
+    /** Reconciliation status: the current configuration is confirmed. */
+    const SYNC_CONFIRMED = "confirmed";
     const SETTINGS_GROUP = "ahpc_settings_group";
     const API_VERSION = 3;
     const PRODUCT_DELETED_HOOK = "ahpc_product_permanently_deleted";
@@ -48,6 +68,13 @@ class Webhook_Manager
      * @var bool
      */
     private $syncing = false;
+
+    /**
+     * Context and kind of the running sync, for recording its outcome.
+     *
+     * @var array{context:string,automatic:bool}|null
+     */
+    private $attempt = null;
 
     /**
      * Returns the default plugin settings.
@@ -331,8 +358,10 @@ class Webhook_Manager
     }
 
     /**
-     * Fences in-flight syncs after the registered connection changed. A valid
-     * token rotation keeps the context: deliveries read the token late.
+     * Fences in-flight syncs after the registered connection changed, and
+     * pauses delivery until the background reconciliation registers the new
+     * one. A valid token rotation keeps the context: deliveries read the
+     * token late.
      *
      * @param mixed $old_value Previous settings.
      * @param mixed $value     New settings.
@@ -349,7 +378,9 @@ class Webhook_Manager
             self::is_valid_access_token($old_value["access_token"] ?? "") !==
                 self::is_valid_access_token($value["access_token"] ?? "")
         ) {
-            (new self())->mark_context_changed();
+            $manager = new self();
+            $manager->mark_context_changed();
+            $manager->pause_webhooks();
         }
     }
 
@@ -442,7 +473,9 @@ class Webhook_Manager
     }
 
     /**
-     * Returns whether a sync should run, then runs it if required.
+     * Returns whether a sync should run, then runs it if required. Only
+     * interactive admin actions call this; ordinary requests queue the
+     * background reconciliation instead.
      *
      * @param int $wait Seconds to wait for a sync running in another request.
      * @return bool
@@ -457,12 +490,314 @@ class Webhook_Manager
     }
 
     /**
-     * Synchronizes the managed webhooks.
+     * Synchronizes the managed webhooks now, on behalf of a merchant action.
+     * This also resumes stopped background reconciliation: a retryable
+     * failure starts a new series of automatic attempts.
      *
      * @param int $wait Seconds to wait for a sync running in another request.
      * @return true|WP_Error
      */
     public function sync_webhooks($wait = 0)
+    {
+        return $this->run_sync($wait, null);
+    }
+
+    /**
+     * Action Scheduler callback of the background reconciliation. Only the
+     * action carrying the current wake-up syncs; an action queued for an
+     * earlier attempt, context or connection does nothing.
+     *
+     * @param string $wake Wake-up token in the action args.
+     * @return true|WP_Error|null Null when the action was obsolete.
+     */
+    public function reconcile($wake = "")
+    {
+        if (!is_string($wake) || "" === $wake || $wake !== $this->get_sync_retry(true)["wake"]) {
+            return null;
+        }
+
+        $result = $this->run_sync(0, $wake);
+
+        if (
+            is_wp_error($result) &&
+            "ahpc_sync_in_progress" === $result->get_error_code() &&
+            $wake === $this->get_sync_retry(true)["wake"] &&
+            function_exists("as_schedule_single_action")
+        ) {
+            // A sync holding the lease records its own outcome and retires
+            // this wake-up. A request that was only queueing does not, so keep
+            // the wake-up. Not unique: this running action still carries it.
+            as_schedule_single_action(time() + self::SYNC_RETRY_DELAY, self::SYNC_ACTION_HOOK, [$wake], self::SYNC_ACTION_GROUP);
+        }
+
+        return $result;
+    }
+
+    /**
+     * Queues the background reconciliation while a sync is required, unless
+     * an action for the current attempt is already queued or automatic
+     * attempts have stopped. Runs on ordinary requests, so it never contacts
+     * the backend and normally costs one Action Scheduler lookup.
+     *
+     * @return bool Whether this call queued an action.
+     */
+    public function maybe_queue_sync()
+    {
+        if (
+            "yes" !== get_option(self::OPTION_NEEDS_SYNC, "yes") ||
+            !function_exists("as_schedule_single_action") ||
+            !function_exists("as_has_scheduled_action") ||
+            !did_action("action_scheduler_init")
+        ) {
+            return false;
+        }
+
+        $state = $this->get_sync_retry();
+        if (self::SYNC_STOPPED === $state["status"] || $this->sync_action_queued($state["wake"])) {
+            return false;
+        }
+
+        // Concurrent requests must not queue competing attempts. A sync that
+        // holds the lease schedules its own retry.
+        $lease = new Option_Lease(self::OPTION_SYNC_LOCK);
+        if (!$lease->acquire(self::SYNC_LOCK_SECONDS)) {
+            return false;
+        }
+
+        try {
+            $state = $this->get_sync_retry(true);
+            if (
+                "yes" !== Option_Lease::read(self::OPTION_NEEDS_SYNC, "yes") ||
+                self::SYNC_STOPPED === $state["status"] ||
+                $this->sync_action_queued($state["wake"])
+            ) {
+                return false;
+            }
+
+            // Keep the backoff of a retry whose action went missing.
+            return $this->queue_sync_action($lease, $state, max(0, $state["next_at"] - time()));
+        } finally {
+            $lease->release();
+        }
+    }
+
+    /**
+     * Clears the automatic attempts so the next request queues a fresh
+     * reconciliation, for example after activation or a plugin update.
+     *
+     * @return void
+     */
+    public function reset_sync_retries()
+    {
+        delete_option(self::OPTION_SYNC_RETRY);
+    }
+
+    /**
+     * Stops background reconciliation on deactivation. Any queued or running
+     * action loses its wake-up; activation resumes with a fresh attempt.
+     *
+     * @return void
+     */
+    public function stop_sync()
+    {
+        $this->reset_sync_retries();
+        $this->unschedule_sync_actions();
+    }
+
+    /**
+     * Returns the reconciliation status for the settings page.
+     *
+     * @return array{status:string,attempts:int,max_attempts:int,next_at:int}
+     */
+    public function get_sync_status()
+    {
+        $state = $this->get_sync_retry();
+
+        if ("yes" !== get_option(self::OPTION_NEEDS_SYNC, "yes")) {
+            $status = self::SYNC_CONFIRMED;
+        } else {
+            $status = "" !== $state["status"] ? $state["status"] : self::SYNC_PENDING;
+        }
+
+        return [
+            "status" => $status,
+            "attempts" => $state["attempts"],
+            "max_attempts" => self::SYNC_MAX_ATTEMPTS,
+            "next_at" => self::SYNC_CONFIRMED === $status ? 0 : $state["next_at"],
+        ];
+    }
+
+    /**
+     * Returns the seconds to wait after a number of failed attempts in a row.
+     *
+     * @param int $attempts Failed attempts so far, at least one.
+     * @return int
+     */
+    public static function sync_retry_delay($attempts)
+    {
+        $exponent = min(max(0, (int) $attempts - 1), 16);
+
+        return (int) min(self::SYNC_RETRY_DELAY * (2 ** $exponent), self::SYNC_MAX_RETRY_DELAY);
+    }
+
+    /**
+     * Returns the automatic attempts of the current context. Attempts left by
+     * another connection, currency or language count as a fresh start, so a
+     * context change resumes stopped reconciliation.
+     *
+     * @param bool $fresh Read from the database instead of the option cache.
+     * @return array{context:string,status:string,attempts:int,next_at:int,wake:string}
+     */
+    private function get_sync_retry($fresh = false)
+    {
+        return self::normalize_sync_retry(
+            $fresh ? Option_Lease::read(self::OPTION_SYNC_RETRY, []) : get_option(self::OPTION_SYNC_RETRY, []),
+            (string) ($fresh ? Option_Lease::read(self::OPTION_SYNC_CONTEXT, "") : get_option(self::OPTION_SYNC_CONTEXT, "")),
+        );
+    }
+
+    /**
+     * @param mixed  $state   Stored attempts.
+     * @param string $context Current sync context.
+     * @return array{context:string,status:string,attempts:int,next_at:int,wake:string}
+     */
+    private static function normalize_sync_retry($state, $context)
+    {
+        $state = is_array($state) && ($state["context"] ?? null) === $context ? $state : [];
+        $status = $state["status"] ?? "";
+
+        return [
+            "context" => $context,
+            "status" => in_array($status, [self::SYNC_PENDING, self::SYNC_RETRYING, self::SYNC_STOPPED], true) ? $status : "",
+            "attempts" => max(0, (int) ($state["attempts"] ?? 0)),
+            "next_at" => max(0, (int) ($state["next_at"] ?? 0)),
+            "wake" => isset($state["wake"]) && is_string($state["wake"]) ? $state["wake"] : "",
+        ];
+    }
+
+    /**
+     * Makes a new wake-up current, then queues the only action carrying it;
+     * actions of earlier attempts are removed. Without Action Scheduler the
+     * attempt stays due, and a later request queues it.
+     *
+     * @param Option_Lease $lease Held sync lease.
+     * @param array        $state Attempts to save with the wake-up.
+     * @param int          $delay Seconds until the attempt is due.
+     * @return bool Whether the action was queued.
+     */
+    private function queue_sync_action(Option_Lease $lease, array $state, $delay)
+    {
+        $state["wake"] = "wake-" . wp_generate_uuid4();
+        $state["next_at"] = time() + $delay;
+        if ("" === $state["status"]) {
+            $state["status"] = self::SYNC_PENDING;
+        }
+
+        if (
+            !$lease->write(self::OPTION_SYNC_RETRY, $state) ||
+            !function_exists("as_schedule_single_action") ||
+            !did_action("action_scheduler_init")
+        ) {
+            return false;
+        }
+
+        $this->unschedule_sync_actions();
+
+        return (bool) as_schedule_single_action(
+            $state["next_at"],
+            self::SYNC_ACTION_HOOK,
+            [$state["wake"]],
+            self::SYNC_ACTION_GROUP,
+            true,
+        );
+    }
+
+    /**
+     * Retires the current wake-up, so no queued action syncs again.
+     *
+     * @param Option_Lease $lease Held sync lease.
+     * @param array        $state Attempts to keep for the status.
+     * @return bool
+     */
+    private function retire_sync_wake(Option_Lease $lease, array $state)
+    {
+        $state["wake"] = "wake-" . wp_generate_uuid4();
+        $state["next_at"] = 0;
+        $written = $lease->write(self::OPTION_SYNC_RETRY, $state);
+        $this->unschedule_sync_actions();
+
+        return $written;
+    }
+
+    /**
+     * @param string $wake Wake-up token.
+     * @return bool Whether the action carrying it is queued or running.
+     */
+    private function sync_action_queued($wake)
+    {
+        return "" !== $wake &&
+            function_exists("as_has_scheduled_action") &&
+            as_has_scheduled_action(self::SYNC_ACTION_HOOK, [$wake], self::SYNC_ACTION_GROUP);
+    }
+
+    /**
+     * Removes queued reconciliation actions; a running one is left to finish.
+     *
+     * @return void
+     */
+    private function unschedule_sync_actions()
+    {
+        if (function_exists("as_unschedule_all_actions") && did_action("action_scheduler_init")) {
+            as_unschedule_all_actions(self::SYNC_ACTION_HOOK, null, self::SYNC_ACTION_GROUP);
+        }
+    }
+
+    /**
+     * Decides whether and when reconciliation tries again after a failure
+     * recorded under the lease. Only retryable failures (no response, timeout,
+     * HTTP 408, 429 or 5xx, or a local save error) are retried, with
+     * exponential backoff, and automatic attempts stop after
+     * SYNC_MAX_ATTEMPTS failures in a row. A failure of an interactive sync
+     * starts a new series; a changed context is attempted again right away.
+     *
+     * @param Option_Lease $lease Held sync lease.
+     * @param WP_Error     $error Recorded sync error.
+     * @return void
+     */
+    private function schedule_sync_retry(Option_Lease $lease, WP_Error $error)
+    {
+        if (null === $this->attempt) {
+            return;
+        }
+
+        $context = (string) Option_Lease::read(self::OPTION_SYNC_CONTEXT, "");
+        if ("ahpc_connection_changed" === $error->get_error_code() || $context !== $this->attempt["context"]) {
+            $this->queue_sync_action($lease, self::normalize_sync_retry([], $context), 0);
+            return;
+        }
+
+        $state = self::normalize_sync_retry(Option_Lease::read(self::OPTION_SYNC_RETRY, []), $context);
+        $state["attempts"] = ($this->attempt["automatic"] ? $state["attempts"] : 0) + 1;
+        $data = $error->get_error_data();
+
+        if (!is_array($data) || empty($data["retryable"]) || $state["attempts"] >= self::SYNC_MAX_ATTEMPTS) {
+            $state["status"] = self::SYNC_STOPPED;
+            $this->retire_sync_wake($lease, $state);
+            return;
+        }
+
+        $state["status"] = self::SYNC_RETRYING;
+        $this->queue_sync_action($lease, $state, self::sync_retry_delay($state["attempts"]));
+    }
+
+    /**
+     * Synchronizes the managed webhooks.
+     *
+     * @param int         $wait Seconds to wait for a sync running in another request.
+     * @param string|null $wake Wake-up token of a background reconciliation.
+     * @return true|WP_Error
+     */
+    private function run_sync($wait, $wake)
     {
         if (
             !class_exists("WC_Webhook") ||
@@ -494,11 +829,30 @@ class Webhook_Manager
         }
 
         try {
+            if (null !== $wake) {
+                // Recheck under the lease: another sync may have finished or
+                // retired this attempt since the action started.
+                if ($wake !== $this->get_sync_retry(true)["wake"]) {
+                    return new WP_Error(
+                        "ahpc_sync_superseded",
+                        __(
+                            "Another synchronization took over before this one finished. Retry the synchronization.",
+                            "aura-historia-partner-connect",
+                        ),
+                    );
+                }
+
+                if ("yes" !== Option_Lease::read(self::OPTION_NEEDS_SYNC, "yes")) {
+                    return true;
+                }
+            }
+
             $this->initialize_options();
             $this->syncing = true;
             $settings = $this->read_current_settings();
             // Read after the settings, which may generate a missing secret.
-            $context = Option_Lease::read(self::OPTION_SYNC_CONTEXT, "");
+            $context = (string) Option_Lease::read(self::OPTION_SYNC_CONTEXT, "");
+            $this->attempt = ["context" => $context, "automatic" => null !== $wake];
             $listing_source_id = $settings["listing_source_id"];
             $access_token = $settings["access_token"];
             $endpoint_url = self::get_webhook_endpoint_url($listing_source_id);
@@ -604,6 +958,7 @@ class Webhook_Manager
                         new WP_Error(
                             "ahpc_webhook_load_failed",
                             __("A managed webhook could not be loaded. Retry the synchronization.", "aura-historia-partner-connect"),
+                            ["retryable" => true],
                         ),
                     );
                 }
@@ -621,6 +976,7 @@ class Webhook_Manager
                     $save_result = new WP_Error(
                         "ahpc_webhook_save_failed",
                         __("A managed webhook could not be saved. Retry the synchronization.", "aura-historia-partner-connect"),
+                        ["retryable" => true],
                     );
                 }
 
@@ -670,6 +1026,7 @@ class Webhook_Manager
                             $setup_error = new WP_Error(
                                 "ahpc_webhook_load_failed",
                                 __("A managed webhook could not be loaded. Retry the synchronization.", "aura-historia-partner-connect"),
+                                ["retryable" => true],
                             );
                             break;
                         }
@@ -687,6 +1044,7 @@ class Webhook_Manager
                             $save_result = new WP_Error(
                                 "ahpc_webhook_save_failed",
                                 __("A managed webhook could not be saved. Retry the synchronization.", "aura-historia-partner-connect"),
+                                ["retryable" => true],
                             );
                         }
                         if (is_wp_error($save_result)) {
@@ -711,6 +1069,9 @@ class Webhook_Manager
                 return $this->abandon_sync();
             }
 
+            // A confirmed configuration ends the automatic attempts.
+            $this->retire_sync_wake($lease, self::normalize_sync_retry([], $context));
+
             if (Option_Lease::read(self::OPTION_SYNC_CONTEXT, "") !== $context) {
                 // The context changed after activation; synchronize again.
                 $this->mark_sync_required();
@@ -726,13 +1087,14 @@ class Webhook_Manager
             return true;
         } finally {
             $this->syncing = false;
+            $this->attempt = null;
             $lease->release();
         }
     }
 
     /**
      * Pauses delivery and records a failed sync, unless a successor already
-     * owns the webhooks and its outcome.
+     * owns the webhooks and its outcome, then decides on the next attempt.
      *
      * @param Option_Lease $lease Sync lease.
      * @param WP_Error     $error Sync error.
@@ -745,7 +1107,10 @@ class Webhook_Manager
         }
 
         $this->pause_webhooks_best_effort();
-        return $this->record_sync_error($error);
+        $this->record_sync_error($error);
+        $this->schedule_sync_retry($lease, $error);
+
+        return $error;
     }
 
     /**
@@ -813,7 +1178,8 @@ class Webhook_Manager
 
     /**
      * Converts a low-level backend client error into the existing admin-facing
-     * ingestion-configuration error wording.
+     * ingestion-configuration error wording. The error data only says whether
+     * the unchanged PUT may succeed when retried.
      *
      * @param WP_Error $error Backend client error.
      * @return WP_Error
@@ -828,6 +1194,12 @@ class Webhook_Manager
             is_array($error_data) && isset($error_data["response_code"])
                 ? (int) $error_data["response_code"]
                 : 0;
+        // An unexpected success status leaves the outcome uncertain; the PUT
+        // is idempotent, so it is retried like a lost response.
+        $retry = [
+            "retryable" => "ahpc_backend_invalid_response" === $error_code ||
+                (is_array($error_data) && !empty($error_data["retryable"])),
+        ];
 
         if ("ahpc_backend_invalid_url" === $error_code) {
             return new WP_Error(
@@ -860,6 +1232,7 @@ class Webhook_Manager
             return new WP_Error(
                 "ahpc_backend_configuration_failed",
                 __("The backend configuration request could not be confirmed. Try again.", "aura-historia-partner-connect"),
+                $retry,
             );
         }
 
@@ -879,7 +1252,7 @@ class Webhook_Manager
             );
         }
 
-        return new WP_Error("ahpc_backend_configuration_failed", $message);
+        return new WP_Error("ahpc_backend_configuration_failed", $message, $retry);
     }
 
     /**
@@ -992,6 +1365,7 @@ class Webhook_Manager
         delete_option(self::OPTION_LAST_OAUTH_ERROR);
         delete_option(self::OPTION_SYNC_LOCK);
         delete_option(self::OPTION_SYNC_CONTEXT);
+        $this->stop_sync();
         delete_option("ahpc_initial_backfill_pending_source");
         delete_option("ahpc_initial_backfill_started_sources");
         delete_option("ahpc_initial_backfill_error");
@@ -1194,6 +1568,7 @@ class Webhook_Manager
             return new WP_Error(
                 "ahpc_webhook_save_failed",
                 __("A managed webhook could not be saved. Retry the synchronization.", "aura-historia-partner-connect"),
+                ["retryable" => true],
             );
         }
 
