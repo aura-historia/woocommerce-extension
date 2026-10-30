@@ -2,7 +2,7 @@
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.2
-Stable tag: 0.3.1
+Stable tag: 0.3.2
 Contributors: aurahistoria
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -154,8 +154,16 @@ Rescheduling a published product for future publication clears its owned shippin
 
 == Changelog ==
 
-= 0.3.1 =
+= 0.3.2 =
 * Connects through version 2 of the Aura Historia OAuth broker protocol. The browser no longer carries a PKCE verifier or readable broker state, the token and ListingSource come from one proof-protected server-to-server response, and replayed, tampered or stale callbacks are rejected. Requires `AHPC_OAUTH_BROKER_BASE_URL` instead of `AHPC_OAUTH_BROKER_REDIRECT_URI` for non-production environments; the previous handshake is no longer supported.
+* Moves automatic webhook reconciliation into background jobs, so Aura Historia outages no longer delay storefront or other ordinary requests.
+* Retries webhook configuration and retryable product backfill failures with increasing delays, continuing every six hours after ten failed attempts. The settings page shows pending work, scheduled retries, failures needing attention and stopped backfills.
+* Coordinates concurrent backfill workers to prevent duplicate page submissions and stale callbacks overwriting newer runs. Retried batches keep the same product snapshot and idempotency key, including after reconnecting the same ListingSource.
+* Serializes webhook synchronization and activates delivery only for the connection and store context confirmed by Aura Historia. Connection, currency and language changes pause delivery until the matching configuration succeeds.
+* Stops queued webhook reconciliation and backfill work on deactivation and prevents running jobs from reactivating delivery or overwriting stopped work. The manual backfill action resumes retained batches safely.
+* Preserves pending backfill data when credentials are missing, reports failed catalog reads and retries malformed batch admission responses. Detects failed webhook saves and tightens managed-webhook recovery and input validation.
+
+= 0.3.1 =
 * Withdraws the Aura Historia listing when a product is permanently deleted, including forced REST/CRUD deletes, Empty Trash, the scheduled Trash purge and sites with Trash disabled.
 * Repairs the managed webhooks only on real drift. Routine WooCommerce delivery bookkeeping no longer pauses and re-syncs all three webhooks, and reactivating an auto-disabled webhook resets its failure count.
 * A removal refused because Trash already withdrew the listing no longer stalls shipping. Other products continue, the listing is never restored, and the settings page counts the affected products.

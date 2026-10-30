@@ -86,7 +86,7 @@ Managed webhook topics:
 
 | Item | Value |
 | --- | --- |
-| Plugin version | `0.3.1` |
+| Plugin version | `0.3.2` |
 | WordPress | `6.5+` |
 | WooCommerce | Required |
 | PHP | `8.2+` |
@@ -527,7 +527,7 @@ For WordPress.org submission, use the clean release tree or equivalent release c
 
 The production OAuth registration and broker credentials are provisioned. The broker uses the production client secret through its server-side Worker binding; never include that secret in the plugin, and preserve the matching production client ID and secret when redeploying the webapp. This plugin version connects only through broker protocol version 2, so release it only after [webapp #1025](https://github.com/aura-historia/webapp/issues/1025) has deployed the transaction and completion endpoints, and after the paired end-to-end check against that broker has passed.
 
-Before publishing `0.3.1`, complete the deferred real-store connection check: consent and callback, provider configuration, three active signed product webhooks, initial catalog admission, shipping publication and disconnect/deactivation cleanup. The release-preparation checks deliberately do not install WordPress or execute that flow. A matching Git version tag triggers the WordPress.org deployment workflow; `WP_ORG_USERNAME` and `WP_ORG_PASSWORD` must be configured in repository secrets.
+Before publishing `0.3.2`, complete the deferred real-store connection check: consent and callback, provider configuration, three active signed product webhooks, initial catalog admission, shipping publication and disconnect/deactivation cleanup. The release-preparation checks deliberately do not install WordPress or execute that flow. A matching Git version tag triggers the WordPress.org deployment workflow; `WP_ORG_USERNAME` and `WP_ORG_PASSWORD` must be configured in repository secrets.
 
 ## License
 
