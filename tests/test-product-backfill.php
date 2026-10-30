@@ -6,6 +6,7 @@
  */
 
 use AuraHistoria\PartnerConnect\InternalApi\Model\CurrencyData;
+use AuraHistoria\PartnerConnect\Option_Lease;
 use AuraHistoria\PartnerConnect\Product_Backfill;
 use AuraHistoria\PartnerConnect\Webhook_Manager;
 use GuzzleHttp\Client;
@@ -13,6 +14,7 @@ use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
+use GuzzleHttp\Promise\FulfilledPromise;
 use GuzzleHttp\Psr7\Response;
 
 class Test_AHPC_Product_Backfill extends WP_UnitTestCase
@@ -20,6 +22,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
     const SOURCE_ID = "ls_01jw7j4azge008000000000003";
     const OTHER_SOURCE_ID = "ls_01jw7j4azge00800000000000g";
     const TOKEN = "aurahistoria_accesstoken_abcdefghijk_abcdefghijklmnopqrstuvwxyz1234567";
+    const RECONNECTED_TOKEN = "aurahistoria_accesstoken_reconnected_abcdefghijklmnopqrstuvwxyz12345";
     const ENDPOINT = "https://example.com/v1/listing-sources/" . self::SOURCE_ID . "/product-listings/async";
 
     /** @var ClientInterface|null */
@@ -102,6 +105,34 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         $this->backend_client = new Client(["handler" => $stack, "http_errors" => true]);
     }
 
+    /**
+     * Answers each request through $respond, which may run other work while
+     * the request is in flight before it returns the response.
+     */
+    private function respond_with(callable $respond)
+    {
+        $this->requests = [];
+        $handler = function ($request) use ($respond) {
+            $this->requests[] = ["request" => $request];
+            return new FulfilledPromise($respond(count($this->requests)));
+        };
+        $this->backend_client = new Client(["handler" => HandlerStack::create($handler), "http_errors" => true]);
+    }
+
+    /** Lets the batch lease run out, as if its holder had been suspended. */
+    private function expire_lease()
+    {
+        global $wpdb;
+        $lease = json_decode((string) $wpdb->get_var($wpdb->prepare(
+            "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s",
+            Product_Backfill::OPTION_LOCK,
+        )), true);
+        $this->assertIsArray($lease);
+        $lease["until"] = time() - 1;
+        $wpdb->update($wpdb->options, ["option_value" => wp_json_encode($lease)], ["option_name" => Product_Backfill::OPTION_LOCK]);
+        wp_cache_delete(Product_Backfill::OPTION_LOCK, "options");
+    }
+
     private function add_product($name, $status = "publish", $stock = "instock")
     {
         $product = new WC_Product_Simple();
@@ -118,15 +149,50 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         return $this->requests[$index]["request"];
     }
 
-    private function pending_retry_args(array $snapshot, $page = 1)
+    /** Returns the arguments of the queued actions for a page. */
+    private function queued_actions($page, $source = self::SOURCE_ID)
     {
-        $this->assertGreaterThanOrEqual(1, $snapshot["retry_attempt"]);
-        $args = [
-            self::SOURCE_ID,
-            $page,
-            "retry-" . hash("sha256", $snapshot["idempotency_key"] . ":" . $snapshot["retry_attempt"]),
-        ];
-        $this->assertTrue((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, $args, Product_Backfill::ACTION_GROUP));
+        $matches = [];
+        foreach (as_get_scheduled_actions([
+            "hook" => Product_Backfill::ACTION_HOOK,
+            "group" => Product_Backfill::ACTION_GROUP,
+            "status" => ActionScheduler_Store::STATUS_PENDING,
+            "per_page" => 100,
+        ]) as $action) {
+            $args = $action->get_args();
+            if ($source === $args[0] && $page === $args[1]) {
+                $matches[] = $args;
+            }
+        }
+
+        return $matches;
+    }
+
+    /** Returns the arguments of the only queued action for a page. */
+    private function queued_args($page, $source = self::SOURCE_ID)
+    {
+        $matches = $this->queued_actions($page, $source);
+        $this->assertCount(1, $matches);
+        // Only the wake-up token, never a credential, travels with the action.
+        $this->assertCount(3, $matches[0]);
+        $this->assertStringNotContainsString(self::TOKEN, wp_json_encode($matches[0]));
+
+        return $matches[0];
+    }
+
+    /** Runs the queued action for a page the way Action Scheduler would. */
+    private function run_queued($page, $source = self::SOURCE_ID)
+    {
+        $args = $this->queued_args($page, $source);
+        as_unschedule_all_actions(Product_Backfill::ACTION_HOOK, $args, Product_Backfill::ACTION_GROUP);
+        do_action_ref_array(Product_Backfill::ACTION_HOOK, $args);
+
+        return $args;
+    }
+
+    private function pending_retry_args($page = 1)
+    {
+        $args = $this->queued_args($page);
         $this->assertGreaterThan(time(), as_next_scheduled_action(Product_Backfill::ACTION_HOOK, $args, Product_Backfill::ACTION_GROUP));
 
         return $args;
@@ -160,8 +226,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         ];
         update_option(Product_Backfill::OPTION_BATCH, $snapshot, false);
         $this->assertSame(Product_Backfill::START_RESUMED, $backfill->start_or_resume_backfill(self::SOURCE_ID));
-        $args = [self::SOURCE_ID, 1, "retry-" . hash("sha256", "saved-key:1")];
-        $this->assertTrue((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, $args, Product_Backfill::ACTION_GROUP));
+        $this->queued_args(1);
         $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
         $this->assertSame(Product_Backfill::START_ALREADY_QUEUED, $backfill->start_or_resume_backfill(self::SOURCE_ID));
         $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
@@ -185,16 +250,12 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             $this->mock_responses([$this->admission(1), $this->admission(1)]);
             $this->assertSame(Product_Backfill::START_FRESH, $backfill->start_or_resume_backfill(self::SOURCE_ID));
             $this->assertSame(Product_Backfill::START_ALREADY_QUEUED, $backfill->start_or_resume_backfill(self::SOURCE_ID));
-            $this->assertTrue((bool) as_has_scheduled_action(
-                Product_Backfill::ACTION_HOOK, [self::SOURCE_ID, 1], Product_Backfill::ACTION_GROUP,
-            ));
-            $backfill->process_batch(self::SOURCE_ID, 1);
+            $this->run_queued(1);
             $first_key = $this->request()->getHeaderLine("Idempotency-Key");
-            as_unschedule_all_actions(Product_Backfill::ACTION_HOOK, null, Product_Backfill::ACTION_GROUP);
-            $backfill->process_batch(self::SOURCE_ID, 2);
             $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH, false));
+            $this->assertSame(Product_Backfill::STATUS_COMPLETE, $backfill->get_status_details()["status"]);
             $this->assertSame(Product_Backfill::START_FRESH, $backfill->start_or_resume_backfill(self::SOURCE_ID));
-            $backfill->process_batch(self::SOURCE_ID, 1);
+            $this->run_queued(1);
             $this->assertNotSame($first_key, $this->request(1)->getHeaderLine("Idempotency-Key"));
         } finally {
             $product->delete(true);
@@ -652,13 +713,8 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
         $backfill = new Product_Backfill();
         try {
             $this->assertTrue($backfill->schedule_backfill(self::SOURCE_ID));
-            $this->assertTrue((bool) as_has_scheduled_action(
-                Product_Backfill::ACTION_HOOK,
-                [self::SOURCE_ID, 1],
-                Product_Backfill::ACTION_GROUP,
-            ));
             try {
-                $backfill->process_batch(self::SOURCE_ID, 1);
+                $this->run_queued(1);
                 $this->fail("Expected retryable request failure");
             } catch (RuntimeException $exception) {
                 $this->assertStringNotContainsString("secret backend detail", $exception->getMessage());
@@ -668,7 +724,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             $this->assertSame($product->get_id(), $snapshot["last_product_id"]);
             $this->assertSame("0", $backfill->get_status_details()["last_product_id"]);
             $this->assertSame((string) $this->request()->getHeaderLine("Idempotency-Key"), $snapshot["idempotency_key"]);
-            $args = $this->pending_retry_args($snapshot);
+            $args = $this->pending_retry_args();
             $product->set_name("After retry");
             $product->save();
             $this->assertNotFalse(has_action(Product_Backfill::ACTION_HOOK));
@@ -703,7 +759,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             } catch (RuntimeException $exception) {
                 $this->assertStringContainsString("request failed", $exception->getMessage());
             }
-            $first_args = $this->pending_retry_args(get_option(Product_Backfill::OPTION_BATCH));
+            $first_args = $this->pending_retry_args();
             as_unschedule_all_actions(Product_Backfill::ACTION_HOOK, $first_args, Product_Backfill::ACTION_GROUP);
             try {
                 do_action_ref_array(Product_Backfill::ACTION_HOOK, $first_args);
@@ -711,7 +767,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             } catch (RuntimeException $exception) {
                 $this->assertStringContainsString("request failed", $exception->getMessage());
             }
-            $second_args = $this->pending_retry_args(get_option(Product_Backfill::OPTION_BATCH));
+            $second_args = $this->pending_retry_args();
             $this->assertNotSame($first_args[2], $second_args[2]);
             as_unschedule_all_actions(Product_Backfill::ACTION_HOOK, $second_args, Product_Backfill::ACTION_GROUP);
             do_action_ref_array(Product_Backfill::ACTION_HOOK, $second_args);
@@ -728,16 +784,16 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
     {
         $product = $this->add_product("Keep snapshot");
         $this->mock_responses([new Response(503, ["Content-Type" => "application/problem+json"], "{}")]);
-        $reject_retry_write = static function ($value, $old_value) {
-            return !empty($value["retry_attempt"]) ? $old_value : $value;
+        $reject_retry = static function ($pre, $timestamp) {
+            return $timestamp > time() ? 0 : $pre;
         };
-        add_filter("pre_update_option_" . Product_Backfill::OPTION_BATCH, $reject_retry_write, 10, 2);
+        add_filter("pre_as_schedule_single_action", $reject_retry, 10, 2);
         try {
             try {
                 (new Product_Backfill())->process_batch(self::SOURCE_ID, 1);
-                $this->fail("Expected failure to persist retry metadata");
+                $this->fail("Expected failure to queue the retry");
             } catch (RuntimeException $exception) {
-                $this->assertStringContainsString("could not persist its retry", $exception->getMessage());
+                $this->assertStringContainsString("could not schedule its retry", $exception->getMessage());
             }
             $snapshot = get_option(Product_Backfill::OPTION_BATCH);
             $this->assertSame($this->request()->getHeaderLine("Idempotency-Key"), $snapshot["idempotency_key"]);
@@ -745,7 +801,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             $this->assertFalse((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, null, Product_Backfill::ACTION_GROUP));
             $this->assertSame(Product_Backfill::STATUS_FAILED, (new Product_Backfill())->get_status_details()["status"]);
         } finally {
-            remove_filter("pre_update_option_" . Product_Backfill::OPTION_BATCH, $reject_retry_write, 10);
+            remove_filter("pre_as_schedule_single_action", $reject_retry, 10);
             $product->delete(true);
         }
     }
@@ -799,7 +855,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             }
             $snapshot = get_option(Product_Backfill::OPTION_BATCH);
             $this->assertCount(3, $snapshot["payloads"]);
-            $args = $this->pending_retry_args($snapshot);
+            $args = $this->pending_retry_args();
             $this->assertSame("0", $backfill->get_status_details()["permanent_failure_count"]);
             $products[1]->set_name("Edited during retry");
             $products[1]->save();
@@ -879,14 +935,8 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             $backfill->process_batch(self::SOURCE_ID, 1);
             $this->assertTrue($backfill->is_backfill_scheduled());
             $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH));
-            $this->assertTrue((bool) as_has_scheduled_action(
-                Product_Backfill::ACTION_HOOK,
-                [self::SOURCE_ID, 2],
-                Product_Backfill::ACTION_GROUP,
-            ));
             $this->assertSame("1", $backfill->get_status_details()["last_completed_page"]);
-            as_unschedule_all_actions(Product_Backfill::ACTION_HOOK, [self::SOURCE_ID, 2], Product_Backfill::ACTION_GROUP);
-            $backfill->process_batch(self::SOURCE_ID, 2);
+            $this->run_queued(2);
 
             $first = json_decode((string) $this->request()->getBody(), true);
             $second = json_decode((string) $this->request(1)->getBody(), true);
@@ -915,8 +965,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             $this->assertSame((string) $products[99]->get_id(), $backfill->get_status_details()["last_product_id"]);
             $products[0]->set_status("draft");
             $products[0]->save();
-            as_unschedule_all_actions(Product_Backfill::ACTION_HOOK, [self::SOURCE_ID, 2], Product_Backfill::ACTION_GROUP);
-            $backfill->process_batch(self::SOURCE_ID, 2);
+            $this->run_queued(2);
             $body = json_decode((string) $this->request(1)->getBody(), true);
             $this->assertCount(1, $body);
             $this->assertSame((string) $products[100]->get_id(), $body[0]["sourceListingId"]);
@@ -952,8 +1001,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
                 remove_filter("woocommerce_product_get_name", $remove_product, 10);
             }
             $this->assertSame((string) $last_id, $backfill->get_status_details()["last_product_id"]);
-            as_unschedule_all_actions(Product_Backfill::ACTION_HOOK, [self::SOURCE_ID, 2], Product_Backfill::ACTION_GROUP);
-            $backfill->process_batch(self::SOURCE_ID, 2);
+            $this->run_queued(2);
             $body = json_decode((string) $this->request(1)->getBody(), true);
             $this->assertCount(1, $body);
             $this->assertSame((string) $products[100]->get_id(), $body[0]["sourceListingId"]);
@@ -997,8 +1045,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
 
                 // Run page two inline rather than leaving a pending action that
                 // makes the status UI report "scheduled" after our assertion.
-                as_unschedule_all_actions(Product_Backfill::ACTION_HOOK, [self::SOURCE_ID, 2], Product_Backfill::ACTION_GROUP);
-                $backfill->process_batch(self::SOURCE_ID, 2);
+                $this->run_queued(2);
                 $second_body = json_decode((string) $this->request(1)->getBody(), true);
                 $this->assertSame((string) $products[Product_Backfill::BATCH_SIZE]->get_id(), $second_body[0]["sourceListingId"]);
                 $this->assertNotSame($this->request()->getHeaderLine("Idempotency-Key"), $this->request(1)->getHeaderLine("Idempotency-Key"));
@@ -1040,11 +1087,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
 
         $this->assertSame([], $this->requests);
         $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH));
-        $this->assertTrue((bool) as_has_scheduled_action(
-            Product_Backfill::ACTION_HOOK,
-            [self::SOURCE_ID, 2],
-            Product_Backfill::ACTION_GROUP,
-        ));
+        $this->queued_args(2);
         $this->assertSame("2", (new Product_Backfill())->get_status_details()["permanent_failure_count"]);
     }
 
@@ -1095,7 +1138,7 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             $this->assertSame("retry-submission", $state["submission_id"]);
             $snapshot = get_option(Product_Backfill::OPTION_BATCH);
             $this->assertSame($this->request()->getHeaderLine("Idempotency-Key"), $snapshot["idempotency_key"]);
-            $this->pending_retry_args($snapshot);
+            $this->pending_retry_args();
         } finally {
             $product->delete(true);
         }
@@ -1119,11 +1162,219 @@ class Test_AHPC_Product_Backfill extends WP_UnitTestCase
             $product->save();
             $this->assertTrue($backfill->schedule_backfill(self::SOURCE_ID));
             $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH));
-            $backfill->process_batch(self::SOURCE_ID, 1);
+            $this->run_queued(1);
             $this->assertNotSame($this->request()->getHeaderLine("Idempotency-Key"), $this->request(1)->getHeaderLine("Idempotency-Key"));
             $this->assertSame("Fresh", json_decode((string) $this->request(1)->getBody(), true)[0]["title"]["text"]);
         } finally {
             $product->delete(true);
         }
+    }
+
+    public function test_interleaved_callbacks_for_one_page_keep_one_batch_and_key()
+    {
+        $product = $this->add_product("Interleaved");
+        try {
+            $this->assertSame(Product_Backfill::START_FRESH, (new Product_Backfill())->start_or_resume_backfill(self::SOURCE_ID));
+            $args = $this->queued_args(1);
+            as_unschedule_all_actions(Product_Backfill::ACTION_HOOK, $args, Product_Backfill::ACTION_GROUP);
+            // A second runner starts a copy of the same action while the first
+            // is still building the batch, before either has saved a snapshot.
+            $interleaved = false;
+            $second = function ($name) use ($args, &$interleaved) {
+                if (!$interleaved) {
+                    $interleaved = true;
+                    do_action_ref_array(Product_Backfill::ACTION_HOOK, $args);
+                    $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH, false));
+                    $this->assertSame([], $this->requests);
+                }
+                return $name;
+            };
+            add_filter("woocommerce_product_get_name", $second);
+            try {
+                do_action_ref_array(Product_Backfill::ACTION_HOOK, $args);
+            } finally {
+                remove_filter("woocommerce_product_get_name", $second);
+            }
+
+            $this->assertTrue($interleaved);
+            $this->assertCount(1, $this->requests);
+            $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH, false));
+            $state = (new Product_Backfill())->get_status_details();
+            $this->assertSame(Product_Backfill::STATUS_COMPLETE, $state["status"]);
+            $this->assertSame("1", $state["last_completed_page"]);
+            $this->assertSame((string) $product->get_id(), $state["last_product_id"]);
+
+            // The contended copy was kept, not dropped; it is superseded now.
+            $this->assertSame($args, $this->pending_retry_args(1));
+            $this->run_queued(1);
+            $this->assertCount(1, $this->requests);
+            $this->assertSame($state, (new Product_Backfill())->get_status_details());
+        } finally {
+            $product->delete(true);
+        }
+    }
+
+    public function test_lock_contention_keeps_the_wakeup_until_the_holder_releases()
+    {
+        $product = $this->add_product("Contended");
+        $holder = new Option_Lease(Product_Backfill::OPTION_LOCK);
+        $backfill = new Product_Backfill();
+        try {
+            $this->assertTrue($holder->acquire(Product_Backfill::LOCK_SECONDS));
+            // Nothing is queued yet, and a busy batch never reports a start.
+            $this->assertFalse($backfill->start_or_resume_backfill(self::SOURCE_ID));
+            $this->assertFalse($backfill->is_backfill_scheduled());
+            $holder->release();
+
+            $this->assertSame(Product_Backfill::START_FRESH, $backfill->start_or_resume_backfill(self::SOURCE_ID));
+            $this->assertTrue($holder->acquire(Product_Backfill::LOCK_SECONDS));
+            $args = $this->run_queued(1);
+            $this->assertSame([], $this->requests);
+            $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH, false));
+            $this->assertSame($args, $this->pending_retry_args(1));
+            $this->assertSame(Product_Backfill::START_ALREADY_QUEUED, $backfill->start_or_resume_backfill(self::SOURCE_ID));
+            $holder->release();
+
+            $this->run_queued(1);
+            $this->assertCount(1, $this->requests);
+            $this->assertSame(Product_Backfill::STATUS_COMPLETE, $backfill->get_status_details()["status"]);
+        } finally {
+            $holder->release();
+            $product->delete(true);
+        }
+    }
+
+    public function test_expired_holder_cannot_overwrite_its_successor()
+    {
+        $product = $this->add_product("Expired holder");
+        try {
+            $this->assertSame(Product_Backfill::START_FRESH, (new Product_Backfill())->start_or_resume_backfill(self::SOURCE_ID));
+            $args = $this->queued_args(1);
+            as_unschedule_all_actions(Product_Backfill::ACTION_HOOK, $args, Product_Backfill::ACTION_GROUP);
+            $successor = null;
+            $this->respond_with(function ($count) use ($args, &$successor) {
+                if (1 === $count) {
+                    // The first holder stalls past its lease. A successor takes
+                    // over, replays the persisted request and finishes the run.
+                    $this->expire_lease();
+                    do_action_ref_array(Product_Backfill::ACTION_HOOK, $args);
+                    $successor = get_option(Product_Backfill::OPTION_STATE);
+                    return new Response(503, ["Content-Type" => "application/problem+json"], "{}");
+                }
+                return $this->admission(1);
+            });
+
+            do_action_ref_array(Product_Backfill::ACTION_HOOK, $args);
+
+            $this->assertCount(2, $this->requests);
+            $this->assertSame((string) $this->request()->getBody(), (string) $this->request(1)->getBody());
+            $this->assertSame($this->request()->getHeaderLine("Idempotency-Key"), $this->request(1)->getHeaderLine("Idempotency-Key"));
+            $this->assertSame(Product_Backfill::STATUS_COMPLETE, $successor["status"]);
+            $this->assertSame($successor, get_option(Product_Backfill::OPTION_STATE));
+            $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH, false));
+            $this->assertFalse((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, null, Product_Backfill::ACTION_GROUP));
+        } finally {
+            $product->delete(true);
+        }
+    }
+
+    public static function connection_changes()
+    {
+        return [
+            "cancellation" => ["cancel"],
+            "source replacement" => ["replace"],
+            "same-source reconnect" => ["reconnect"],
+        ];
+    }
+
+    /** @dataProvider connection_changes */
+    public function test_worker_suspended_across_a_connection_change_cannot_mutate_its_successor($change)
+    {
+        $product = $this->add_product("Suspended worker");
+        try {
+            $this->assertSame(Product_Backfill::START_FRESH, (new Product_Backfill())->start_or_resume_backfill(self::SOURCE_ID));
+            $args = $this->queued_args(1);
+            as_unschedule_all_actions(Product_Backfill::ACTION_HOOK, $args, Product_Backfill::ACTION_GROUP);
+            $successor = null;
+            $this->respond_with(function ($count) use ($change, &$successor) {
+                if (1 !== $count) {
+                    return $this->admission(1);
+                }
+                // The connection changes while the first request is in flight.
+                $backfill = new Product_Backfill();
+                if ("reconnect" === $change) {
+                    $this->configure_connection(self::SOURCE_ID, self::RECONNECTED_TOKEN);
+                } elseif ("replace" === $change) {
+                    $this->configure_connection(self::OTHER_SOURCE_ID);
+                    $backfill->cancel_backfill();
+                    $this->assertSame(Product_Backfill::START_FRESH, $backfill->start_or_resume_backfill(self::OTHER_SOURCE_ID));
+                } else {
+                    $backfill->cancel_backfill();
+                }
+                $successor = [get_option(Product_Backfill::OPTION_STATE), get_option(Product_Backfill::OPTION_BATCH, false)];
+                // The change revoked the old credential; applied as a terminal
+                // rejection, this answer would end the successor's run.
+                return new Response(401, ["Content-Type" => "application/problem+json"], '{"detail":"revoked"}');
+            });
+
+            do_action_ref_array(Product_Backfill::ACTION_HOOK, $args);
+
+            $this->assertSame($successor, [get_option(Product_Backfill::OPTION_STATE), get_option(Product_Backfill::OPTION_BATCH, false)]);
+            $this->assertCount(1, $this->requests);
+
+            if ("cancel" === $change) {
+                $this->assertSame(Product_Backfill::STATUS_NOT_SCHEDULED, $successor[0]["status"]);
+                $this->assertFalse((bool) as_has_scheduled_action(Product_Backfill::ACTION_HOOK, null, Product_Backfill::ACTION_GROUP));
+                return;
+            }
+
+            if ("replace" === $change) {
+                $this->assertSame([], $this->queued_actions(1));
+                $this->queued_args(1, self::OTHER_SOURCE_ID);
+                return;
+            }
+
+            // The same wake-up replays the unchanged request with the current
+            // credential, then finishes the run.
+            $this->assertSame(self::SOURCE_ID, $successor[1]["listing_source_id"]);
+            $this->run_queued(1);
+            $this->assertCount(2, $this->requests);
+            $this->assertSame((string) $this->request()->getBody(), (string) $this->request(1)->getBody());
+            $this->assertSame($this->request()->getHeaderLine("Idempotency-Key"), $this->request(1)->getHeaderLine("Idempotency-Key"));
+            $this->assertSame("Bearer " . self::RECONNECTED_TOKEN, $this->request(1)->getHeaderLine("Authorization"));
+            $this->assertSame(Product_Backfill::STATUS_COMPLETE, (new Product_Backfill())->get_status_details()["status"]);
+            $this->assertFalse(get_option(Product_Backfill::OPTION_BATCH, false));
+        } finally {
+            $product->delete(true);
+        }
+    }
+
+    public function test_action_queued_by_the_previous_release_continues_its_run_once()
+    {
+        // 0.3.1 queued [source, page] and suffixed retries with "retry-<sha256>".
+        $payloads = [["sourceListingId" => "legacy", "url" => "https://example.com/legacy", "images" => []]];
+        update_option(Product_Backfill::OPTION_BATCH, [
+            "listing_source_id" => self::SOURCE_ID,
+            "page" => 1,
+            "product_count" => 1,
+            "payloads" => $payloads,
+            "idempotency_key" => "legacy-key",
+            "retry_attempt" => 1,
+        ], false);
+        update_option(Product_Backfill::OPTION_STATE, ["status" => Product_Backfill::STATUS_FAILED], false);
+        $legacy_retry = [self::SOURCE_ID, 1, "retry-" . hash("sha256", "legacy-key:1")];
+
+        do_action_ref_array(Product_Backfill::ACTION_HOOK, $legacy_retry);
+
+        $this->assertCount(1, $this->requests);
+        $this->assertSame("legacy-key", $this->request()->getHeaderLine("Idempotency-Key"));
+        $this->assertSame($payloads, json_decode((string) $this->request()->getBody(), true));
+        $this->assertSame(Product_Backfill::STATUS_COMPLETE, (new Product_Backfill())->get_status_details()["status"]);
+
+        // Once the run has a wake-up, a leftover action of the old shape is ignored.
+        do_action_ref_array(Product_Backfill::ACTION_HOOK, [self::SOURCE_ID, 1]);
+        do_action_ref_array(Product_Backfill::ACTION_HOOK, $legacy_retry);
+        $this->assertCount(1, $this->requests);
+        $this->assertSame(Product_Backfill::STATUS_COMPLETE, (new Product_Backfill())->get_status_details()["status"]);
     }
 }

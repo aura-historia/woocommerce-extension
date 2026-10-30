@@ -231,11 +231,11 @@ class Plugin
         if (class_exists(Product_Backfill::class)) {
             add_action(
                 Product_Backfill::ACTION_HOOK,
-                static function ($listing_source_id, $page) {
-                    (new Product_Backfill())->process_batch($listing_source_id, $page);
+                static function ($listing_source_id, $page, $wake = "") {
+                    (new Product_Backfill())->process_batch($listing_source_id, $page, $wake);
                 },
                 10,
-                2,
+                3,
             );
         }
 

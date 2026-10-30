@@ -30,6 +30,10 @@ class Webhook_Manager
     const OPTION_LAST_SYNC_ERROR = "ahpc_last_sync_error";
     const OPTION_LAST_SYNC_AT = "ahpc_last_sync_at";
     const OPTION_LAST_OAUTH_ERROR = "ahpc_last_oauth_error";
+    /** Sync lease, separate from the backfill and shipping locks. */
+    const OPTION_SYNC_LOCK = "ahpc_webhook_sync_lock";
+    /** Sync lease lifetime; far longer than staging, one PUT and activation. */
+    const SYNC_LOCK_SECONDS = 120;
     const SETTINGS_GROUP = "ahpc_settings_group";
     const API_VERSION = 3;
     const PRODUCT_DELETED_HOOK = "ahpc_product_permanently_deleted";
@@ -433,11 +437,25 @@ class Webhook_Manager
             );
         }
 
+        // Never interleave two read/create/register/activate sequences. The
+        // holder records its own outcome; a sync stays required until one
+        // succeeds for the current settings.
+        $lease = new Option_Lease(self::OPTION_SYNC_LOCK);
+        if (!$lease->acquire(self::SYNC_LOCK_SECONDS)) {
+            return new WP_Error(
+                "ahpc_sync_in_progress",
+                __(
+                    "Another request is synchronizing the webhooks right now. Try again in a moment.",
+                    "aura-historia-partner-connect",
+                ),
+            );
+        }
+
         $this->initialize_options();
         $this->syncing = true;
 
         try {
-            $settings = $this->get_settings();
+            $settings = $this->read_current_settings();
             $listing_source_id = $settings["listing_source_id"];
             $access_token = $settings["access_token"];
             $endpoint_url = self::get_webhook_endpoint_url($listing_source_id);
@@ -569,6 +587,10 @@ class Webhook_Manager
             }
 
             if (!$setup_error && "" !== $listing_source_id && "" !== $access_token) {
+                if (!$lease->held()) {
+                    return $this->abandon_sync();
+                }
+
                 $registration_result = $this->reconcile_ingestion_configuration(
                     $listing_source_id,
                     $access_token,
@@ -576,6 +598,18 @@ class Webhook_Manager
                 );
                 if (is_wp_error($registration_result)) {
                     $setup_error = $registration_result;
+                } elseif (!$lease->held()) {
+                    // A successor may have registered another context.
+                    return $this->abandon_sync();
+                } elseif ($this->read_current_settings() !== $settings) {
+                    // Activate only the context the backend just accepted.
+                    $setup_error = new WP_Error(
+                        "ahpc_connection_changed",
+                        __(
+                            "The connection changed during the synchronization. Delivery stays paused until the next synchronization.",
+                            "aura-historia-partner-connect",
+                        ),
+                    );
                 } else {
                     foreach (array_keys($this->get_managed_topics()) as $topic) {
                         try {
@@ -623,7 +657,17 @@ class Webhook_Manager
                 return $this->record_sync_error($setup_error);
             }
 
-            update_option(self::OPTION_NEEDS_SYNC, "no", false);
+            // Report success only while still holding the lease, so a sync
+            // that expired never marks a successor's context as synchronized.
+            if (!$lease->write(self::OPTION_NEEDS_SYNC, "no")) {
+                return $this->abandon_sync();
+            }
+
+            if ($this->read_current_settings() !== $settings) {
+                // The connection changed after activation; synchronize again.
+                $this->mark_sync_required();
+            }
+
             update_option(
                 self::OPTION_LAST_SYNC_AT,
                 current_time("mysql"),
@@ -634,7 +678,41 @@ class Webhook_Manager
             return true;
         } finally {
             $this->syncing = false;
+            $lease->release();
         }
+    }
+
+    /**
+     * Ends a sync that lost its lease. A successor owns the webhooks and its
+     * outcome, so this sync only keeps synchronization required.
+     *
+     * @return WP_Error
+     */
+    private function abandon_sync()
+    {
+        $this->mark_sync_required();
+
+        return new WP_Error(
+            "ahpc_sync_superseded",
+            __(
+                "Another synchronization took over before this one finished. Retry the synchronization.",
+                "aura-historia-partner-connect",
+            ),
+        );
+    }
+
+    /**
+     * Reads the settings again; another request may have reconnected the
+     * store since this request cached them.
+     *
+     * @return array<string,mixed>
+     */
+    private function read_current_settings()
+    {
+        wp_cache_delete(self::OPTION_SETTINGS, "options");
+        wp_cache_delete("notoptions", "options");
+
+        return $this->get_settings();
     }
 
     /**
@@ -846,6 +924,7 @@ class Webhook_Manager
         delete_option(self::OPTION_LAST_SYNC_ERROR);
         delete_option(self::OPTION_LAST_SYNC_AT);
         delete_option(self::OPTION_LAST_OAUTH_ERROR);
+        delete_option(self::OPTION_SYNC_LOCK);
         delete_option("ahpc_initial_backfill_pending_source");
         delete_option("ahpc_initial_backfill_started_sources");
         delete_option("ahpc_initial_backfill_error");
@@ -855,6 +934,7 @@ class Webhook_Manager
         }
 
         delete_option("ahpc_backfill_state");
+        delete_option("ahpc_backfill_lock");
         if (class_exists(Shipping_Publisher::class)) {
             Shipping_Publisher::uninstall();
         }
