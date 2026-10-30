@@ -594,14 +594,23 @@ class Webhook_Manager
 
     /**
      * Stops background reconciliation on deactivation. Any queued or running
-     * action loses its wake-up; activation resumes with a fresh attempt.
+     * action loses its wake-up, and a running sync loses its lease, so it can
+     * neither activate delivery nor record an outcome afterwards. Activation
+     * resumes with a fresh attempt.
      *
      * @return void
      */
     public function stop_sync()
     {
-        $this->reset_sync_retries();
-        $this->unschedule_sync_actions();
+        $lease = new Option_Lease(self::OPTION_SYNC_LOCK);
+        $lease->seize(self::SYNC_LOCK_SECONDS);
+
+        try {
+            $this->reset_sync_retries();
+            $this->unschedule_sync_actions();
+        } finally {
+            $lease->release();
+        }
     }
 
     /**
@@ -777,7 +786,8 @@ class Webhook_Manager
         }
 
         $state = self::normalize_sync_retry(Option_Lease::read(self::OPTION_SYNC_RETRY, []), $context);
-        $state["attempts"] = ($this->attempt["automatic"] ? $state["attempts"] : 0) + 1;
+        // An automatic attempt was counted when it started.
+        $state["attempts"] = $this->attempt["automatic"] ? max(1, $state["attempts"]) : 1;
         $data = $error->get_error_data();
 
         if (!is_array($data) || empty($data["retryable"]) || $state["attempts"] >= self::SYNC_MAX_ATTEMPTS) {
@@ -832,7 +842,8 @@ class Webhook_Manager
             if (null !== $wake) {
                 // Recheck under the lease: another sync may have finished or
                 // retired this attempt since the action started.
-                if ($wake !== $this->get_sync_retry(true)["wake"]) {
+                $state = $this->get_sync_retry(true);
+                if ($wake !== $state["wake"]) {
                     return new WP_Error(
                         "ahpc_sync_superseded",
                         __(
@@ -844,6 +855,28 @@ class Webhook_Manager
 
                 if ("yes" !== Option_Lease::read(self::OPTION_NEEDS_SYNC, "yes")) {
                     return true;
+                }
+
+                if ($state["attempts"] >= self::SYNC_MAX_ATTEMPTS) {
+                    // Earlier attempts ended without an outcome, for example
+                    // after a fatal error; stop like after recorded failures.
+                    $state["status"] = self::SYNC_STOPPED;
+                    $this->retire_sync_wake($lease, $state);
+                    return new WP_Error(
+                        "ahpc_sync_stopped",
+                        __(
+                            "Automatic webhook synchronization stopped after repeated failures. Use Sync webhooks now to try again.",
+                            "aura-historia-partner-connect",
+                        ),
+                    );
+                }
+
+                // Count the attempt before any outbound request, so one that
+                // ends without recording an outcome still backs off.
+                ++$state["attempts"];
+                $state["next_at"] = time() + self::sync_retry_delay($state["attempts"]);
+                if (!$lease->write(self::OPTION_SYNC_RETRY, $state)) {
+                    return $this->abandon_sync();
                 }
             }
 
@@ -1008,15 +1041,19 @@ class Webhook_Manager
                     return $this->abandon_sync();
                 } elseif (Option_Lease::read(self::OPTION_SYNC_CONTEXT, "") !== $context) {
                     // Activate only the context the backend just accepted.
-                    $setup_error = new WP_Error(
-                        "ahpc_connection_changed",
-                        __(
-                            "The connection changed during the synchronization. Delivery stays paused until the next synchronization.",
-                            "aura-historia-partner-connect",
-                        ),
-                    );
+                    $setup_error = self::connection_changed_error();
                 } else {
                     foreach (array_keys($this->get_managed_topics()) as $topic) {
+                        // Deactivation or a successor may take the lease, and
+                        // another request may change the context, between saves.
+                        if (!$lease->held()) {
+                            return $this->abandon_sync();
+                        }
+                        if (Option_Lease::read(self::OPTION_SYNC_CONTEXT, "") !== $context) {
+                            $setup_error = self::connection_changed_error();
+                            break;
+                        }
+
                         try {
                             $webhook = $this->load_managed_webhook($topic, $webhook_ids);
                             if (!$webhook) {
@@ -1069,13 +1106,14 @@ class Webhook_Manager
                 return $this->abandon_sync();
             }
 
+            if (Option_Lease::read(self::OPTION_SYNC_CONTEXT, "") !== $context) {
+                // The context changed while delivery was activated: pause it
+                // and register the new context right away.
+                return $this->fail_sync($lease, self::connection_changed_error());
+            }
+
             // A confirmed configuration ends the automatic attempts.
             $this->retire_sync_wake($lease, self::normalize_sync_retry([], $context));
-
-            if (Option_Lease::read(self::OPTION_SYNC_CONTEXT, "") !== $context) {
-                // The context changed after activation; synchronize again.
-                $this->mark_sync_required();
-            }
 
             update_option(
                 self::OPTION_LAST_SYNC_AT,
@@ -1090,6 +1128,20 @@ class Webhook_Manager
             $this->attempt = null;
             $lease->release();
         }
+    }
+
+    /**
+     * @return WP_Error
+     */
+    private static function connection_changed_error()
+    {
+        return new WP_Error(
+            "ahpc_connection_changed",
+            __(
+                "The connection changed during the synchronization. Delivery stays paused until the next synchronization.",
+                "aura-historia-partner-connect",
+            ),
+        );
     }
 
     /**

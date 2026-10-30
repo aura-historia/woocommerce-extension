@@ -114,10 +114,11 @@ class Plugin
     public static function deactivate()
     {
         $manager = new Webhook_Manager();
-        $manager->pause_webhooks();
-        // Queued actions must not resume after reactivation. The retained
-        // backfill batch waits for a manual resume.
+        // Fence a running sync first, so it cannot activate delivery again
+        // after the pause. The retained backfill batch waits for a manual
+        // resume.
         $manager->stop_sync();
+        $manager->pause_webhooks();
         (new Product_Backfill())->stop_backfill(__(
             "The plugin was deactivated.",
             "aura-historia-partner-connect",
@@ -1834,6 +1835,18 @@ class Plugin
             ];
         }
 
+        // A queued fresh attempt is pending, even after an earlier error.
+        if ("yes" === get_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes")) {
+            return [
+                "type" => "warning",
+                "label" => __("Sync pending", "aura-historia-partner-connect"),
+                "message" => __(
+                    "The webhook configuration is queued for background synchronization. Product listing ingestion has not been admitted yet.",
+                    "aura-historia-partner-connect",
+                ),
+            ];
+        }
+
         if ("" !== $sync_error) {
             return [
                 "type" => "error",
@@ -1845,17 +1858,6 @@ class Plugin
                         "aura-historia-partner-connect",
                     ),
                     $sync_error,
-                ),
-            ];
-        }
-
-        if ("yes" === get_option(Webhook_Manager::OPTION_NEEDS_SYNC, "yes")) {
-            return [
-                "type" => "warning",
-                "label" => __("Sync pending", "aura-historia-partner-connect"),
-                "message" => __(
-                    "The webhook configuration is queued for background synchronization. Product listing ingestion has not been admitted yet.",
-                    "aura-historia-partner-connect",
                 ),
             ];
         }
@@ -1980,7 +1982,7 @@ class Plugin
             }
 
             $message .= " " . __(
-                "Its pending batch and retry key are kept. Use Re-send all existing products to resume it.",
+                "Use Re-send all existing products to resume it: a pending batch is sent again unchanged with its retry key, otherwise the run continues with its next page.",
                 "aura-historia-partner-connect",
             );
 

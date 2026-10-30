@@ -127,7 +127,7 @@ Storefront and other ordinary requests never contact Aura Historia, so an outage
 
 = What happens when the plugin is disabled? =
 
-Plugin-owned webhooks are paused on deactivation so WooCommerce stops sending deliveries. Queued webhook reconciliation and backfill work is stopped and does not resume on its own after reactivation; a stopped backfill keeps its pending batch for the manual resume action. Shipping jobs are fenced/canceled, and the plugin attempts protected retirement of its shared shipping profile and clearing of its source default. This is not source authorization revocation. Unconfirmed cleanup is visible after reactivation; review retained assertions in Aura Historia. Existing assertions have no automatic expiry.
+Plugin-owned webhooks are paused on deactivation so WooCommerce stops sending deliveries. Queued webhook reconciliation and backfill work is stopped. Reactivation reconciles the webhooks again, while a stopped backfill keeps its pending batch for the manual resume action. Shipping jobs are fenced/canceled, and the plugin attempts protected retirement of its shared shipping profile and clearing of its source default. This is not source authorization revocation. Unconfirmed cleanup is visible after reactivation; review retained assertions in Aura Historia. Existing assertions have no automatic expiry.
 
 = Which shipping settings are supported? =
 
