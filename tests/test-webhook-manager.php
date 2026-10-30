@@ -5,6 +5,8 @@
  * @package AuraHistoria\PartnerConnect
  */
 
+require_once __DIR__ . "/class-ahpc-fake-oauth-broker.php";
+
 use AuraHistoria\PartnerConnect\Plugin;
 use AuraHistoria\PartnerConnect\Product_Backfill;
 use AuraHistoria\PartnerConnect\Webhook_Manager;
@@ -72,19 +74,11 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
     protected $admin_base_url = "https://merchant.example/wp-admin/";
 
     /**
-     * OAuth authorization endpoint used by tests.
+     * In-memory OAuth broker used to connect stores in tests.
      *
-     * @var string
+     * @var AHPC_Fake_OAuth_Broker
      */
-    protected $oauth_authorize_url = "https://auth.example/oauth/authorize";
-
-    /**
-     * OAuth broker redirect URI used by tests.
-     *
-     * @var string
-     */
-    protected $oauth_broker_redirect_uri =
-        "https://auth.example/api/oauth/client/redirect-broker/woocommerce";
+    protected $oauth_broker;
 
     /**
      * OAuth client ID used by tests.
@@ -140,14 +134,13 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         );
         add_filter("admin_url", [$this, "filter_admin_url"], 10, 4);
         add_filter("ahpc_oauth_client_id", [$this, "filter_oauth_client_id"]);
-        add_filter("ahpc_oauth_authorize_url", [
-            $this,
-            "filter_oauth_authorize_url",
-        ]);
-        add_filter("ahpc_oauth_broker_redirect_uri", [
-            $this,
-            "filter_oauth_broker_redirect_uri",
-        ]);
+        $this->oauth_broker = new AHPC_Fake_OAuth_Broker();
+        add_filter("ahpc_oauth_broker_base_url", static function () {
+            return AHPC_Fake_OAuth_Broker::BASE_URL;
+        });
+        add_filter("ahpc_oauth_broker_guzzle_client", function () {
+            return $this->oauth_broker->client();
+        });
 
         $this->set_backend_mock_responses(
             array_fill(0, 10, $this->mock_backend_registration_response()),
@@ -180,14 +173,6 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         );
         remove_filter("admin_url", [$this, "filter_admin_url"], 10);
         remove_filter("ahpc_oauth_client_id", [$this, "filter_oauth_client_id"]);
-        remove_filter("ahpc_oauth_authorize_url", [
-            $this,
-            "filter_oauth_authorize_url",
-        ]);
-        remove_filter("ahpc_oauth_broker_redirect_uri", [
-            $this,
-            "filter_oauth_broker_redirect_uri",
-        ]);
         wp_set_current_user(0);
 
         parent::tearDown();
@@ -231,32 +216,6 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         unset($client_id);
 
         return $this->oauth_client_id;
-    }
-
-    /**
-     * Overrides the OAuth authorization endpoint during tests.
-     *
-     * @param string $authorize_url Current authorization endpoint.
-     * @return string
-     */
-    public function filter_oauth_authorize_url($authorize_url)
-    {
-        unset($authorize_url);
-
-        return $this->oauth_authorize_url;
-    }
-
-    /**
-     * Overrides the OAuth broker redirect URI during tests.
-     *
-     * @param string $redirect_uri Current broker redirect URI.
-     * @return string
-     */
-    public function filter_oauth_broker_redirect_uri($redirect_uri)
-    {
-        unset($redirect_uri);
-
-        return $this->oauth_broker_redirect_uri;
     }
 
     /**
@@ -313,59 +272,6 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             ["Content-Type" => "application/json"],
             wp_json_encode($body),
         );
-    }
-
-    /**
-     * Builds a mocked OAuth token exchange response.
-     *
-     * @param string $access_token Access token to return.
-     * @param string $scope        Granted OAuth scope string.
-     * @param string $token_type   OAuth token type to return.
-     * @return Response
-     */
-    protected function mock_oauth_token_response(
-        $access_token,
-        $scope = \AuraHistoria\PartnerConnect\Plugin::OAUTH_SCOPE,
-        $token_type = "Bearer",
-    ) {
-        return new Response(
-            200,
-            ["Content-Type" => "application/json"],
-            wp_json_encode([
-                "access_token" => $access_token,
-                "token_type" => $token_type,
-                "scope" => $scope,
-            ]),
-        );
-    }
-
-    /**
-     * Decodes base64url test values.
-     *
-     * @param string $value Encoded value.
-     * @return string
-     */
-    protected function base64url_decode($value)
-    {
-        $value = (string) $value;
-        $padding = strlen($value) % 4;
-
-        if ($padding > 0) {
-            $value .= str_repeat("=", 4 - $padding);
-        }
-
-        return (string) base64_decode(strtr($value, "-_", "+/"));
-    }
-
-    /**
-     * Encodes raw bytes using base64url without padding for test assertions.
-     *
-     * @param string $value Raw value.
-     * @return string
-     */
-    protected function base64url_encode($value)
-    {
-        return rtrim(strtr(base64_encode((string) $value), "+/", "-_"), "=");
     }
 
     /**
@@ -555,285 +461,6 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $output = $this->render_plugin_settings_page();
         $this->assertStringNotContainsString("ahpcOauthAutoStart", $output);
         $this->assertStringContainsString("Reconnect with Aura Historia", $output);
-    }
-
-    /**
-     * It builds an OAuth authorization URL with PKCE and broker state.
-     *
-     * @return void
-     */
-    public function test_create_oauth_authorization_url_uses_pkce_and_broker_state()
-    {
-        $plugin = new Plugin();
-        $authorization_url = $plugin->create_oauth_authorization_url();
-
-        $this->assertIsString($authorization_url);
-
-        $parts = wp_parse_url($authorization_url);
-        $this->assertIsArray($parts);
-        $this->assertSame("https", $parts["scheme"]);
-        $this->assertSame("auth.example", $parts["host"]);
-        $this->assertSame("/oauth/authorize", $parts["path"]);
-
-        parse_str($parts["query"], $query);
-
-        $this->assertSame($this->oauth_client_id, $query["client_id"]);
-        $this->assertSame(
-            $this->oauth_broker_redirect_uri,
-            $query["redirect_uri"],
-        );
-        $this->assertSame("code", $query["response_type"]);
-        $this->assertSame("S256", $query["code_challenge_method"]);
-        $this->assertSame(\AuraHistoria\PartnerConnect\Plugin::OAUTH_SCOPE, $query["scope"]);
-        $this->assertSame("true", $query["requires_listing_source_id"]);
-        $this->assertNotEmpty($query["code_challenge"]);
-        $this->assertNotEmpty($query["state"]);
-
-        $broker_state = json_decode(
-            $this->base64url_decode($query["state"]),
-            true,
-        );
-
-        $this->assertIsArray($broker_state);
-        $this->assertSame(
-            $this->admin_base_url . "admin.php?page=" . Plugin::PAGE_SLUG,
-            $broker_state["redirect_uri"],
-        );
-        $this->assertMatchesRegularExpression(
-            "/\A[A-Za-z0-9_-]{43,128}\z/",
-            $broker_state["code_verifier"],
-        );
-        $this->assertMatchesRegularExpression(
-            "/\A[A-Za-z0-9_-]{32,}\z/",
-            $broker_state["client_state"],
-        );
-        $this->assertSame(
-            $this->base64url_encode(
-                hash("sha256", $broker_state["code_verifier"], true),
-            ),
-            $query["code_challenge"],
-        );
-
-        $stored_state = get_transient(
-            Plugin::OAUTH_STATE_TRANSIENT_PREFIX .
-                hash("sha256", $broker_state["client_state"]),
-        );
-
-        $this->assertIsArray($stored_state);
-        $this->assertSame($this->admin_user_id, $stored_state["user_id"]);
-    }
-
-    /**
-     * It exchanges the OAuth broker code, stores local credentials, and syncs webhooks.
-     *
-     * @return void
-     */
-    public function test_complete_oauth_connection_stores_token_and_syncs_webhooks()
-    {
-        $listing_source_id = "ls_01jw7j4azge00800000000000g";
-        $exchange_code = "01970f22-2bf0-7000-8000-000000000099";
-        $access_token =
-            "aurahistoria_abcdefghijk_verylongtokenvalue";
-
-        update_option(
-            Webhook_Manager::OPTION_SETTINGS,
-            [
-                "listing_source_id" => "",
-                "access_token" => "",
-                "secret" => "test-secret",
-            ],
-            false,
-        );
-
-        $plugin = new Plugin();
-        $authorization_url = $plugin->create_oauth_authorization_url();
-        $parts = wp_parse_url($authorization_url);
-        parse_str($parts["query"], $query);
-        $broker_state = json_decode(
-            $this->base64url_decode($query["state"]),
-            true,
-        );
-
-        $this->set_backend_mock_responses([
-            $this->mock_oauth_token_response($access_token),
-            $this->mock_backend_registration_response(201),
-        ]);
-
-        $result = $plugin->complete_oauth_connection(
-            $listing_source_id,
-            $exchange_code,
-            $broker_state["client_state"],
-        );
-
-        $this->assertTrue($result);
-
-        $settings = get_option(Webhook_Manager::OPTION_SETTINGS, []);
-        $this->assertSame($listing_source_id, $settings["listing_source_id"]);
-        $this->assertSame($access_token, $settings["access_token"]);
-        $this->assertSame("test-secret", $settings["secret"]);
-        $this->assertSame(
-            [$listing_source_id => true],
-            get_option(Plugin::OPTION_INITIAL_BACKFILL_STARTED_SOURCES, []),
-        );
-        $this->assertFalse(get_option(Plugin::OPTION_INITIAL_BACKFILL_PENDING_SOURCE, false));
-        $this->assertTrue((new Product_Backfill())->is_backfill_scheduled());
-
-        $oauth_requests = $this->get_backend_requests_for_url(
-            "https://example.com/v1/oauth/tokens/by-third-party-code/" .
-                $exchange_code,
-        );
-        $this->assertCount(1, $oauth_requests);
-        $this->assertSame(
-            "GET",
-            strtoupper($oauth_requests[0]["request"]->getMethod()),
-        );
-        $this->assertSame(
-            "",
-            $oauth_requests[0]["request"]->getHeaderLine("Authorization"),
-        );
-
-        $registration_requests = $this->get_backend_requests_for_url(
-            "https://example.com/v1/listing-sources/" . $listing_source_id . "/ingestion-configurations/woocommerce",
-        );
-        $this->assertCount(1, $registration_requests);
-        $this->assertSame(
-            "Bearer " . $access_token,
-            $registration_requests[0]["request"]->getHeaderLine(
-                "Authorization",
-            ),
-        );
-
-        $manager = new Webhook_Manager();
-        $this->assertCount(3, $manager->get_webhook_ids());
-
-        foreach ($manager->get_webhook_ids() as $webhook_id) {
-            $webhook = new WC_Webhook($webhook_id);
-            $this->assertSame("active", $webhook->get_status());
-        }
-
-        // Reauthorizing while the first batch is pending must preserve its snapshot.
-        $snapshot = ["idempotency_key" => "original-key", "payloads" => [["sourceListingId" => "42"]]];
-        update_option(Product_Backfill::OPTION_BATCH, $snapshot, false);
-        $next_url = $plugin->create_oauth_authorization_url();
-        $next_parts = wp_parse_url($next_url);
-        parse_str($next_parts["query"], $next_query);
-        $next_state = json_decode($this->base64url_decode($next_query["state"]), true);
-        $this->set_backend_mock_responses([
-            $this->mock_oauth_token_response($access_token),
-            $this->mock_backend_registration_response(201),
-        ]);
-        $this->assertTrue($plugin->complete_oauth_connection(
-            $listing_source_id,
-            $exchange_code,
-            $next_state["client_state"],
-        ));
-        $this->assertSame($snapshot, get_option(Product_Backfill::OPTION_BATCH));
-    }
-
-    /**
-     * It rejects OAuth callbacks with missing or expired CSRF state before exchange.
-     *
-     * @return void
-     */
-    public function test_complete_oauth_connection_rejects_invalid_state()
-    {
-        $plugin = new Plugin();
-        $result = $plugin->complete_oauth_connection(
-            "ls_01jw7j4azge00800000000000g",
-            "01970f22-2bf0-7000-8000-000000000099",
-            "invalid-state",
-        );
-
-        $this->assertInstanceOf(WP_Error::class, $result);
-        $this->assertSame("ahpc_oauth_invalid_state", $result->get_error_code());
-        $this->assertSame([], $this->backend_http_requests);
-    }
-
-    /**
-     * It rejects OAuth token responses with an unsupported token type.
-     *
-     * @return void
-     */
-    public function test_complete_oauth_connection_rejects_invalid_token_type()
-    {
-        $listing_source_id = "ls_01jw7j4azge00800000000000g";
-        $exchange_code = "01970f22-2bf0-7000-8000-000000000099";
-        $access_token =
-            "aurahistoria_abcdefghijk_verylongtokenvalue";
-
-        $plugin = new Plugin();
-        $authorization_url = $plugin->create_oauth_authorization_url();
-        $parts = wp_parse_url($authorization_url);
-        parse_str($parts["query"], $query);
-        $broker_state = json_decode(
-            $this->base64url_decode($query["state"]),
-            true,
-        );
-
-        $this->set_backend_mock_responses([
-            $this->mock_oauth_token_response(
-                $access_token,
-                "product-listings:write listing-sources:write",
-                "MAC",
-            ),
-        ]);
-
-        $result = $plugin->complete_oauth_connection(
-            $listing_source_id,
-            $exchange_code,
-            $broker_state["client_state"],
-        );
-
-        $this->assertInstanceOf(WP_Error::class, $result);
-        $this->assertSame(
-            "ahpc_oauth_exchange_failed",
-            $result->get_error_code(),
-        );
-        $this->assertFalse(
-            Webhook_Manager::is_valid_access_token(
-                get_option(Webhook_Manager::OPTION_SETTINGS, [])["access_token"],
-            ),
-        );
-    }
-
-    /**
-     * It rejects OAuth token responses that omit required scopes.
-     *
-     * @return void
-     */
-    public function test_complete_oauth_connection_rejects_missing_scope()
-    {
-        $listing_source_id = "ls_01jw7j4azge00800000000000g";
-        $exchange_code = "01970f22-2bf0-7000-8000-000000000099";
-        $access_token =
-            "aurahistoria_abcdefghijk_verylongtokenvalue";
-
-        $plugin = new Plugin();
-        $authorization_url = $plugin->create_oauth_authorization_url();
-        $parts = wp_parse_url($authorization_url);
-        parse_str($parts["query"], $query);
-        $broker_state = json_decode(
-            $this->base64url_decode($query["state"]),
-            true,
-        );
-
-        $this->set_backend_mock_responses([
-            $this->mock_oauth_token_response($access_token, "product-listings:write"),
-        ]);
-
-        $result = $plugin->complete_oauth_connection(
-            $listing_source_id,
-            $exchange_code,
-            $broker_state["client_state"],
-        );
-
-        $this->assertInstanceOf(WP_Error::class, $result);
-        $this->assertSame("ahpc_oauth_missing_scope", $result->get_error_code());
-        $this->assertFalse(
-            Webhook_Manager::is_valid_access_token(
-                get_option(Webhook_Manager::OPTION_SETTINGS, [])["access_token"],
-            ),
-        );
     }
 
     /**
@@ -2006,7 +1633,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
         $plugin = new Plugin();
         $valid = "oc_01jw7j4azge00800000000000g";
         $this->oauth_client_id = $valid;
-        $this->assertIsString($plugin->create_oauth_authorization_url());
+        $this->assertIsString($plugin->start_oauth_connection());
 
         foreach ([
             "ls_01jw7j4azge008000000000003",
@@ -2025,7 +1652,7 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
             "123e4567-e89b-12d3-a456-426614174000",
         ] as $invalid) {
             $this->oauth_client_id = $invalid;
-            $result = $plugin->create_oauth_authorization_url();
+            $result = $plugin->start_oauth_connection();
             $this->assertInstanceOf(WP_Error::class, $result, $invalid);
             $this->assertSame("ahpc_oauth_invalid_client_id", $result->get_error_code(), $invalid);
         }
@@ -2412,18 +2039,16 @@ class Test_AHPC_Webhook_Manager extends WP_UnitTestCase
 
     private function connect_listing_source(Plugin $plugin, $listing_source_id, array $responses = [])
     {
-        $url = $plugin->create_oauth_authorization_url();
-        $this->assertIsString($url);
-        parse_str(wp_parse_url($url, PHP_URL_QUERY), $query);
-        $state = json_decode($this->base64url_decode($query["state"]), true);
-        $this->set_backend_mock_responses(array_merge(
-            [$this->mock_oauth_token_response("test-token")],
-            $responses ?: [$this->mock_backend_registration_response()],
-        ));
+        $this->assertIsString($plugin->start_oauth_connection());
+        $callback = $this->oauth_broker->approve(null, [
+            "listing_source_id" => $listing_source_id,
+            "access_token" => "test-token",
+        ]);
+        $this->set_backend_mock_responses($responses ?: [$this->mock_backend_registration_response()]);
         return $plugin->complete_oauth_connection(
-            $listing_source_id,
-            "01970f22-2bf0-7000-8000-000000000099",
-            $state["client_state"],
+            $callback["transaction_id"],
+            $callback["state"],
+            $callback["completion_code"],
         );
     }
 

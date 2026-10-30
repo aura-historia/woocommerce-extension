@@ -94,6 +94,24 @@ async function observeOauthStarts(page) {
 }
 
 /**
+ * Disconnects the store and clears stored OAuth errors and fake broker
+ * transactions through the e2e fake broker mu-plugin.
+ *
+ * @param {import("@playwright/test").Page} page Logged-in page.
+ * @return {Promise<void>}
+ */
+async function resetStore(page) {
+    const response = await page.request.get("/wp-admin/admin-post.php?action=ahpc_e2e_reset");
+
+    if (!response.ok()) {
+        throw new Error(
+            `Resetting the store failed with HTTP ${response.status()}. The browser tests need ` +
+                "the e2e fake broker mu-plugin and AHPC_E2E_FAKE_BROKER, as configured in CI.",
+        );
+    }
+}
+
+/**
  * Reads the auto-start marker from the page's session storage.
  *
  * @param {import("@playwright/test").Page} page Page to read.
@@ -112,4 +130,5 @@ module.exports = {
     isSettingsUrl,
     observeOauthStarts,
     readAutoStartMarker,
+    resetStore,
 };

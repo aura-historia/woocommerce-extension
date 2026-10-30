@@ -1,12 +1,13 @@
 // @ts-check
-const { createHash } = require("node:crypto");
 const { test, expect } = require("@playwright/test");
 const {
+    BASE_URL,
     SETTINGS_PATH,
     isOauthStartUrl,
     isSettingsUrl,
     observeOauthStarts,
     readAutoStartMarker,
+    resetStore,
 } = require("./helpers");
 
 const OAUTH_SCOPE =
@@ -47,6 +48,10 @@ async function expectOauthStarts(observed, count) {
         .toEqual({ errors: [], starts: count });
 }
 
+test.beforeEach(async ({ page }) => {
+    await resetStore(page);
+});
+
 test("first visit starts OAuth once even though the form has a control named submit", async ({
     page,
 }) => {
@@ -58,27 +63,28 @@ test("first visit starts OAuth once even though the form has a control named sub
     await expectOauthStarts(observed, 1);
     await expect(page).toHaveURL(isOauthStartUrl);
 
-    // WordPress accepted the nonce and redirected to the authorization endpoint.
+    // WordPress accepted the nonce, registered a broker transaction server to
+    // server and redirected to the broker's authorization URL.
     expect(starts[0].body.get("_wpnonce")).toBeTruthy();
     expect(starts[0].status).toBe(302);
 
     const authorization = new URL(starts[0].location);
     const query = authorization.searchParams;
-    expect(authorization.pathname).toBe("/oauth/authorize");
+    expect(authorization.origin).toBe(new URL(BASE_URL).origin);
+    expect(authorization.pathname).toBe("/en/oauth/authorize");
     expect(query.get("client_id")).toMatch(/^oc_[0-9a-z]{26}$/);
     expect(query.get("response_type")).toBe("code");
     expect(query.get("scope")).toBe(OAUTH_SCOPE);
     expect(query.get("requires_listing_source_id")).toBe("true");
     expect(query.get("code_challenge_method")).toBe("S256");
 
-    const state = JSON.parse(
-        Buffer.from(query.get("state") || "", "base64url").toString("utf8"),
-    );
-    expect(isSettingsUrl(new URL(state.redirect_uri))).toBe(true);
-    expect(state.client_state).toBeTruthy();
-    expect(query.get("code_challenge")).toBe(
-        createHash("sha256").update(state.code_verifier).digest("base64url"),
-    );
+    // The browser carries only the broker's opaque reference: no verifier,
+    // completion secret or readable broker-state payload.
+    expect(query.has("code_verifier")).toBe(false);
+    expect(starts[0].location).not.toMatch(/completion_secret|client_state|code_verifier/);
+    expect(() =>
+        JSON.parse(Buffer.from(query.get("state") || "", "base64url").toString("utf8")),
+    ).toThrow();
 
     // Returning in the same tab must not start OAuth again.
     await openSettings(page);

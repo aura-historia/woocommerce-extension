@@ -41,6 +41,12 @@ tests_add_filter("ahpc_backend_guzzle_client", static function () {
     ]);
 }, 1);
 
+tests_add_filter("ahpc_oauth_broker_guzzle_client", static function () {
+    return new \GuzzleHttp\Client([
+        "handler" => \GuzzleHttp\HandlerStack::create(new \GuzzleHttp\Handler\MockHandler()),
+    ]);
+}, 1);
+
 tests_add_filter("muplugins_loaded", static function () {
     $woocommerce_files = glob(WP_PLUGIN_DIR . "/*/woocommerce.php");
 

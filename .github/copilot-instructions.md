@@ -23,6 +23,7 @@ Keep the plugin small and follow the current structure:
 - `includes/class-option-lease.php` — expiring option-row leases and lease-fenced checkpoints; backfill and webhook sync each use their own lease
 - `includes/class-shipping-{acquisition,mapper,publisher}.php` — local shipping reads, conservative mapping and resumable typed publication shared with ongoing reconciliation
 - `includes/class-backend-api-client.php` — typed backend requests using the generated client
+- `includes/class-oauth-broker-client.php` — validated server-to-server client for the webapp OAuth broker transactions (protocol version 2)
 - `uninstall.php` — uninstall cleanup
 - `tests/` — WordPress integration tests
 - `.wp-env.json`, `package.json`, and `composer.json` — local development and test tooling
@@ -62,9 +63,10 @@ When changing functionality, preserve these invariants:
 - PUT the generated signing secret and store locale to `/v1/listing-sources/{listingSourceId}/ingestion-configurations/woocommerce` before activating delivery.
 - The plugin must send webhook deliveries to `/v1/webhooks/woocommerce/{listingSourceId}`.
 - The backend access token is a separate credential from the WooCommerce webhook secret.
-- Validate the OAuth access token and required scopes before saving.
-- Request ListingSource selection with `requires_listing_source_id=true` and consume the broker's `listing_source_id` callback parameter.
-- The bundled public OAuth client ID is for production. Stage and local connections require a separately configured client ID matching their webapp broker; keep client secrets in the broker only.
+- Connect only through the webapp broker's transaction protocol (version 2): register the transaction server to server with a completion challenge, keep the completion secret server-side, accept a callback with only `transaction_id`, `state` and `completion_code`, and redeem the code with the secret at the configured completion endpoint. Never redeem a backend `third_party_exchange_code`, generate a backend PKCE verifier, put a secret into a URL or fall back to the retired handshake.
+- Take the access token and the ListingSource ID together from the validated completion response only. Never accept a token, source or endpoint from browser parameters. Validate the token type, token format and exactly the requested scopes before saving, and preserve the existing connection on every failure.
+- One site-wide connection attempt is active at a time. Starts and completions run under the `ahpc_oauth_lock` lease; a claimed attempt is redeemed at most once and the replacement settings are written through the lease.
+- The bundled public OAuth client ID is for production. Stage and local connections require a separately configured client ID and `AHPC_OAUTH_BROKER_BASE_URL` matching their webapp broker; keep client secrets in the broker only.
 - Validate canonical UUIDv7 `ls_` ListingSource and `oc_` OAuth client TypeIDs with the shared validator.
 - The plugin should add the access token to the webhook bearer `Authorization` header as safely as possible.
 - Prefer adding the access token to the webhook bearer `Authorization` header late in the WordPress HTTP stack if that avoids leaking the header into WooCommerce delivery logs.
@@ -110,7 +112,7 @@ Notes:
 - `.wp-env.json` currently installs WooCommerce from WordPress.org.
 - `AHPC_FORCE_SYNC_DELIVERY` is enabled locally so webhook delivery happens synchronously.
 - Tests should avoid real outbound HTTP and should mock webhook requests.
-- Tests override the hardcoded backend base URL through the `ahpc_backend_base_url` filter.
+- Tests override the hardcoded backend base URL through the `ahpc_backend_base_url` filter, and the broker through `ahpc_oauth_broker_base_url` and `ahpc_oauth_broker_guzzle_client` (see `tests/class-ahpc-fake-oauth-broker.php`).
 - The test suite depends on PHPUnit Polyfills installed via Composer inside `wp-env`.
 
 When changing behavior, add or update tests when sensible, especially around:

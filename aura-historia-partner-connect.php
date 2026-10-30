@@ -60,18 +60,16 @@ if (!defined("AHPC_OAUTH_CLIENT_ID")) {
     unset($ahpc_env_oauth_client_id);
 }
 
-if (!defined("AHPC_OAUTH_BROKER_REDIRECT_URI")) {
-    $ahpc_env_oauth_broker_redirect_uri = getenv(
-        "AHPC_OAUTH_BROKER_REDIRECT_URI",
-    );
+if (!defined("AHPC_OAUTH_BROKER_BASE_URL")) {
+    $ahpc_env_oauth_broker_base_url = getenv("AHPC_OAUTH_BROKER_BASE_URL");
     define(
-        "AHPC_OAUTH_BROKER_REDIRECT_URI",
-        $ahpc_env_oauth_broker_redirect_uri !== false &&
-        $ahpc_env_oauth_broker_redirect_uri !== ""
-            ? $ahpc_env_oauth_broker_redirect_uri
-            : "https://aura-historia.com/api/oauth/client/redirect-broker/woocommerce",
+        "AHPC_OAUTH_BROKER_BASE_URL",
+        $ahpc_env_oauth_broker_base_url !== false &&
+        $ahpc_env_oauth_broker_base_url !== ""
+            ? $ahpc_env_oauth_broker_base_url
+            : "https://aura-historia.com",
     );
-    unset($ahpc_env_oauth_broker_redirect_uri);
+    unset($ahpc_env_oauth_broker_base_url);
 }
 
 $ahpc_autoload = AHPC_PLUGIN_DIR . "vendor/autoload.php";
@@ -83,6 +81,7 @@ if (file_exists($ahpc_autoload)) {
 require_once AHPC_PLUGIN_DIR . "includes/class-internal-api-autoloader.php";
 \AuraHistoria\PartnerConnect\Internal_Api_Autoloader::register();
 require_once AHPC_PLUGIN_DIR . "includes/class-backend-api-client.php";
+require_once AHPC_PLUGIN_DIR . "includes/class-oauth-broker-client.php";
 require_once AHPC_PLUGIN_DIR . "includes/class-store-locale.php";
 require_once AHPC_PLUGIN_DIR . "includes/class-option-lease.php";
 require_once AHPC_PLUGIN_DIR . "includes/class-webhook-manager.php";

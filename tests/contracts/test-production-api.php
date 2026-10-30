@@ -2,7 +2,6 @@
 /** Production wire contract checks with in-memory HTTP responses. */
 
 use AuraHistoria\PartnerConnect\InternalApi\Api\ListingSourcesApi;
-use AuraHistoria\PartnerConnect\InternalApi\Api\OAuthApi;
 use AuraHistoria\PartnerConnect\InternalApi\Api\ProductListingsApi;
 use AuraHistoria\PartnerConnect\InternalApi\Configuration;
 use AuraHistoria\PartnerConnect\InternalApi\Model\AssignShippingDefaultData;
@@ -19,14 +18,10 @@ use PHPUnit\Framework\TestCase;
 
 class Test_AHPC_Production_Api_Contract extends TestCase
 {
-    public function test_connection_and_backfill_use_the_production_wire_contract()
+    public function test_configuration_and_backfill_use_the_production_wire_contract()
     {
         $history = [];
         $stack = HandlerStack::create(new MockHandler([
-            new Response(200, ["Content-Type" => "application/json"], json_encode([
-                "access_token" => "fake-opaque-token", "token_type" => "Bearer",
-                "scope" => "product-listings:read product-listings:write listing-sources:read listing-sources:write",
-            ])),
             new Response(204),
             new Response(202, ["Content-Type" => "application/json"], json_encode([
                 "submissionId" => "01970f22-2bf0-7000-8000-000000000010", "acceptedCount" => 1, "failures" => [],
@@ -35,13 +30,10 @@ class Test_AHPC_Production_Api_Contract extends TestCase
         $stack->push(Middleware::history($history));
         $http = new Client(["handler" => $stack]);
         $config = (new Configuration())->setHost("https://api.aura-historia.com");
-        $code = "01970f22-2bf0-7000-8000-000000000099";
         $source = "ls_01jw7j4azge00800000000000g";
 
-        $token = (new OAuthApi($http, $config))->oauthTokenByThirdPartyCode($code);
-        $this->assertSame("Bearer", $token->getTokenType());
-        $this->assertNull($token->getExpiresIn());
-        $config->setAccessToken($token->getAccessToken());
+        // The connection's token comes from the webapp broker, not this API.
+        $config->setAccessToken("fake-opaque-token");
         (new ListingSourcesApi($http, $config))->putWoocommerceListingSourceIngestionConfiguration(
             $source,
             new PutWoocommerceListingSourceIngestionConfigurationData([
@@ -52,14 +44,12 @@ class Test_AHPC_Production_Api_Contract extends TestCase
         [$report, $status] = (new ProductListingsApi($http, $config))->postAsyncPartnerProductListingsWithHttpInfo($source, $payloads, "stable-retry-key");
         $this->assertSame(202, $status);
         $this->assertSame(1, $report->getAcceptedCount());
-        $this->assertSame("/v1/oauth/tokens/by-third-party-code/" . $code, $history[0]["request"]->getUri()->getPath());
-        $this->assertFalse($history[0]["request"]->hasHeader("Authorization"));
-        $this->assertSame("/v1/listing-sources/$source/ingestion-configurations/woocommerce", $history[1]["request"]->getUri()->getPath());
-        $this->assertSame("Bearer fake-opaque-token", $history[1]["request"]->getHeaderLine("Authorization"));
-        $this->assertSame("fake-signing-secret", json_decode((string) $history[1]["request"]->getBody(), true)["webhookSecret"]);
-        $this->assertSame("/v1/listing-sources/$source/product-listings/async", $history[2]["request"]->getUri()->getPath());
-        $this->assertSame("stable-retry-key", $history[2]["request"]->getHeaderLine("Idempotency-Key"));
-        $this->assertSame($payloads, json_decode((string) $history[2]["request"]->getBody(), true));
+        $this->assertSame("/v1/listing-sources/$source/ingestion-configurations/woocommerce", $history[0]["request"]->getUri()->getPath());
+        $this->assertSame("Bearer fake-opaque-token", $history[0]["request"]->getHeaderLine("Authorization"));
+        $this->assertSame("fake-signing-secret", json_decode((string) $history[0]["request"]->getBody(), true)["webhookSecret"]);
+        $this->assertSame("/v1/listing-sources/$source/product-listings/async", $history[1]["request"]->getUri()->getPath());
+        $this->assertSame("stable-retry-key", $history[1]["request"]->getHeaderLine("Idempotency-Key"));
+        $this->assertSame($payloads, json_decode((string) $history[1]["request"]->getBody(), true));
     }
 
     public function test_production_shipping_fixtures_preserve_empty_objects_and_timestamps()

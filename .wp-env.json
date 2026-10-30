@@ -14,6 +14,6 @@
     "AHPC_FORCE_SYNC_DELIVERY": true,
     "AHPC_BACKEND_BASE_URL": "https://api.stage.aura-historia.com",
     "AHPC_OAUTH_CLIENT_ID": "",
-    "AHPC_OAUTH_BROKER_REDIRECT_URI": "https://aura-historia-staging.bitter-frog-5102.workers.dev/api/oauth/client/redirect-broker/woocommerce"
+    "AHPC_OAUTH_BROKER_BASE_URL": "https://aura-historia-staging.bitter-frog-5102.workers.dev"
   }
 }

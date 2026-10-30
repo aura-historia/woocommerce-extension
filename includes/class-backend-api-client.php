@@ -8,13 +8,11 @@
 namespace AuraHistoria\PartnerConnect;
 
 use AuraHistoria\PartnerConnect\InternalApi\Api\ListingSourcesApi;
-use AuraHistoria\PartnerConnect\InternalApi\Api\OAuthApi;
 use AuraHistoria\PartnerConnect\InternalApi\Api\ProductListingsApi;
 use AuraHistoria\PartnerConnect\InternalApi\ApiException;
 use AuraHistoria\PartnerConnect\InternalApi\Configuration;
 use AuraHistoria\PartnerConnect\InternalApi\Model\AsyncProductListingBatchReport;
 use AuraHistoria\PartnerConnect\InternalApi\Model\AsyncProductListingBatchFailure;
-use AuraHistoria\PartnerConnect\InternalApi\Model\OAuthTokenResponseData;
 use AuraHistoria\PartnerConnect\InternalApi\Model\PutWoocommerceListingSourceIngestionConfigurationData;
 use GuzzleHttp\Client as GuzzleClient;
 use GuzzleHttp\ClientInterface;
@@ -159,31 +157,6 @@ class Backend_Api_Client
     }
 
     /**
-     * @param string $third_party_exchange_code UUIDv7 single-use code.
-     * @return OAuthTokenResponseData|WP_Error
-     */
-    public function oauth_token_by_third_party_code($third_party_exchange_code)
-    {
-        $code = is_string($third_party_exchange_code) ? trim($third_party_exchange_code) : "";
-        if ("" === $this->base_url || !preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iD', $code)) {
-            return new WP_Error("ahpc_backend_invalid_oauth_exchange_code", __("The OAuth exchange code returned by Aura Historia is invalid or expired.", "aura-historia-partner-connect"));
-        }
-        if (!$this->is_runtime_available()) {
-            return $this->unavailable_error();
-        }
-        try {
-            $response = $this->create_oauth_api()->oauthTokenByThirdPartyCode($code);
-        } catch (ApiException $exception) {
-            return $this->translate_api_exception($exception);
-        } catch (\InvalidArgumentException $exception) {
-            return $this->invalid_request_error();
-        } catch (\Throwable $exception) {
-            return $this->transport_error();
-        }
-        return $response instanceof OAuthTokenResponseData ? $response : new WP_Error("ahpc_backend_invalid_response", __("Aura Historia returned an unexpected OAuth token response.", "aura-historia-partner-connect"));
-    }
-
-    /**
      * Only retain safe report metadata. Echoed source IDs are included only
      * when they match the original item at that index; never include arbitrary
      * backend text or unknown response fields in error data.
@@ -237,7 +210,7 @@ class Backend_Api_Client
 
     private function is_runtime_available()
     {
-        return class_exists(ListingSourcesApi::class) && class_exists(ProductListingsApi::class) && class_exists(OAuthApi::class) && class_exists(GuzzleClient::class);
+        return class_exists(ListingSourcesApi::class) && class_exists(ProductListingsApi::class) && class_exists(GuzzleClient::class);
     }
 
     private function create_listing_sources_api($token)
@@ -248,11 +221,6 @@ class Backend_Api_Client
     private function create_product_listings_api($token)
     {
         return new ProductListingsApi($this->create_http_client(), $this->create_configuration($token));
-    }
-
-    private function create_oauth_api()
-    {
-        return new OAuthApi($this->create_http_client(), $this->create_configuration());
     }
 
     private function create_configuration($token = "")
