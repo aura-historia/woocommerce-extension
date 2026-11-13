@@ -274,10 +274,16 @@ class Webhook_Manager
     }
 
     /**
-     * WooCommerce's product.deleted topic only listens to wp_trash_post, so a
+     * WooCommerce's product.deleted topic only reports trashed products, so a
      * permanent deletion without Trash never reaches the backend. Subscribe the
      * managed product.deleted webhook, and no merchant webhook, to permanent
-     * deletions as well. Delivery stays WooCommerce's signed {"id"} payload.
+     * deletions of parent products as well. Delivery stays WooCommerce's signed
+     * {"id"} payload.
+     *
+     * Since WooCommerce 11.3 the topic also listens to before_delete_post to
+     * report permanently deleted variations, including every variation removed
+     * with its variable parent. Variations have no listing of their own, so the
+     * managed webhook drops that hook and keeps reporting only the parent.
      *
      * @param array<string,array<int,string>> $topic_hooks Topic hook map.
      * @param WC_Webhook|null                 $webhook     Webhook being enqueued.
@@ -295,6 +301,7 @@ class Webhook_Manager
         }
 
         $hooks = isset($topic_hooks["product.deleted"]) ? (array) $topic_hooks["product.deleted"] : [];
+        $hooks = array_values(array_diff($hooks, ["before_delete_post"]));
         if (!in_array(self::PRODUCT_DELETED_HOOK, $hooks, true)) {
             $hooks[] = self::PRODUCT_DELETED_HOOK;
         }

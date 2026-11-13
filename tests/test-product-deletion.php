@@ -389,6 +389,9 @@ class Test_AHPC_Product_Deletion extends WP_UnitTestCase
 
         $this->assertContains(Webhook_Manager::PRODUCT_DELETED_HOOK, (new WC_Webhook($managed_ids["product.deleted"]))->get_hooks());
         $this->assertContains("wp_trash_post", (new WC_Webhook($managed_ids["product.deleted"]))->get_hooks());
+        // WooCommerce 11.3+ reports permanently deleted variations through
+        // before_delete_post; the managed webhook reports only parent products.
+        $this->assertNotContains("before_delete_post", (new WC_Webhook($managed_ids["product.deleted"]))->get_hooks());
         $this->assertNotContains(Webhook_Manager::PRODUCT_DELETED_HOOK, (new WC_Webhook($managed_ids["product.updated"]))->get_hooks());
         $this->assertContains("wp_trash_post", (new WC_Webhook($merchant->get_id()))->get_hooks());
         $this->assertNotContains(Webhook_Manager::PRODUCT_DELETED_HOOK, (new WC_Webhook($merchant->get_id()))->get_hooks());
