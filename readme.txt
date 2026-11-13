@@ -2,7 +2,7 @@
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.2
-Stable tag: 0.3.2
+Stable tag: 0.3.3
 Contributors: aurahistoria
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -153,6 +153,9 @@ No WooCommerce REST key/secret is needed or exported; the backend never calls th
 Rescheduling a published product for future publication clears its owned shipping components until it is published again. A failed local removal recheck retains the original request and bounded retries; only confirmed restoration cancels a pending removal.
 
 == Changelog ==
+
+= 0.3.3 =
+* Stops the managed `product.deleted` webhook from reporting permanently deleted variations. WooCommerce 11.3 and later also send that topic for them, including every variation removed with its variable parent; variations have no listing of their own, so only the parent product's deletion is sent. Your own WooCommerce webhooks keep their default behavior.
 
 = 0.3.2 =
 * Connects through version 2 of the Aura Historia OAuth broker protocol. The browser no longer carries a PKCE verifier or readable broker state, the token and ListingSource come from one proof-protected server-to-server response, and replayed, tampered or stale callbacks are rejected. Requires `AHPC_OAUTH_BROKER_BASE_URL` instead of `AHPC_OAUTH_BROKER_REDIRECT_URI` for non-production environments; the previous handshake is no longer supported.
